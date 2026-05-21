@@ -13,6 +13,8 @@ struct TodayView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { shiftDay(-1) } label: {
                         Image(systemName: "chevron.left")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
                 if isFarFuture {
@@ -21,18 +23,20 @@ struct TodayView: View {
                     }
                     ToolbarItem(placement: .topBarLeading) {
                         Button(action: jumpToToday) {
-                            Text(jumpHomeLabel)
+                            Text("nav.jump_home")
                         }
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text(navigationTitle)
                         .font(.headline)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 if isFarPast {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(action: jumpToToday) {
-                            Text(jumpHomeLabel)
+                            Text("nav.jump_home")
                         }
                     }
                     if #available(iOS 26.0, *) {
@@ -42,6 +46,8 @@ struct TodayView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { shiftDay(1) } label: {
                         Image(systemName: "chevron.right")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
             }
@@ -87,20 +93,15 @@ struct TodayView: View {
     private var isFarPast: Bool { daysFromToday < -1 }
     private var isFarFuture: Bool { daysFromToday > 1 }
 
-    private var jumpHomeLabel: String {
-        let preferred = Locale.preferredLanguages.first ?? ""
-        return preferred.hasPrefix("ko") ? "오늘" : "Today"
-    }
-
     private var navigationTitle: String {
         switch daysFromToday {
-        case 0:  return "오늘"
-        case 1:  return "내일"
-        case -1: return "어제"
+        case 0:  return String(localized: "today.nav.today")
+        case 1:  return String(localized: "today.nav.tomorrow")
+        case -1: return String(localized: "today.nav.yesterday")
         default:
             let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "ko_KR")
-            formatter.dateFormat = "M월 d일 (E)"
+            formatter.locale = Locale.current
+            formatter.setLocalizedDateFormatFromTemplate("MMMd EEE")
             return formatter.string(from: displayedDate)
         }
     }
@@ -108,13 +109,18 @@ struct TodayView: View {
 
 struct TodayList: View {
 
+    let date: Date
     @Binding var sheet: ItemSheetMode?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var referenceDate = Date()
 
     @FetchRequest var dueItems: FetchedResults<Item>
     @FetchRequest var inProgressItems: FetchedResults<Item>
     @FetchRequest var startItems: FetchedResults<Item>
+    @FetchRequest var routineItems: FetchedResults<Item>
 
     init(date: Date, sheet: Binding<ItemSheetMode?>) {
+        self.date = date
         self._sheet = sheet
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: date)
@@ -124,7 +130,7 @@ struct TodayList: View {
         _dueItems = FetchRequest(
             sortDescriptors: sort,
             predicate: NSPredicate(
-                format: "dueDate >= %@ AND dueDate < %@ AND status == 0",
+                format: "dueDate >= %@ AND dueDate < %@ AND status == 0 AND recurrenceRule == nil",
                 start as NSDate, end as NSDate
             ),
             animation: .default
@@ -132,7 +138,7 @@ struct TodayList: View {
         _inProgressItems = FetchRequest(
             sortDescriptors: sort,
             predicate: NSPredicate(
-                format: "startDate < %@ AND dueDate >= %@ AND status == 0",
+                format: "startDate < %@ AND dueDate >= %@ AND status == 0 AND recurrenceRule == nil",
                 start as NSDate, end as NSDate
             ),
             animation: .default
@@ -140,61 +146,85 @@ struct TodayList: View {
         _startItems = FetchRequest(
             sortDescriptors: sort,
             predicate: NSPredicate(
-                format: "startDate >= %@ AND startDate < %@ AND status == 0 AND (dueDate == nil OR dueDate >= %@)",
+                format: "startDate >= %@ AND startDate < %@ AND status == 0 AND (dueDate == nil OR dueDate >= %@) AND recurrenceRule == nil",
                 start as NSDate, end as NSDate, end as NSDate
+            ),
+            animation: .default
+        )
+        _routineItems = FetchRequest(
+            sortDescriptors: sort,
+            predicate: NSPredicate(
+                format: "recurrenceRule != nil AND status != 2"
             ),
             animation: .default
         )
     }
 
+    private var routinesForDate: [Item] {
+        let target = date
+        return routineItems.filter { item in
+            guard let rule = item.recurrenceRule else { return false }
+            return rule.occurs(on: target, startDate: item.startDate, endDate: item.dueDate)
+        }
+    }
+
     var body: some View {
         List {
-            Section("진행 중 Not Todo") {
-                emptyRow("진행 중인 Not Todo가 없습니다")
+            Section("today.section.not_todo") {
+                emptyRow("today.empty.not_todo")
             }
 
-            Section("마감") {
+            Section("today.section.due") {
                 if dueItems.isEmpty {
-                    emptyRow("마감인 할일이 없습니다")
+                    emptyRow("today.empty.due")
                 } else {
                     ForEach(dueItems, id: \.objectID) { rowButton(for: $0) }
                 }
             }
 
-            Section("진행 중") {
+            Section("today.section.in_progress") {
                 if inProgressItems.isEmpty {
-                    emptyRow("진행 중인 할일이 없습니다")
+                    emptyRow("today.empty.in_progress")
                 } else {
                     ForEach(inProgressItems, id: \.objectID) { rowButton(for: $0) }
                 }
             }
 
-            Section("시작") {
+            Section("today.section.start") {
                 if startItems.isEmpty {
-                    emptyRow("시작하는 할일이 없습니다")
+                    emptyRow("today.empty.start")
                 } else {
                     ForEach(startItems, id: \.objectID) { rowButton(for: $0) }
                 }
             }
 
-            Section("루틴") {
-                emptyRow("루틴이 없습니다")
+            Section("today.section.routine") {
+                if routinesForDate.isEmpty {
+                    emptyRow("today.empty.routine")
+                } else {
+                    ForEach(routinesForDate, id: \.objectID) { rowButton(for: $0) }
+                }
             }
         }
         .listStyle(.insetGrouped)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                referenceDate = Date()
+            }
+        }
     }
 
     private func rowButton(for item: Item) -> some View {
         Button {
             sheet = .edit(item)
         } label: {
-            ItemRow(item: item)
+            ItemRow(item: item, referenceDate: referenceDate)
         }
         .buttonStyle(.plain)
     }
 
-    private func emptyRow(_ text: String) -> some View {
-        Text(text)
+    private func emptyRow(_ key: LocalizedStringKey) -> some View {
+        Text(key)
             .foregroundStyle(.secondary)
             .font(.subheadline)
     }

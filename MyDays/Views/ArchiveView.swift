@@ -4,7 +4,9 @@ import SwiftUI
 struct ArchiveView: View {
 
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: ItemSheetMode?
+    @State private var referenceDate = Date()
 
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\Item.priority, order: .reverse), SortDescriptor(\Item.createdAt)],
@@ -17,7 +19,7 @@ struct ArchiveView: View {
         List {
             Section {
                 if items.isEmpty {
-                    Text("막연한 할일이 없습니다")
+                    Text("archive.empty")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 } else {
@@ -25,7 +27,7 @@ struct ArchiveView: View {
                         Button {
                             sheet = .edit(item)
                         } label: {
-                            ItemRow(item: item)
+                            ItemRow(item: item, referenceDate: referenceDate)
                         }
                         .buttonStyle(.plain)
                     }
@@ -33,7 +35,7 @@ struct ArchiveView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("보관함")
+        .navigationTitle("archive.title")
         .overlay(alignment: .bottomTrailing) {
             Button {
                 sheet = .new(baseDate: nil)
@@ -53,6 +55,11 @@ struct ArchiveView: View {
                 AddItemView(baseDate: baseDate)
             case .edit(let item):
                 AddItemView(editing: item)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                referenceDate = Date()
             }
         }
     }

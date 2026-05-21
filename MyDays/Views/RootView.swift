@@ -2,19 +2,30 @@ import SwiftUI
 
 struct RootView: View {
 
+    @Environment(\.managedObjectContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         TabView {
             NavigationStack { TodayView() }
-                .tabItem { Label("오늘", systemImage: "checklist") }
+                .tabItem { Label("tab.today", systemImage: "checklist") }
 
             NavigationStack { ListView() }
-                .tabItem { Label("목록", systemImage: "list.bullet") }
+                .tabItem { Label("tab.list", systemImage: "list.bullet") }
 
             NavigationStack { ArchiveView() }
-                .tabItem { Label("보관함", systemImage: "archivebox") }
+                .tabItem { Label("tab.archive", systemImage: "archivebox") }
 
             NavigationStack { SettingsView() }
-                .tabItem { Label("설정", systemImage: "gearshape") }
+                .tabItem { Label("tab.settings", systemImage: "gearshape") }
+        }
+        .task {
+            Item.completeExpiredRoutines(in: context)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Item.completeExpiredRoutines(in: context)
+            }
         }
     }
 }

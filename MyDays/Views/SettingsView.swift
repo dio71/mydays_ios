@@ -4,25 +4,25 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("동기화") {
-                Text("iCloud (CloudKit)")
+            Section("settings.section.sync") {
+                Text(verbatim: "iCloud (CloudKit)")
                     .foregroundStyle(.secondary)
             }
-            Section("활동") {
-                NavigationLink("활동 로그") {
+            Section("settings.section.activity") {
+                NavigationLink("settings.activity_log") {
                     ActivityLogView()
                 }
             }
-            Section("정보") {
+            Section("settings.section.info") {
                 HStack {
-                    Text("버전")
+                    Text("settings.label.version")
                     Spacer()
-                    Text(versionString)
+                    Text(verbatim: versionString)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .navigationTitle("설정")
+        .navigationTitle("settings.title")
     }
 
     private var versionString: String {

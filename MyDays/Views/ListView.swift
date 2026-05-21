@@ -4,8 +4,10 @@ import SwiftUI
 struct ListView: View {
 
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: ItemSheetMode?
     @State private var showCompleted = false
+    @State private var referenceDate = Date()
 
     @FetchRequest(
         sortDescriptors: [
@@ -13,32 +15,32 @@ struct ListView: View {
             SortDescriptor(\Item.dueDate),
             SortDescriptor(\Item.createdAt)
         ],
-        predicate: NSPredicate(format: "status == 0"),
+        predicate: NSPredicate(format: "status == 0 AND isSomeday == NO"),
         animation: .default
     )
     private var activeItems: FetchedResults<Item>
 
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\Item.completedAt, order: .reverse)],
-        predicate: NSPredicate(format: "status == 1"),
+        predicate: NSPredicate(format: "status == 1 AND isSomeday == NO"),
         animation: .default
     )
     private var completedItems: FetchedResults<Item>
 
     var body: some View {
         List {
-            Section("진행 중") {
+            Section("list.section.active") {
                 if activeItems.isEmpty {
-                    emptyRow("진행 중인 할일이 없습니다")
+                    emptyRow("list.empty.active")
                 } else {
                     ForEach(activeItems, id: \.objectID) { rowButton(for: $0) }
                 }
             }
 
             if showCompleted {
-                Section("완료") {
+                Section("list.section.completed") {
                     if completedItems.isEmpty {
-                        emptyRow("완료된 할일이 없습니다")
+                        emptyRow("list.empty.completed")
                     } else {
                         ForEach(completedItems, id: \.objectID) { rowButton(for: $0) }
                     }
@@ -76,19 +78,29 @@ struct ListView: View {
                 AddItemView(editing: item)
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                referenceDate = Date()
+            }
+        }
     }
 
     private func rowButton(for item: Item) -> some View {
         Button {
             sheet = .edit(item)
         } label: {
-            ItemRow(item: item)
+            ItemRow(
+                item: item,
+                referenceDate: referenceDate,
+                showRoutineDday: true,
+                routineCheckable: false
+            )
         }
         .buttonStyle(.plain)
     }
 
-    private func emptyRow(_ text: String) -> some View {
-        Text(text)
+    private func emptyRow(_ key: LocalizedStringKey) -> some View {
+        Text(key)
             .foregroundStyle(.secondary)
             .font(.subheadline)
     }

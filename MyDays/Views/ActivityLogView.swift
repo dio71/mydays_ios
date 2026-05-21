@@ -12,7 +12,7 @@ struct ActivityLogView: View {
     var body: some View {
         List {
             if events.isEmpty {
-                Text("아직 활동이 없습니다")
+                Text("activity_log.empty")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
             } else {
@@ -23,7 +23,7 @@ struct ActivityLogView: View {
                             .frame(width: 20)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(event.itemTitle?.isEmpty == false ? event.itemTitle! : "(제목 없음)")
+                            Text(verbatim: eventTitle(event))
                                 .font(.subheadline)
                             Text(event.itemAction.displayName)
                                 .font(.caption)
@@ -32,7 +32,7 @@ struct ActivityLogView: View {
 
                         Spacer()
 
-                        Text(formattedDate(event.timestamp))
+                        Text(verbatim: formattedDate(event.timestamp))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -40,8 +40,15 @@ struct ActivityLogView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("활동 로그")
+        .navigationTitle("activity_log.title")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func eventTitle(_ event: ItemEvent) -> String {
+        if let title = event.itemTitle, !title.isEmpty {
+            return title
+        }
+        return String(localized: "activity_log.untitled")
     }
 
     private func icon(for action: ItemAction) -> String {
@@ -53,6 +60,7 @@ struct ActivityLogView: View {
         case .cancelled:   return "xmark.circle"
         case .restored:    return "arrow.clockwise.circle"
         case .deleted:     return "trash.circle"
+        case .failed:      return "flag.slash.circle"
         }
     }
 
@@ -61,6 +69,7 @@ struct ActivityLogView: View {
         case .completed: return .green
         case .deleted:   return .red
         case .cancelled: return .orange
+        case .failed:    return .orange
         default:         return .secondary
         }
     }
@@ -68,11 +77,11 @@ struct ActivityLogView: View {
     private func formattedDate(_ date: Date?) -> String {
         guard let date else { return "" }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.locale = Locale.current
         if Calendar.current.isDateInToday(date) {
-            formatter.dateFormat = "HH:mm"
+            formatter.setLocalizedDateFormatFromTemplate("HHmm")
         } else {
-            formatter.dateFormat = "M/d HH:mm"
+            formatter.setLocalizedDateFormatFromTemplate("Md HHmm")
         }
         return formatter.string(from: date)
     }
