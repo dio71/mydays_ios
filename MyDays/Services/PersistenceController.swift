@@ -48,4 +48,31 @@ final class PersistenceController {
             assertionFailure("Core Data save failed: \(error)")
         }
     }
+
+    /// 모든 엔티티의 모든 객체를 삭제. CloudKit에도 동기화됨.
+    ///
+    /// 주의: 개발/테스트용. NSBatchDeleteRequest는 CloudKit 동기화가 누락될 수 있어
+    /// fetch + context.delete 방식으로 객체별 삭제 → context.save로 CloudKit propagation 보장.
+    /// 모델에 등록된 모든 entity를 한 번씩 훑으므로 entity 추가돼도 자동 포함.
+    func deleteAllData() {
+        let context = viewContext
+        let entityNames = container.managedObjectModel.entities.compactMap { $0.name }
+        for name in entityNames {
+            let fetch = NSFetchRequest<NSManagedObject>(entityName: name)
+            fetch.includesPropertyValues = false  // 필요한 건 objectID뿐
+            do {
+                let objects = try context.fetch(fetch)
+                for obj in objects {
+                    context.delete(obj)
+                }
+            } catch {
+                assertionFailure("deleteAllData fetch failed for \(name): \(error)")
+            }
+        }
+        do {
+            try context.save()
+        } catch {
+            assertionFailure("deleteAllData save failed: \(error)")
+        }
+    }
 }

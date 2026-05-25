@@ -28,6 +28,14 @@ struct ActivityLogView: View {
                             Text(event.itemAction.displayName)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            // NTD 포기 사유 등 ItemEvent.note에 부가 정보 있으면 표시.
+                            if let note = event.note, !note.isEmpty {
+                                Text(verbatim: note)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .truncationMode(.tail)
+                            }
                         }
 
                         Spacer()

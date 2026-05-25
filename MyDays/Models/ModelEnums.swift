@@ -3,6 +3,15 @@ import Foundation
 enum ItemKind: Int16, CaseIterable {
     case todo = 0
     case notTodo = 1
+
+    /// 영어 "Fast" / 한국어 "비움" — NTD의 사용자 노출 명칭.
+    /// (notTodo는 내부 enum 명, 표시엔 항상 displayName 사용)
+    var displayName: String {
+        switch self {
+        case .todo:    return String(localized: "item_kind.todo")
+        case .notTodo: return String(localized: "item_kind.not_todo")
+        }
+    }
 }
 
 enum Priority: Int16, CaseIterable {
@@ -57,6 +66,17 @@ enum TimeOfDay: Int16, CaseIterable {
         case .morning:   return String(localized: "time_of_day.morning")
         case .afternoon: return String(localized: "time_of_day.afternoon")
         case .evening:   return String(localized: "time_of_day.evening")
+        }
+    }
+
+    /// Todo 알림 fire 시각 매핑 (wall-clock 시간).
+    /// 오전 9 / 오후 14 / 저녁 19 / 미설정 9 (default).
+    var defaultHour: Int {
+        switch self {
+        case .morning:   return 9
+        case .afternoon: return 14
+        case .evening:   return 19
+        case .none:      return 9
         }
     }
 }

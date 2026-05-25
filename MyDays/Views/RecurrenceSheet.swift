@@ -3,6 +3,7 @@ import SwiftUI
 struct RecurrenceSheet: View {
 
     let initialConfig: RecurrenceConfig?
+    let presetDate: Date  // 신규 config 생성 시 요일/일자 preset 기준 (UTC anchor)
     let onSave: (RecurrenceConfig) -> Void
     let onClear: () -> Void
 
@@ -11,13 +12,36 @@ struct RecurrenceSheet: View {
 
     init(
         initialConfig: RecurrenceConfig?,
+        presetDate: Date = .todayCalendarAnchor,
         onSave: @escaping (RecurrenceConfig) -> Void,
         onClear: @escaping () -> Void
     ) {
         self.initialConfig = initialConfig
+        self.presetDate = presetDate
         self.onSave = onSave
         self.onClear = onClear
-        self._config = State(initialValue: initialConfig ?? RecurrenceConfig.makeDefault())
+        // 신규 config: 요일·일자를 presetDate 기준으로 preset.
+        // 기존 config 편집은 사용자 선택값 보존.
+        let initial = initialConfig ?? Self.makeDefault(presetDate: presetDate)
+        self._config = State(initialValue: initial)
+    }
+
+    /// presetDate 기준 default config — 매주는 그날의 요일, 매월은 그날의 일자(또는 말일) pre-set.
+    private static func makeDefault(presetDate: Date) -> RecurrenceConfig {
+        var config = RecurrenceConfig.makeDefault()
+        let weekday = Calendar.gmt.component(.weekday, from: presetDate)
+        let day = Calendar.gmt.component(.day, from: presetDate)
+        let isLastDay: Bool = {
+            guard let range = Calendar.gmt.range(of: .day, in: .month, for: presetDate) else { return false }
+            return day == range.last
+        }()
+        config.weekdays = [weekday]
+        if isLastDay {
+            config.includesLastDay = true
+        } else {
+            config.days = [day]
+        }
+        return config
     }
 
     var body: some View {
