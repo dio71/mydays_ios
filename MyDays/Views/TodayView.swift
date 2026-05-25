@@ -9,66 +9,90 @@ struct TodayView: View {
     // 자정 넘김 감지 기준값. 변경 감지 후 displayedDate를 ±1 범위에서 자동 shift.
     @State private var lastKnownToday: Date = .todayCalendarAnchor
     @State private var sheet: ItemSheetMode?
+    // 일자 이동 방향 — slide 애니메이션 방향 제어. forward(미래) → 새 view가 우측에서 진입.
+    @State private var lastNavigationForward: Bool = true
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TodayList(date: displayedDate, sheet: $sheet)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { shiftDay(-1) } label: {
-                        Image(systemName: "chevron.left")
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
+        // ZStack + .id로 view identity 변경 시 transition 발동.
+        // 외곽 ZStack에 .animation 부착 — implicit하게 insertion/removal animate.
+        // toolbar는 ZStack 외부에 둠 — view 재생성 시 toolbar 깜빡임 방지.
+        let insertionEdge: Edge = lastNavigationForward ? .trailing : .leading
+        let removalEdge: Edge = lastNavigationForward ? .leading : .trailing
+        ZStack {
+            TodayList(date: displayedDate, sheet: $sheet)
+                .id(displayedDate)
+                .transition(.asymmetric(
+                    insertion: .move(edge: insertionEdge),
+                    removal: .move(edge: removalEdge)
+                ))
+        }
+        .clipped()
+        .animation(.easeInOut(duration: 0.22), value: displayedDate)
+        // 좌우 스와이프로 일자 이동 — List 세로 스크롤과 공존하도록 simultaneousGesture 사용.
+        // 수평 우세 (|h| > |v|*2) + 충분한 거리(>60pt)일 때만 day shift 트리거.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let h = value.translation.width
+                    let v = value.translation.height
+                    guard abs(h) > abs(v) * 2, abs(h) > 60 else { return }
+                    // 오른쪽 스와이프 → 이전 일자, 왼쪽 스와이프 → 다음 일자.
+                    shiftDay(h > 0 ? -1 : 1)
                 }
-                if isFarFuture {
-                    if #available(iOS 26.0, *) {
-                        ToolbarSpacer(.fixed, placement: .topBarLeading)
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(action: jumpToToday) {
-                            Text("nav.jump_home")
-                        }
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text(navigationTitle)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-                if isFarPast {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: jumpToToday) {
-                            Text("nav.jump_home")
-                        }
-                    }
-                    if #available(iOS 26.0, *) {
-                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { shiftDay(1) } label: {
-                        Image(systemName: "chevron.right")
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
+        )
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { shiftDay(-1) } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                Button {
-                    sheet = .new(baseDate: displayedDate)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(Circle().fill(Color.accentColor))
-                        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-                }
-                .padding(20)
+            ToolbarItem(placement: .principal) {
+                Text(navigationTitle)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .fixedSize()
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { shiftDay(1) } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+            }
+        }
+        // 하단 leading: "오늘" 버튼 항상 노출. 색상으로 상태 표시:
+        //   - 오늘: accent fill + 흰 글자 (현재 위치 indicator)
+        //   - 다른 날: gray fill + secondary 글자 (탭하면 jump)
+        .overlay(alignment: .bottomLeading) {
+            let isToday = daysFromToday == 0
+            Button(action: jumpToToday) {
+                Text("nav.jump_home")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isToday ? .white : Color.secondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .background(Capsule().fill(isToday ? Color.accentColor : Color(.systemGray4)))
+                    .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+            }
+            .padding(20)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                sheet = .new(baseDate: displayedDate)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(Circle().fill(Color.accentColor))
+                    .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+            }
+            .padding(20)
+        }
             .sheet(item: $sheet) { mode in
                 switch mode {
                 case .new(let baseDate):
@@ -103,14 +127,30 @@ struct TodayView: View {
     }
 
     private func shiftDay(_ value: Int) {
-        // displayedDate(UTC anchor)에 UTC 캘린더로 ±1일.
-        if let next = Calendar.gmt.date(byAdding: .day, value: value, to: displayedDate) {
-            displayedDate = next
-        }
+        guard let next = Calendar.gmt.date(byAdding: .day, value: value, to: displayedDate) else { return }
+        navigateTo(next, forward: value > 0)
     }
 
     private func jumpToToday() {
-        displayedDate = .todayCalendarAnchor
+        let today: Date = .todayCalendarAnchor
+        guard !Calendar.gmt.isDate(displayedDate, inSameDayAs: today) else { return }
+        navigateTo(today, forward: displayedDate < today)
+    }
+
+    /// 일자 이동 공통 — 방향 바뀔 때 direction state를 먼저 업데이트(한 박자 먼저)해서
+    /// 기존 view의 removal transition도 새 방향으로 재캡처되게 함.
+    /// 직접 같은 cycle에서 둘 다 바꾸면 SwiftUI가 old view의 transition을 이전 capture값으로 적용해
+    /// "한 방향으로만 자연스럽고 방향 바꾸면 같은 쪽으로 사라지는" 버그 발생.
+    private func navigateTo(_ date: Date, forward: Bool) {
+        if forward != lastNavigationForward {
+            lastNavigationForward = forward
+            // 다음 run loop에서 displayedDate 변경 — old view가 새 transition으로 re-capture된 상태에서 removal.
+            DispatchQueue.main.async {
+                displayedDate = date
+            }
+        } else {
+            displayedDate = date
+        }
     }
 
     private var daysFromToday: Int {
@@ -119,12 +159,9 @@ struct TodayView: View {
         return Calendar.gmt.dateComponents([.day], from: today, to: displayedDate).day ?? 0
     }
 
-    private var isFarPast: Bool { daysFromToday < -1 }
-    private var isFarFuture: Bool { daysFromToday > 1 }
-
     private var navigationTitle: String {
-        // 모든 케이스에 "(요일)" 일관 표시 — 어제/오늘/내일·임의 날짜 동일 포맷.
-        // UTC anchor displayedDate → formatter도 UTC로 해석.
+        // 모든 케이스 동일 포맷: "M월 d일 (요일)" — 오늘/어제/내일도 절대 날짜로 표시.
+        // 상대 마커는 하단 (오늘) floating 버튼이 대체. UTC anchor → formatter도 UTC로.
         let utc = TimeZone(identifier: "UTC") ?? .gmt
         let weekdayFormatter = DateFormatter()
         weekdayFormatter.locale = Locale.current
@@ -132,19 +169,13 @@ struct TodayView: View {
         weekdayFormatter.setLocalizedDateFormatFromTemplate("EEE")
         let weekday = weekdayFormatter.string(from: displayedDate)
 
-        let base: String
-        switch daysFromToday {
-        case 0:  base = String(localized: "today.nav.today")
-        case 1:  base = String(localized: "today.nav.tomorrow")
-        case -1: base = String(localized: "today.nav.yesterday")
-        default:
-            let formatter = DateFormatter()
-            formatter.locale = Locale.current
-            formatter.timeZone = utc
-            formatter.setLocalizedDateFormatFromTemplate("MMMd")
-            base = formatter.string(from: displayedDate)
-        }
-        return "\(base) (\(weekday))"
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = utc
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        let dateStr = formatter.string(from: displayedDate)
+
+        return "\(dateStr) (\(weekday))"
     }
 }
 

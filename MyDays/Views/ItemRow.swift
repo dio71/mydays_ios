@@ -422,6 +422,11 @@ struct ItemRow: View {
             }
             return item.effectiveDueDate ?? occStart
         }()
+        // today mode 여부 + view가 real today 여부 — d-day 출력 방식 결정.
+        let realTodayDay = Calendar.gmt.startOfDay(for: .todayCalendarAnchor)
+        let viewDay = Calendar.gmt.startOfDay(for: referenceDate)
+        let isTodayMode = (mode == .today)
+        let isViewToday = Calendar.gmt.isDate(viewDay, inSameDayAs: realTodayDay)
         return scheduleLabel(
             startDay: Calendar.gmt.startOfDay(for: occStart),
             dueDay: Calendar.gmt.startOfDay(for: occDue),
@@ -429,6 +434,8 @@ struct ItemRow: View {
             startH: item.startHourInt,
             dueH: item.dueHourInt,
             hasExplicitTime: item.hasExplicitTime,
+            isTodayMode: isTodayMode,
+            isViewToday: isViewToday,
             now: now
         )
     }
@@ -439,6 +446,8 @@ struct ItemRow: View {
         startInst: Date?,
         startH: Int, dueH: Int,
         hasExplicitTime: Bool,
+        isTodayMode: Bool,
+        isViewToday: Bool,
         now: Date
     ) -> String? {
         let realTodayDay = Calendar.gmt.startOfDay(for: .todayCalendarAnchor)
@@ -467,25 +476,48 @@ struct ItemRow: View {
             // 그 외 — d-day fall through
         }
 
-        // 원칙 2: d-day
+        // 오늘탭 (today mode) d-day 규칙 — view date 자체가 일자 정보 제공:
+        //   - 단일 (startDay == dueDay): nil — 라벨 없음
+        //   - 기간 (startDay != dueDay):
+        //     · view=today + 종료일=today → "오늘 종료"
+        //     · 그 외 → "M월 d일 종료" (절대 종료일자, D-N 아님)
+        if isTodayMode {
+            if isSameDay { return nil }
+            if isViewToday && isDueToday {
+                return String(localized: "todo.list.ends_today")
+            }
+            return String.localizedStringWithFormat(
+                NSLocalizedString("todo.today.ends_on_format", comment: ""),
+                Self.absoluteDayLabel(dueDay)
+            )
+        }
+
+        // mode == .list: 기존 d-day 중심 로직 (D-N 형식)
         if let inst = startInst, now < inst {
-            // 시작 전 — 시작일 기준 D-N, prefix 없음.
             let days = Calendar.gmt.dateComponents([.day], from: realTodayDay, to: startDay).day ?? 0
             return formatDDay(days)
         }
-        // 시작 후 — 종료일 기준.
-        // 시각 미설정 + 종료일=오늘 → "오늘 종료" (단일/다일 모두 적용)
         if !hasExplicitTime && isDueToday {
             return String(localized: "todo.list.ends_today")
         }
         let days = Calendar.gmt.dateComponents([.day], from: realTodayDay, to: dueDay).day ?? 0
         if isSameDay {
-            return formatDDay(days)  // 단일 — prefix 없음
+            return formatDDay(days)
         }
         return String.localizedStringWithFormat(
             NSLocalizedString("todo.list.in_progress_dday_format", comment: ""),
             formatDDay(days)
         )
+    }
+
+    /// UTC anchor calendar date를 로케일 "M월 d일" / "MMM d" 형식으로.
+    /// timezone=UTC 강제 — anchor date가 timezone shift로 어긋나지 않게.
+    private static func absoluteDayLabel(_ day: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        return formatter.string(from: day)
     }
 
     private func startTimeLabel(_ h: Int) -> String {

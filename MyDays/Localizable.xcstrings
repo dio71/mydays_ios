@@ -2774,6 +2774,7 @@
       }
     },
     "today.nav.today" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2790,6 +2791,7 @@
       }
     },
     "today.nav.tomorrow" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2806,6 +2808,7 @@
       }
     },
     "today.nav.yesterday" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3000,6 +3003,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 시작"
+          }
+        }
+      }
+    },
+    "todo.today.ends_on_format" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ends %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 종료"
           }
         }
       }

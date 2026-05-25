@@ -135,17 +135,27 @@ MyDays/MyDays/
 ### 탭바 4개 — 오늘 / 목록 / 보관함 / 설정
 
 ### 오늘 화면 (TodayView)
-- 일자 이동: 좌우 chevron toolbar 버튼. nav title: 오늘/내일/어제/M.d (E). UTC formatter 사용.
+- **일자 이동**:
+  - 좌우 chevron toolbar 버튼
+  - **좌우 swipe** (List 세로 스크롤과 공존, `.simultaneousGesture` 사용. 임계: |h|>60pt + 수평 우세 |h|>|v|*2). 오른쪽 swipe → 이전 일자, 왼쪽 swipe → 다음 일자.
+  - 하단 leading "오늘" 버튼 (항상 노출 — 상태로 색 구분):
+    · 오늘: accent fill + 흰 글자 (현재 위치 indicator)
+    · 다른 날: systemGray4 fill + secondary 글자 (탭하면 jump)
+- **슬라이드 transition**: ZStack + `.id(displayedDate)` + `.animation(.easeInOut(duration: 0.22), value: displayedDate)`. forward 이동 시 새 view 우측에서 진입 / 기존 좌측 퇴장, backward 반대.
+  - 방향 전환 시 `navigateTo(_:forward:)`가 한 박자 먼저 `lastNavigationForward` 업데이트 후 다음 run loop에 `displayedDate` 변경 — old view의 removal transition이 새 방향으로 re-capture되도록.
+- **navigation title**: 항상 절대 날짜 포맷 "M월 d일 (E)" (UTC formatter). 상대 마커(어제/오늘/내일)는 제거 — 하단 "오늘" 버튼의 색이 그 역할.
 - `displayedDate`는 UTC anchor (`.todayCalendarAnchor` default)
-- **자정 넘김 자동 갱신**: `lastKnownToday` 추적 + `.NSCalendarDayChanged` 알림 + `scenePhase==.active` 트리거. displayedDate가 lastKnownToday ±1일 범위(어제/오늘/내일)였으면 dayDelta만큼 forward shift — 사용자가 보고 있던 상대 라벨 유지. 모레+ 이후는 절대 날짜 유지.
-- "오늘로 점프" 버튼 (그제 이전이면 우측, 모레 이후면 좌측; 어제/오늘/내일은 표시 X). 한국어 "오늘" / 영어 "Now"
-- iOS 26+에선 `ToolbarSpacer(.fixed, …)`로 점프 버튼과 chevron 분리. iOS 17~25는 capsule로 묶임 (fallback)
-- 섹션 순서: **절제 목표** (NTD) / **할일** (Todo) / **루틴** — 3-섹션 모델. 할일 섹션은 시작·진행 중·마감 모두 통합 (.start→.inProgress→.due 순서). 라벨로 "X시 시작/종료" / "종료" / "종료 D-N" 등 노출.
+- **자정 넘김 자동 갱신**: `lastKnownToday` 추적 + `.NSCalendarDayChanged` 알림 + `scenePhase==.active` 트리거. displayedDate가 lastKnownToday ±1일 범위(어제/오늘/내일)였으면 dayDelta만큼 forward shift. 모레+ 이후는 절대 날짜 유지.
+- 섹션 순서: **절제 목표** (NTD) / **할일** (Todo) / **루틴** — 3-섹션 모델. 할일 섹션은 시작·진행 중·마감 모두 통합 (.start→.inProgress→.due 순서). 라벨로 "X시 시작/종료" / "종료" / "5월 26일 종료" / "오늘 종료" 등 노출.
 - **Todo 라벨 원칙** (1회성/기간/반복 통일, ItemRow.scheduleLabel):
-  1. d-day는 real today(`.todayCalendarAnchor`) 기준. view 일자 무관.
-  2. 일정 정보 기반만 — `Item.completedAt` 무시 (사용자가 미래/과거 시점에 체크하는 케이스 多). 완료 항목도 schedule-based d-day로 표시.
-  3. 시각 설정 + 시작/종료가 오늘 → "X시 시작" / "X시 종료". 그 외 → d-day.
-  4. d-day: 시작 instant 전 → 시작일 기준 D-N(prefix 없음). 시작 후 → 종료일 기준 D-N + "종료" prefix. 단 (a) 시작==종료(단일)면 prefix 생략, (b) 시각 미설정 + 종료일=오늘 → "오늘 종료" 라벨 (단일/다일 공통).
+  1. 일정 정보 기반만 — `Item.completedAt` 무시 (완료 항목도 schedule-based 라벨로 표시).
+  2. 시각 설정 + 시작/종료가 real today → "X시 시작" / "X시 종료" (원칙 3 우선). 그 외 → d-day section.
+  3. **today mode** (mode=.today, TodayView):
+     - 단일 (startDay==dueDay): 라벨 없음 (nil) — 일자/요일은 view date 자체가 표시
+     - 기간 (startDay!=dueDay):
+       · view=today + 종료일=today → "오늘 종료"
+       · 그 외 → "M월 d일 종료" (절대 종료일자, D-N 아님)
+  4. **list mode** (mode=.list, ListView): 기존 D-N 중심 ("D-3" / "종료 D-3" / "오늘 종료" 등)
   5. 반복은 적용 occurrence start를 anchor로 1회성처럼 처리 (`Item.referenceOccurrenceStartDate(viewDate:)`). list mode에선 다음 future occurrence 사용.
   - NTD는 별도 라벨 경로 (`ntdListLabel`/`ntdListModeLabel`) — 원칙 적용 안 함 (실시간 카운트다운 + 절제 목표 정체성).
   - 모든 Todo predicate에 `kind == 0` 추가 — NTD는 NTD 섹션에서만
@@ -288,11 +298,14 @@ MyDays/MyDays/
     - pending + 오늘이 occurrence: `arrow.triangle.2.circlepath.circle` outline + accent (blue 라인)
     - done (반복 종료일 도과 자동 완료): `arrow.triangle.2.circlepath.circle.fill` + accent (blue filled)
     - failed: 같은 fill + secondary (실제 발생 드묾)
-- D-day/시각 라벨 분기:
+- D-day/시각 라벨 분기 (`scheduleLabel`):
   - mode=.today + NTD: `ntdListLabel` (현재 시간 기반 카운트다운)
-  - mode=.today + 1회성 Todo: `Item.todoSection(on:now:)` 결과 → `.start`/"X시 시작", `.due`/"X시 종료", `.inProgress`/"종료 D-N" (시간 미설정이면 시간 라벨 생략, D-N만)
-  - mode=.today + 반복 Todo: `occurrencePosition`으로 multi-day occurrence 인식 (.start/.end만 라벨)
-  - mode=.list: `listModeLabel` — D-day 중심 (반복은 다음 occurrence, 1회성 Todo는 effectiveDueDate, 1회성 NTD는 startDate)
+  - mode=.today + Todo: 원칙 3 시각 라벨 우선 (시각 설정 + 시작/종료가 real today면 "X시 시작/종료"), 그 외 today mode d-day 규칙:
+    · 단일 (startDay==dueDay): 라벨 없음 (nil)
+    · 기간 + view=today + 종료일=today → "오늘 종료"
+    · 기간 + 그 외 → "M월 d일 종료" (절대 종료일자, D-N 아님)
+  - mode=.list: D-N 중심 ("D-3", "종료 D-3", "오늘 종료" 등)
+- **단일 시각 (s==d, 같은 instant) 처리** — `Item.isInProgress` / `nextCountdownInstant` 둘 다 단일 시각 edge case 분기: 시작 후 occurrence day 자정까지 inProgress 유지 (오후 9시 단일 시각 routine을 9:15에 봐도 파란 라인). 자정에 transition.
 - **1회성 NTD 완료/포기 라벨** (`ntdListLabel`):
   - status=done/failed: `Item.ntdLastCompletionInstant(on:)` 사용해 "%@ 종료" / "%@ 포기" — `Mdjm` 템플릿으로 항상 일자+시:분 포함 (예: "5/24 오후 2:32 포기"). 다일 NTD에서 어느 날 종료했는지 식별
 - 행 탭 = 편집 시트 (체크박스/leadingControl 영역 제외)
@@ -385,57 +398,68 @@ MyDays/MyDays/
 
 ## 미구현 (다음 후보, 우선순위 순)
 
-### 1. 알림 후속 개선
-- 알림 탭 → 항목 편집 화면 deep link
-- 권한 거부 후 Settings 재안내 경로
-- pending 한계(64) 초과 시 graceful 처리
+### 1. Week strip → Month view (다음 작업 — 회사에서 이어받기)
+**컨셉**: TodayView 상단 타이틀 아래에 week strip(요일+날짜 가로 줄)을 두고, 추후 [D][M] 토글로 월간 grid 진입. Week view는 별도 구현 안 함 — strip이 그 효과 대체. 일자 시간격자 일정이 없는 todo+NTD 앱이라 month view가 더 유용.
 
-### 2. WidgetKit 위젯 (다음 작업 — 진행 중)
-**범위**: Home Screen Small + Medium만 (Lock Screen 제외, Live Activity는 Phase 2)
-**목표**: 핵심 기능인 NTD를 위젯으로 노출 — 진행 중 카운트다운으로 효과 검증
+**Phase 1: Week strip만 (다음 작업, 회사에서 시작)**
+- 위치: TodayView toolbar(title) 아래. 옵션 (a) `safeAreaInset(edge: .top)` (b) ZStack 위로 VStack 묶기
+- 구성: 7 cell — 요일(일/월/...토) + 날짜 숫자만 (indicator 없음)
+- **주 시작 요일**: `Calendar.current.firstWeekday` 따라감 — 한국=일요일, 유럽=월요일 자동
+- 일자 cell 탭 → `displayedDate` 변경 (기존 `navigateTo(_:forward:)` 재사용 — slide transition 그대로 작동)
+- **주 단위 swipe**: Week strip 영역에서만 detect (TodayView 본문의 일 단위 swipe와 분리). 한 swipe = 7일 shift.
+- **선택일 표시**: 선택된 일자 cell에 accent fill background (circle 또는 capsule)
+- **오늘 일자**: 별도 시각 표시 (예: 요일 라벨 색 accent, 또는 작은 dot)
+- 구현 단위: 새 view `Views/WeekStripView.swift`, `@Binding var selectedDate: Date` 받음
+- 주 시작점 계산: `Calendar.current.dateInterval(of: .weekOfYear, for: someDate)` 로 주 시작일 얻기. **주의**: 우리는 UTC anchor로 저장하지만 firstWeekday 계산은 `Calendar.current`로 (사용자 로케일 따름). 날짜 비교는 UTC startOfDay 통일.
+- 컴포넌트 분리 — 추후 Phase 2/3에서 Month grid와 같은 prop 패턴 공유 가능하게.
 
-**진행 step**:
+**Phase 2 (이후): [D][M] toggle + Month view**
+- Day mode (D, default): 현재 + week strip
+- Month mode (M): week strip 숨김, 풀 month grid (LazyVGrid 7열)
+- Month grid: cell당 날짜 + indicator (NTD bar, 완료 dot 등) — 점진적 추가
+- 일자 탭 → D mode로 복귀 + displayedDate 변경
+- 토글 위치: week strip 우측 small segmented control 또는 toolbar trailing
 
-1. **App Group ID 생성** (Apple Developer Portal, 회사 접근 필요)
-   - Identifier: `group.io.snapplay.MyDays`
-2. **Main app Signing & Capabilities에 App Groups 추가** (Xcode)
-   - `group.io.snapplay.MyDays` 체크
-3. **Widget Extension target 추가** (Xcode → File → New → Target → Widget Extension)
-   - Product Name: `MyDaysWidget` (예시)
-   - Include Live Activity: ☐ (Phase 2로 보류)
-4. **Widget target에도 App Groups capability + group ID 체크**
-5. **PersistenceController 수정** — App Group container URL로 shared store 변경
+**Phase 3 (이후): NTD 히스토리 등에 month grid 인프라 재활용**
+- 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용
+
+### 2. WidgetKit 위젯 (병행 대기 — 회사에서 진행 가능)
+**범위**: Home Screen Small + Medium만 (Lock Screen 제외, Live Activity는 추후 Phase)
+**목표**: NTD를 위젯으로 — 진행 중 카운트다운으로 핵심 기능 효과 검증
+**진행 step (회사에서 Apple Developer Portal 접근 필요)**:
+1. App Group ID 생성 (`group.io.snapplay.MyDays`)
+2. Main app Signing & Capabilities에 App Groups 추가
+3. Widget Extension target 추가 (Xcode → File → New → Target → Widget Extension)
+   - Include Live Activity: ☐
+4. Widget target에도 App Groups capability + group ID 체크
+5. PersistenceController 수정 — shared store URL:
    ```swift
    let storeURL = FileManager.default
        .containerURL(forSecurityApplicationGroupIdentifier: "group.io.snapplay.MyDays")!
        .appendingPathComponent("MyDays.sqlite")
    ```
-6. **Widget target에 필요한 파일 file membership 추가**:
-   - `Models/Item+Helpers.swift`, `Models/CalendarDate.swift`, `Models/ModelEnums.swift`, `Models/RecurrenceRule+Helpers.swift`
-   - `MyDays.xcdatamodeld`
-   - `Services/PersistenceController.swift`
-7. **TimelineProvider 구현** — 활성 NTD (`ntdRelevantOccurrenceDate`) 읽어서 entries 생성
-   - 의미 있는 시점: 시작 instant, 중간 stale 시점들, 종료 instant
-8. **Widget views**:
-   - Small (`.systemSmall`): stopwatch icon + 카운트다운 + 제목
-   - Medium (`.systemMedium`): 제목 + 카운트다운 + progress bar + 시작/종료 시각
-9. **실기기 home에 위젯 추가 → 동작 확인**
+6. Widget target에 file membership 추가:
+   - Models/Item+Helpers.swift, CalendarDate.swift, ModelEnums.swift, RecurrenceRule+Helpers.swift
+   - MyDays.xcdatamodeld
+   - Services/PersistenceController.swift
+7. TimelineProvider — `ntdRelevantOccurrenceDate` 기반 entries (시작/중간/종료 instant)
+8. Widget views: Small (icon + countdown + 제목), Medium (제목 + countdown + progress bar)
+9. 실기기 home에 추가 → 동작 확인
 
-**참고**:
-- PBXFileSystemSynchronizedRootGroup (Xcode 16+) 사용 중이라 widget target 추가 후 file membership 설정 방식이 살짝 다를 수 있음 — 확인 필요
-- iOS 17.6 deployment 유지
-- CloudKit 동기화는 widget도 자동 (shared container 통해)
+**참고**: PBXFileSystemSynchronizedRootGroup (Xcode 16+) 사용 중 — widget target file membership 방식 다를 수 있음. iOS 17.6 deployment 유지. CloudKit 동기화는 shared container로 자동.
 
-### 3. 카테고리·태그 관리 UI
+### 3. 알림 후속 개선
+- 알림 탭 → 항목 편집 화면 deep link
+- 권한 거부 후 Settings 재안내 경로
+- pending 한계(64) 초과 시 graceful 처리
+
+### 4. 카테고리·태그 관리 UI
 - Category 입력/편집 화면
 - 목록·보관함에 필터 추가
 
-### 4. 3단계 계층 구조
+### 5. 3단계 계층 구조
 - AddItemView에 parent 선택 UI
 - 표시(들여쓰기) — 깊이 제한 3단계 앱 로직
-
-### 5. Week View / Month View / 달력 뷰
-- TodayView의 일자 이동 외에 주/월 뷰 추가
 
 ### 6. iPad 최적화
 - 합의: **앱 완성 후 일괄 작업**

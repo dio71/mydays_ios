@@ -170,15 +170,22 @@ extension Item {
         let startInst = Item.localInstant(fromCalendarDate: occStart, hour: startHourInt)
         let dueInst = Item.localInstant(fromCalendarDate: occDueDay, hour: dueHourInt)
         if let s = startInst, now < s { return s }
+        // 단일 시각 (s==d): 시작 후 → 다음 transition은 자정 (occurrence day 끝).
+        if let s = startInst, let d = dueInst, s == d {
+            guard let nextDay = Calendar.gmt.date(byAdding: .day, value: 1, to: occDueDay),
+                  let endOfDay = Item.localInstant(fromCalendarDate: nextDay, hour: 0)
+            else { return nil }
+            return now < endOfDay ? endOfDay : nil
+        }
         if let d = dueInst, now < d { return d }
         return nil
     }
 
     /// 진행 중 판정 — 적용 occurrence 시작 instant 후 + 종료 instant 전.
     /// 라벨/체크박스 색상(푸른 라인) 등 시각 피드백 공통 helper.
-    /// - 1회성 단일 시각 미설정: 0시~24시(=다음날 0시) → 종일 진행 중
-    /// - 1회성 단일 시각 있음(s==e): 진행 중 instant 사실상 없음 → false
-    /// - 1회성 기간/반복: occurrence 범위 안이면 진행 중
+    /// - 단일 시각 미설정 (s==자정, d==다음날 자정): 0~24시 종일 진행 중
+    /// - **단일 시각 있음 (s==d, 같은 instant)**: 시작 후 occurrence day 자정까지 진행 중 — todoSection의 단일 의미와 일관 ("시작 후 영속")
+    /// - 기간/다일 occurrence: [start, due) 범위 안이면 진행 중
     func isInProgress(viewDate: Date, now: Date) -> Bool {
         guard let occStart = referenceOccurrenceStartDate(viewDate: viewDate) else { return false }
         let span = recurrenceRule != nil ? spanDays : 0
@@ -188,6 +195,15 @@ extension Item {
         let startInst = Item.localInstant(fromCalendarDate: occStart, hour: startHourInt)
         let dueInst = Item.localInstant(fromCalendarDate: occDueDay, hour: dueHourInt)
         if let s = startInst, now < s { return false }
+        // 단일 시각 (s==d): 단순 "now >= d → false" 적용 시 시작 직후 false 되는 edge case 회피.
+        // occurrence day 자정(다음 날 0시)까지 inProgress 유지.
+        if let s = startInst, let d = dueInst, s == d {
+            guard let nextDay = Calendar.gmt.date(byAdding: .day, value: 1, to: occDueDay),
+                  let endOfDay = Item.localInstant(fromCalendarDate: nextDay, hour: 0) else {
+                return true
+            }
+            return now < endOfDay
+        }
         if let d = dueInst, now >= d { return false }
         return true
     }
