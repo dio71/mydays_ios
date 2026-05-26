@@ -1720,6 +1720,23 @@
         }
       }
     },
+    "ntd.giveup_sheet.reason.interruption" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interruption"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주변방해"
+          }
+        }
+      }
+    },
     "ntd.giveup_sheet.reason.schedule" : {
       "extractionState" : "stale",
       "localizations" : {

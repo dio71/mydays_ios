@@ -55,6 +55,7 @@ struct TodoCompleteSheet: View {
                     .font(.title3)
                     .fontWeight(.semibold)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(6)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)

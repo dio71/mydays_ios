@@ -11,6 +11,11 @@ struct ItemRow: View {
     @ObservedObject var item: Item
     var referenceDate: Date = Date()
     var mode: DisplayMode = .today
+    /// 명시 occurrence start override — 같은 Item이 같은 view에 여러 occurrence로 노출될 때 각 row가 다른 occurrence를 표시.
+    /// nil이면 referenceDate로부터 자동 계산 (기존 동작).
+    var occurrenceStartOverride: Date? = nil
+    /// compact 표시 — 그룹 내 마지막이 아닌 row용. 아이콘 + 제목 + d-day만 노출 (notes/status icons 숨김).
+    var compactMode: Bool = false
     @Environment(\.managedObjectContext) private var context
     @State private var showCompleteSheet = false
 
@@ -60,7 +65,7 @@ struct ItemRow: View {
                     }
                 }
 
-                if let notes = item.notes, !notes.isEmpty {
+                if !compactMode, let notes = item.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -68,7 +73,7 @@ struct ItemRow: View {
                         .truncationMode(.tail)
                 }
 
-                if hasAnyStatusIconOrMeta {
+                if !compactMode, hasAnyStatusIconOrMeta {
                     statusIcons
                 }
             }
@@ -168,7 +173,10 @@ struct ItemRow: View {
 
     private var isCompletedForDate: Bool {
         if isRoutine {
-            return item.isCompletedForDate(referenceDate)
+            // occurrence별 완료 — multi-day occurrence가 같은 날에 여러 개 있을 때 각각 독립 체크.
+            // override 있으면 occurrence start 기준, 없으면 referenceDate (단일 occurrence 케이스).
+            let day = occurrenceStartOverride ?? referenceDate
+            return item.isCompletedForDate(day)
         }
         return item.itemStatus == .done
     }
@@ -233,11 +241,16 @@ struct ItemRow: View {
         saveContext()
     }
 
-    /// RC.date 기준일 — 반복은 referenceDate, 1회성은 startDate(canonical event date) 사용.
+    /// RC.date 기준일 —
+    /// 반복: occurrence start 기준 (override > 자동 계산 > referenceDate). multi-day occurrence가 같은 날에
+    ///       여러 개 노출될 때 각 occurrence를 독립 RC로 토글하기 위함.
+    /// 1회성: startDate (canonical event date) — 다양한 day view에서 같은 RC 매칭.
     private var canonicalCompletionDay: Date {
-        isRoutine
-            ? Calendar.gmt.startOfDay(for: referenceDate)
-            : Calendar.gmt.startOfDay(for: item.startDate ?? referenceDate)
+        if isRoutine {
+            let day = occurrenceStartOverride ?? referenceDate
+            return Calendar.gmt.startOfDay(for: day)
+        }
+        return Calendar.gmt.startOfDay(for: item.startDate ?? referenceDate)
     }
 
     /// 미래 일정 판정 — 적용 occurrence의 시작 instant가 now보다 미래면 true.
@@ -456,8 +469,9 @@ struct ItemRow: View {
     // 적용: 1회성/반복 통일. 반복은 적용 occurrence start를 anchor로 1회성처럼 처리.
 
     /// Todo 라벨 entry — 적용 occurrence start/due 계산 후 scheduleLabel로 위임.
+    /// occurrenceStartOverride가 있으면 그것 우선, 없으면 referenceDate로 자동 계산.
     private func todoUnifiedLabel(now: Date) -> String? {
-        guard let occStart = item.referenceOccurrenceStartDate(viewDate: referenceDate) else {
+        guard let occStart = occurrenceStartOverride ?? item.referenceOccurrenceStartDate(viewDate: referenceDate) else {
             return nil
         }
         let span = isRoutine ? item.spanDays : 0
@@ -502,8 +516,11 @@ struct ItemRow: View {
         let isDueToday = Calendar.gmt.isDate(dueDay, inSameDayAs: realTodayDay)
         let isSameDay = Calendar.gmt.isDate(startDay, inSameDayAs: dueDay)
 
-        // 원칙 3: 시각 라벨 (시각 설정 + 오늘이 시작/종료일)
-        if hasExplicitTime {
+        // 원칙 3: 시각 라벨 (시각 설정 + 오늘이 시작/종료일).
+        // **view가 real today일 때만 적용** — 다른 날짜 페이지에서는 today-mode d-day 규칙으로 떨어져야
+        // "view=5/27인데 5/26 시작 일정이 '9시 시작'으로 보이는" 혼동 회피.
+        // list mode는 referenceDate가 항상 today라 isViewToday=true → 영향 없음.
+        if hasExplicitTime && (!isTodayMode || isViewToday) {
             if isStartToday && isDueToday {
                 // 시작=종료=오늘. 단일시간(s==e)이거나 시작 전 → "s시 시작". 시작 후 → "e시 종료".
                 // 단일시간 + 오늘탭에서 오늘 페이지: "s시" (시작 prefix 생략 — view 자체가 "오늘"을 제공).

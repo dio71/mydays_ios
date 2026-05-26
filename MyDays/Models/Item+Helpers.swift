@@ -224,6 +224,32 @@ extension Item {
         return nil
     }
 
+    /// 주어진 calendar date를 cover하는 모든 occurrence start dates (오래된 순).
+    /// 반복 항목: offset 0...span 전체 검사 — multi-day 겹침 시 여러 start 반환 가능.
+    /// 1회성: viewDate가 [startDate, dueDate] 안이면 startDate 1개, 아니면 empty.
+    /// TodayView에서 같은 일자에 여러 occurrence가 겹칠 때 모두 표시하는 용도.
+    func occurrenceStartsCovering(date viewDate: Date) -> [Date] {
+        let day = Calendar.gmt.startOfDay(for: viewDate)
+        if let rule = recurrenceRule, let anchor = startDate {
+            let span = spanDays
+            var starts: [Date] = []
+            // offset이 큰 것(오래된 시작)부터 → 결과는 chronological order(오래된 → 최근).
+            for offset in (0...span).reversed() {
+                guard let candidate = Calendar.gmt.date(byAdding: .day, value: -offset, to: day) else { continue }
+                if rule.occurs(on: candidate, startDate: anchor, endDate: recurrenceEndDate) {
+                    starts.append(candidate)
+                }
+            }
+            return starts
+        }
+        // 1회성
+        guard let s = startDate else { return [] }
+        let dueDay = effectiveDueDate ?? s
+        let startDay = Calendar.gmt.startOfDay(for: s)
+        let endDay = Calendar.gmt.startOfDay(for: dueDay)
+        return (startDay <= day && day <= endDay) ? [s] : []
+    }
+
     /// 라벨 계산용 적용 occurrence start.
     /// - 1회성: item.startDate
     /// - 반복: viewDate가 occurrence 범위면 그 start, 아니면 다음 future occurrence
@@ -464,9 +490,11 @@ extension Item {
     /// 종료 instant 결정:
     ///   - 목표 시간(duration) 설정됨: 계획된 종료 instant
     ///     (실제 완료/포기와 무관 — 계획된 일자에 계속 노출 → 완료/포기 row로 표시)
-    ///   - duration 없음 + RC 기록(완료/포기) 있음: RC.completedAt (사용자 종료 시점)
+    ///   - duration 없음 + RC 기록(완료/포기) 있음: RC.completedAt
     ///   - duration 없음 + 1회성 종료(Item.status done/failed): item.completedAt
-    ///   - duration 없음 + 진행 중: now (계속 확장 — "현재까지 진행시간")
+    ///   - duration 없음 + **반복** + RC 없음: 다음 occurrence가 이미 시작됐다면 그 시점에 implicit end
+    ///     (사용자가 명시 종료 안 해도 다음 occurrence가 자동 교체 — 안 그러면 lookback 모든 occurrence가 today를 cover)
+    ///   - duration 없음 + 1회성/마지막 진행 중: now
     func ntdOccurrenceCalendarRange(occurrenceDate: Date, now: Date = Date()) -> (start: Date, end: Date) {
         let start = Calendar.gmt.startOfDay(for: occurrenceDate)
         let endInstant: Date
@@ -478,6 +506,11 @@ extension Item {
                   (itemStatus == .done || itemStatus == .failed),
                   let ce = completedAt {
             endInstant = ce
+        } else if let rule = recurrenceRule,
+                  let nextOcc = rule.nextOccurrence(after: occurrenceDate, startDate: startDate, endDate: recurrenceEndDate),
+                  let nextStart = ntdStartInstant(on: nextOcc),
+                  nextStart <= now {
+            endInstant = nextStart
         } else {
             endInstant = now
         }
@@ -504,12 +537,15 @@ extension Item {
         let startBound = Calendar.gmt.date(byAdding: .day, value: -(lookbackDays + 1), to: displayedDate) ?? displayedDate
         var cursor = startBound
         var dates: [Date] = []
-        // displayedDate까지 forward iterate. 안전 한도 50 — 보통 lookback 일수 내 occurrence 개수.
+        // displayedDate까지 forward iterate. 안전 한도 50.
+        // 주의: RecurrenceRule.nextOccurrence(after:)는 referenceDate를 *포함* 검사 (이름과 달리).
+        // cursor를 1일 advance해서 같은 occurrence 재반환 무한 루프 회피.
         while dates.count < 50 {
             guard let next = rule.nextOccurrence(after: cursor, startDate: startDate, endDate: recurrenceEndDate) else { break }
             if next > displayedDate { break }
             dates.append(next)
-            cursor = next
+            guard let advanced = Calendar.gmt.date(byAdding: .day, value: 1, to: next) else { break }
+            cursor = advanced
         }
         return dates
     }

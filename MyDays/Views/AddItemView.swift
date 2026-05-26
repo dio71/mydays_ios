@@ -642,6 +642,10 @@ struct AddItemView: View {
             .onChange(of: dateExpansion)       { _, expansion in if expansion != .none { titleFocused = false } }
             .onChange(of: durationExpanded)    { _, expanded in if expanded { titleFocused = false } }
             .onChange(of: showRecurrenceSheet) { _, n in if n { titleFocused = false } }
+            // NTD 목표 시간이 미설정(nil)되면 반복 설정도 자동 제거 — 미설정 NTD는 1회성 의미라 반복 불가.
+            .onChange(of: ntdDurationHour) { _, new in
+                if isNTD && new == nil { recurrenceConfig = nil }
+            }
             .navigationTitle(navigationTitleText)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

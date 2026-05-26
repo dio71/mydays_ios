@@ -20,6 +20,8 @@ struct NTDRow: View {
 
     @ObservedObject var item: Item
     let occurrenceDate: Date  // UTC anchor
+    /// compact 표시 — 그룹 내 마지막이 아닌 row용. notes/statusIcons/(x) 버튼 숨김.
+    var compactMode: Bool = false
 
     @Environment(\.managedObjectContext) private var context
     @State private var showGiveUpSheet = false
@@ -50,7 +52,7 @@ struct NTDRow: View {
                             .layoutPriority(1)
                     }
 
-                    if let notes = item.notes, !notes.isEmpty {
+                    if !compactMode, let notes = item.notes, !notes.isEmpty {
                         Text(notes)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -58,13 +60,13 @@ struct NTDRow: View {
                             .truncationMode(.tail)
                     }
 
-                    if hasAnyStatusIconOrMeta {
+                    if !compactMode, hasAnyStatusIconOrMeta {
                         statusIcons
                     }
                 }
 
-                // 명시적 포기 버튼 — 진행 중/예정인 경우에만.
-                if !completed && !failed {
+                // 명시적 포기 버튼 — 진행 중/예정 + compact 아닐 때만.
+                if !compactMode && !completed && !failed {
                     Button {
                         showGiveUpSheet = true
                     } label: {

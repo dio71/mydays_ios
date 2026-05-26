@@ -163,14 +163,16 @@ MyDays/MyDays/
   - NTD section (`ntdsForDate`): kind==1 fetch + **range 기반 노출** 규칙
     - displayedDate가 occurrence의 [start, end calendar date] 범위 안에 있으면 표시 — 완료/포기 무관
     - end calendar date 결정 (`Item.ntdOccurrenceCalendarRange`):
-      - duration 설정됨: 계획된 종료 instant의 local 일자 (실제 완료/포기와 무관 — 계획된 일자에 모두 노출)
+      - duration 설정됨: 계획된 종료 instant의 local 일자
       - duration 없음 + RC.completedAt 있음: RC.completedAt의 local 일자
       - duration 없음 + 1회성 종료: item.completedAt의 local 일자
-      - duration 없음 + 진행 중: now의 local 일자 (계속 확장 — "현재까지 진행시간")
+      - duration 없음 + **반복** + RC 없음: 다음 occurrence start instant (implicit auto-end — 안 그러면 lookback 모든 occurrence가 today를 cover)
+      - duration 없음 + 1회성/마지막 진행 중: now
     - 후보 occurrence start dates (`Item.ntdOccurrenceStartCandidates(coveringDate:)`):
       - 1회성: startDate 1개
       - 반복: lookback 내 forward iterate — duration 설정 시 ceil(duration/24)+1일, 미설정 시 31일
-    - 한 Item당 한 occurrence만 노출 (가장 먼저 매치)
+      - **주의**: `RecurrenceRule.nextOccurrence(after:)`는 referenceDate를 *포함* 검사 (이름과 달리). cursor를 `next + 1일`로 advance해야 같은 occurrence 재반환 무한 루프 회피.
+    - **모든 매치 occurrence 노출** (multi-day 겹침 시 같은 Item이 여러 줄로 표시. 그룹핑은 view layer에서)
   - 1회성 Todo 섹션 분류 (`Item.todoSection(on:now:)` 공용 helper, fetch는 displayedDay 구간 통합):
     - 모든 항목 `(effectiveStartInstant, effectiveDueInstant)` 쌍 보유 (시간 미설정 → 0시/24시 default).
     - **단일/기간 분기** (`Item.isSingleSchedule`):
@@ -194,6 +196,34 @@ MyDays/MyDays/
     - 비어있을 때: `AddItemView(baseDate: nil)` 시트 열림 — 일정 chip "미정" preset
   - 키보드 dismiss: focus 시 mic 위치에 `keyboard.chevron.compact.down` 버튼 노출. List swipe도 `.scrollDismissesKeyboard(.immediately)`로 dismiss.
   - submit 시 항상 text clear + fieldFocused=false (Reminders 같은 keep-focus 패턴 아님 — 사용자 명시 요구).
+
+### Multi-occurrence rendering (TodayView NTD / Routine 공통)
+- **모델**: 같은 Item이 같은 일자에 여러 occurrence로 나올 수 있음 (multi-day span 겹침 또는 NTD duration 겹침).
+- **수집**:
+  - NTD: `ntdsForDate`가 모든 매치 occurrence 반환 (이전 break 제거).
+  - Routine Todo: `routinesForDate`가 `Item.occurrenceStartsCovering(date:)`로 cover하는 모든 start dates 수집.
+  - 결과 타입: `OccurrenceRow` (Identifiable wrapper, id = objectID + timestamp 조합).
+- **정렬** (`sortedRoutines`):
+  - 같은 Item의 occurrence들은 항상 **인접** (chronological 순서, 그룹 마지막=가장 최근).
+  - Item 그룹 단위: pending occurrence 있는 그룹 먼저, 전부 done인 그룹은 섹션 끝.
+  - Occurrence별 split하면 같은 Item이 pending/done bucket으로 쪼개져 인접 깨짐 → 그룹 단위 split.
+- **정렬 snapshot** (`stableRoutineOrder @State`):
+  - 첫 render의 `.onAppear`에서 sortedRoutines 결과를 ID 순서로 캡처.
+  - 이후 체크 토글 시 cache 사용 → 즉시 reorder 회피.
+  - date 변경 시 부모 `.id(displayedDate)`로 TodayList 재생성 → @State 초기화 → 다시 캡처.
+- **그룹 렌더링** (List row 1개 per Item):
+  - `ItemGroup` struct로 같은 Item의 연속 occurrence 묶음.
+  - 그룹 = List row 1개. 내부 `VStack(spacing: 4)`로 occurrence stacking → List의 enforced row 높이 영향 회피 (.listRowInsets/negative padding/frame 모두 안 먹는 환경 우회).
+  - 그룹 마지막 occurrence = full ItemRow/NTDRow. 위 row들 = compactMode=true (notes/statusIcons 숨김, NTDRow는 (x) 포기 버튼도 숨김).
+  - 각 occurrence는 자체 Button(편집 시트 open) — VStack 안에서도 개별 tap 동작.
+  - inter-group separator는 자동 (각 그룹 = List row 1개).
+- **per-occurrence 완료**:
+  - `ItemRow.canonicalCompletionDay`: routine은 `occurrenceStartOverride ?? referenceDate` 기준 (각 occurrence 독립 RC).
+  - `isCompletedForDate`도 동일.
+  - 1회성 Todo는 startDate 기준 (canonical event date) — multi-occurrence 무관.
+- **라벨 차별화** (`ItemRow.occurrenceStartOverride: Date?`):
+  - nil이면 referenceDate로 자동 (단일 occurrence).
+  - 명시되면 그 occurrence start를 anchor로 라벨 계산 → 같은 Item의 여러 row가 서로 다른 종료일 라벨 표시.
 
 ### 목록 (ListView) — `isSomeday=NO`. 진행 중 + 완료 토글 (default 숨김). 완료 섹션 predicate = `(status==1 OR status==3) AND isSomeday==NO`
 - 네비게이션 타이틀: "목록" (`.navigationBarTitleDisplayMode(.large)`). 섹션 헤더 제거 — 타이틀이 정체성 제공.
@@ -265,6 +295,7 @@ MyDays/MyDays/
 - **반복 section 노출 조건** (`isRecurrenceSectionVisible`):
   - `hasStart=true` (일정 chip이 미정 아님)
   - NTD인 경우 추가로 `ntdDurationHour != nil`
+- **NTD duration → nil 시 반복 자동 cleanup**: `.onChange(of: ntdDurationHour)`에서 nil 되면 `recurrenceConfig = nil`로 자동 제거 (미설정 NTD는 1회성 의미라 반복 불가).
 
 ### RecurrenceSheet
 - Frequency picker (segmented): 매일/매주/매월
@@ -276,8 +307,13 @@ MyDays/MyDays/
 
 ### ItemRow (3줄 레이아웃)
 - 줄 1: leadingControl + 제목(1줄, truncation tail) + 시간대(caption2) + D-day/카운트다운(caption, isOverdue면 red)
-- 줄 2: 메모(notes, caption secondary, 1줄) — 옵션
-- 줄 3: statusIcons (깃발 / 🔥streak / 알림 bell / 반복 repeat+요약 / NTD 목표 clock+duration) — today·list mode 공통 노출
+- 줄 2: 메모(notes, caption secondary, 1줄) — 옵션 (compactMode 시 숨김)
+- 줄 3: statusIcons (깃발 / 🔥streak / 알림 bell / 반복 repeat+요약 / NTD 목표 clock+duration) — today·list mode 공통 노출 (compactMode 시 숨김)
+- **props**:
+  - `referenceDate`: view 일자 (라벨 계산 기준)
+  - `mode`: .today / .list
+  - `occurrenceStartOverride: Date?`: multi-occurrence rendering 시 명시 — 라벨 + 완료 체크의 anchor (각 occurrence 독립 RC)
+  - `compactMode: Bool`: 그룹 내 비-last row용 (notes/statusIcons 숨김)
   - 알림 아이콘: `bell` (line, not filled)
   - 반복: `repeat` 아이콘 + `rule.summaryText()`
   - NTD duration: `clock` 아이콘 + `formatDuration` (반복과 별도). duration 미설정 NTD는 노출 안 함
@@ -312,6 +348,7 @@ MyDays/MyDays/
 
 ### NTDRow (TodayView 절제 목표 섹션 전용)
 - **AdaptiveCountdownSchedule** — target instant 기반 가변 갱신 (1분 미만 1s / 1시간 미만 30s / 그 외 60s). 배터리 saving.
+- **props**: `item`, `occurrenceDate`, `compactMode: Bool` (그룹 내 비-last 시 statusIcons + (x) 포기 버튼 숨김)
 - Layout: stopwatch icon(좌) + 제목 + trailingText(우, D-day 자리) + (x) 포기 버튼(우끝)
 - 우측 (x): `xmark.circle` (secondary). pending/in-progress occurrence에만 노출. 탭 → NTDGiveUpSheet
 - 좌측 stopwatch (ItemRow.ntdIconStyle 공유, 4-state):

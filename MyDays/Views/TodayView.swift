@@ -184,6 +184,10 @@ struct TodayList: View {
     let date: Date
     @Binding var sheet: ItemSheetMode?
 
+    /// 루틴 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
+    /// 같은 date 내에서 체크 토글 시 즉시 reorder되지 않게 cache. 다음 navigation 시 재계산.
+    @State private var stableRoutineOrder: [String] = []
+
     /// 통합 fetch — displayedDay가 [startDate, dueDate] 구간 안에 있는 모든 active 1회성 Todo.
     /// 시작·진행·마감 섹션 분류는 view-side `classify(_:now:)`에서 시간 instant 기반으로 동적.
     @FetchRequest var allActiveTodos: FetchedResults<Item>
@@ -230,39 +234,126 @@ struct TodayList: View {
 
     // 단순 섹션 분류는 `Item.todoSection(on:now:)` 공용 helper 사용 (Item+Helpers).
 
+    /// (item, occurrence) 쌍 — 같은 Item이 여러 occurrence로 노출될 때 ForEach id 충돌 회피.
+    /// id는 objectID + occurrence timestamp 조합.
+    struct OccurrenceRow: Identifiable {
+        let item: Item
+        let occurrenceDate: Date
+        var id: String {
+            "\(item.objectID.uriRepresentation().absoluteString)|\(Int(occurrenceDate.timeIntervalSince1970))"
+        }
+    }
+
     /// displayedDate에 표시할 NTD occurrence 목록.
     ///
-    /// 원칙 (사용자 정의):
+    /// 원칙:
     ///   - displayedDate가 occurrence의 노출 범위 [start ~ end] 안에 있으면 표시
     ///     · end = duration 설정됨: 계획된 종료 instant의 local 일자
     ///     · end = duration 없음 + RC/Item.completedAt: 그 instant의 local 일자
-    ///     · end = duration 없음 + 진행 중: now의 local 일자 (현재까지 진행시간)
+    ///     · end = duration 없음 + 진행 중: now의 local 일자
     ///   - 완료/포기 occurrence도 노출 범위 안에 있는 한 표시 (NTDRow가 상태 라벨 처리)
-    /// 한 Item당 한 occurrence만 노출 (가장 먼저 매치된 것).
-    private var ntdsForDate: [(item: Item, occurrenceDate: Date)] {
+    ///   - 같은 Item의 multi-day 겹침 시 **모든 매치 occurrence 노출** (그룹핑은 추후).
+    private var ntdsForDate: [OccurrenceRow] {
         let now = Date()
-        var result: [(Item, Date)] = []
+        var result: [OccurrenceRow] = []
 
         for item in ntdItems {
             let candidates = item.ntdOccurrenceStartCandidates(coveringDate: date)
             for occDate in candidates {
                 let range = item.ntdOccurrenceCalendarRange(occurrenceDate: occDate, now: now)
                 if range.start <= date && date <= range.end {
-                    result.append((item, occDate))
-                    break
+                    result.append(OccurrenceRow(item: item, occurrenceDate: occDate))
                 }
             }
         }
         return result
     }
 
-    private var routinesForDate: [Item] {
-        let target = date
-        return routineItems.filter { item in
-            // multi-day occurrence(start~start+span)의 어떤 위치에라도 걸리면 노출.
-            // 단일 day occurrence는 span=0이라 occurrencePosition이 .start만 반환.
-            return item.occurrencePosition(on: target) != nil
+    /// 반복 항목 occurrence 목록. multi-day 겹침 시 같은 Item의 여러 occurrence 모두 반환.
+    /// `Item.occurrenceStartsCovering(date:)`로 cover하는 모든 start dates 수집.
+    private var routinesForDate: [OccurrenceRow] {
+        var result: [OccurrenceRow] = []
+        for item in routineItems {
+            for start in item.occurrenceStartsCovering(date: date) {
+                result.append(OccurrenceRow(item: item, occurrenceDate: start))
+            }
         }
+        return result
+    }
+
+    /// 루틴 섹션 표시 list — snapshot 적용.
+    /// stableRoutineOrder가 비어있으면 fresh sort (첫 render), 있으면 cached order로 재배치.
+    /// 새 occurrence는 cache에 없는 ID라 끝에 append됨.
+    private func displayRoutines() -> [OccurrenceRow] {
+        let current = routinesForDate
+        if stableRoutineOrder.isEmpty {
+            return sortedRoutines()
+        }
+        let idMap = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
+        var result: [OccurrenceRow] = []
+        var seen: Set<String> = []
+        for id in stableRoutineOrder {
+            if let row = idMap[id] {
+                result.append(row)
+                seen.insert(id)
+            }
+        }
+        for row in current where !seen.contains(row.id) {
+            result.append(row)
+        }
+        return result
+    }
+
+    /// 루틴 섹션 정렬 — 같은 Item occurrence 인접 유지 + 그룹 단위 pending/done 정렬.
+    /// 1) 같은 Item의 occurrence들은 항상 인접 (chronological 순서 — 그룹 마지막=가장 최근)
+    /// 2) Item 그룹 순서: 어떤 occurrence라도 pending인 그룹 먼저, 전부 done인 그룹은 섹션 끝으로
+    /// 단순 occurrence별 split하면 같은 Item이 pending/done bucket으로 쪼개져 인접 깨짐 → 그룹 단위 split.
+    private func sortedRoutines() -> [OccurrenceRow] {
+        let routinesRaw = routinesForDate
+        var byItem: [NSManagedObjectID: [OccurrenceRow]] = [:]
+        var itemOrder: [NSManagedObjectID] = []
+        for row in routinesRaw {
+            if byItem[row.item.objectID] == nil { itemOrder.append(row.item.objectID) }
+            byItem[row.item.objectID, default: []].append(row)
+        }
+        var pendingGroups: [[OccurrenceRow]] = []
+        var doneGroups: [[OccurrenceRow]] = []
+        for itemID in itemOrder {
+            guard let group = byItem[itemID] else { continue }
+            let hasAnyPending = group.contains { !$0.item.isCompletedForDate($0.occurrenceDate) }
+            if hasAnyPending { pendingGroups.append(group) } else { doneGroups.append(group) }
+        }
+        return (pendingGroups + doneGroups).flatMap { $0 }
+    }
+
+    /// Item 단위 그룹 — 같은 Item의 연속 occurrence를 한 group으로 묶음.
+    /// rows는 같은 Item의 occurrence가 인접한 순서로 정렬돼 있다고 가정 (sortedRoutines/ntdsForDate).
+    /// 각 group은 List row 1개로 렌더링됨 → List의 enforced row 높이 영향에서 자유로움.
+    struct ItemGroup: Identifiable {
+        let item: Item
+        let occurrences: [OccurrenceRow]
+        var id: NSManagedObjectID { item.objectID }
+    }
+
+    private func itemGroups(_ rows: [OccurrenceRow]) -> [ItemGroup] {
+        var result: [ItemGroup] = []
+        var currentItem: Item? = nil
+        var currentOccs: [OccurrenceRow] = []
+        for row in rows {
+            if currentItem?.objectID == row.item.objectID {
+                currentOccs.append(row)
+            } else {
+                if let item = currentItem {
+                    result.append(ItemGroup(item: item, occurrences: currentOccs))
+                }
+                currentItem = row.item
+                currentOccs = [row]
+            }
+        }
+        if let item = currentItem {
+            result.append(ItemGroup(item: item, occurrences: currentOccs))
+        }
+        return result
     }
 
     /// 통합 fetch를 시간 instant 기반으로 시작/진행/마감 섹션에 그룹화한 결과.
@@ -286,23 +377,30 @@ struct TodayList: View {
         let pendingTodos = todoGroupRaw.filter { $0.itemStatus == .pending }
         let doneTodos = todoGroupRaw.filter { $0.itemStatus != .pending }
         let todoGroup = pendingTodos + doneTodos
-        // 루틴 섹션: 그 날짜에 완료된 occurrence는 섹션 끝으로.
-        let routinesRaw = routinesForDate
-        let pendingRoutines = routinesRaw.filter { !$0.isCompletedForDate(date) }
-        let doneRoutines = routinesRaw.filter { $0.isCompletedForDate(date) }
-        let routinesSorted = pendingRoutines + doneRoutines
+        // 루틴 섹션: snapshot 적용 list (같은 date 내에서 체크 토글에 의한 reorder 회피).
+        let routinesSorted = displayRoutines()
         List {
             Section("today.section.not_todo") {
                 if ntdsForDate.isEmpty {
                     emptyRow("today.empty.not_todo")
                 } else {
-                    ForEach(ntdsForDate, id: \.item.objectID) { pair in
-                        Button {
-                            sheet = .edit(pair.item)
-                        } label: {
-                            NTDRow(item: pair.item, occurrenceDate: pair.occurrenceDate)
+                    // 그룹 = List row 1개. 내부 VStack 간격으로 occurrence 간 간격 직접 제어 (List 강제 높이 회피).
+                    ForEach(itemGroups(ntdsForDate)) { group in
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
+                                let isLast = (idx == group.occurrences.count - 1)
+                                Button {
+                                    sheet = .edit(group.item)
+                                } label: {
+                                    NTDRow(
+                                        item: group.item,
+                                        occurrenceDate: occ.occurrenceDate,
+                                        compactMode: !isLast
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -319,20 +417,45 @@ struct TodayList: View {
                 if routinesSorted.isEmpty {
                     emptyRow("today.empty.routine")
                 } else {
-                    ForEach(routinesSorted, id: \.objectID) { rowButton(for: $0) }
+                    ForEach(itemGroups(routinesSorted)) { group in
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
+                                let isLast = (idx == group.occurrences.count - 1)
+                                rowButton(
+                                    for: group.item,
+                                    occurrenceStart: occ.occurrenceDate,
+                                    compact: !isLast
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
         .listStyle(.insetGrouped)
         // 하단 (+) FAB(56pt + padding 20pt)에 마지막 row가 가리지 않도록 스크롤 여백 확보.
         .contentMargins(.bottom, 96, for: .scrollContent)
+        // 첫 render 후 루틴 정렬 snapshot 캡처 — 이후 체크 토글로 인한 reorder 회피.
+        // date 변경 시 부모 .id(displayedDate)로 view 재생성 → @State 초기화 → 다시 캡처.
+        .onAppear {
+            if stableRoutineOrder.isEmpty {
+                stableRoutineOrder = sortedRoutines().map { $0.id }
+            }
+        }
     }
 
-    private func rowButton(for item: Item) -> some View {
+    /// occurrenceStart override + compact mode 전달.
+    /// compact=true면 ItemRow가 아이콘+제목+d-day만 노출 (그룹 마지막 외 row용).
+    private func rowButton(for item: Item, occurrenceStart: Date? = nil, compact: Bool = false) -> some View {
         Button {
             sheet = .edit(item)
         } label: {
-            ItemRow(item: item, referenceDate: date)
+            ItemRow(
+                item: item,
+                referenceDate: date,
+                occurrenceStartOverride: occurrenceStart,
+                compactMode: compact
+            )
         }
         .buttonStyle(.plain)
     }

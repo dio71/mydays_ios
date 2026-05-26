@@ -33,7 +33,7 @@ struct NTDGiveUpSheet: View {
     private static let presetReasonKeys: [String] = [
         "ntd.giveup_sheet.reason.stress",
         "ntd.giveup_sheet.reason.schedule",
-        "ntd.giveup_sheet.reason.limit",
+        "ntd.giveup_sheet.reason.interruption",
         "ntd.giveup_sheet.reason.condition"
     ]
 
@@ -67,6 +67,7 @@ struct NTDGiveUpSheet: View {
                         .font(.title3)
                         .fontWeight(.semibold)
                         .multilineTextAlignment(.center)
+                        .lineSpacing(6)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 16)
