@@ -12,6 +12,7 @@ struct ItemRow: View {
     var referenceDate: Date = Date()
     var mode: DisplayMode = .today
     @Environment(\.managedObjectContext) private var context
+    @State private var showCompleteSheet = false
 
     /// 루틴 체크박스 동작 여부. 목록탭은 referenceDate 컨텍스트가 명확하지 않아 비활성.
     private var routineCheckable: Bool { mode != .list }
@@ -24,6 +25,11 @@ struct ItemRow: View {
         }
         TimelineView(schedule) { _ in
             rowContent
+        }
+        .sheet(isPresented: $showCompleteSheet) {
+            TodoCompleteSheet { comment in
+                performComplete(comment: comment)
+            }
         }
     }
 
@@ -174,41 +180,82 @@ struct ItemRow: View {
     /// RC.date 기준:
     ///   - 반복: referenceDate (그 occurrence date)
     ///   - 1회성: item.startDate (canonical event date) — 다양한 day view에서 같은 RC 매칭
+    ///
+    /// 신규 체크 + Todo + 미래 일정(시작 instant 전): 사유 입력 시트로 분기 (NTD 포기와 동일 패턴).
+    /// 시간 미설정 일정은 startHour=0(자정)이라 보통 미래로 잡히지 않음 — 의도된 동작.
     private func toggleDone() {
         let now = Date()
-        let day = isRoutine
-            ? Calendar.gmt.startOfDay(for: referenceDate)
-            : Calendar.gmt.startOfDay(for: item.startDate ?? referenceDate)
-
+        let day = canonicalCompletionDay
         let completions = (item.completions as? Set<RoutineCompletion>) ?? []
         let existing = completions.first { c in
             guard let d = c.date else { return false }
             return Calendar.gmt.isDate(d, inSameDayAs: day)
         }
 
-        let action: ItemAction
         if let existing {
             context.delete(existing)
-            action = .uncompleted
             if !isRoutine {
                 item.itemStatus = .pending
                 item.completedAt = nil
             }
-        } else {
-            let comp = RoutineCompletion(context: context)
-            comp.id = UUID()
-            comp.date = day
-            comp.done = true
-            comp.completedAt = now  // 체크 instant — 활동 기록 시각 표시용
-            comp.item = item
-            action = .completed
-            if !isRoutine {
-                item.itemStatus = .done
-                item.completedAt = now
-            }
+            item.updatedAt = now
+            ItemEvent.log(.uncompleted, on: item, in: context)
+            saveContext()
+            return
+        }
+
+        // 신규 체크. Todo + 미래 일정이면 사유 시트로 분기.
+        if !isNTD && isFutureSchedule(now: now) {
+            showCompleteSheet = true
+            return
+        }
+        performComplete(comment: nil)
+    }
+
+    /// 시트 확정 또는 즉시 완료의 공통 경로.
+    /// comment: nil = 사유 없음 / non-nil = 사유 텍스트(RC.comment + ItemEvent.note에 동일 저장).
+    private func performComplete(comment: String?) {
+        let now = Date()
+        let day = canonicalCompletionDay
+        let comp = RoutineCompletion(context: context)
+        comp.id = UUID()
+        comp.date = day
+        comp.done = true
+        comp.completedAt = now  // 체크 instant — 활동 기록 시각 표시용
+        comp.comment = comment
+        comp.item = item
+        if !isRoutine {
+            item.itemStatus = .done
+            item.completedAt = now
         }
         item.updatedAt = now
-        ItemEvent.log(action, on: item, in: context)
+        ItemEvent.log(.completed, on: item, in: context, note: comment)
+        saveContext()
+    }
+
+    /// RC.date 기준일 — 반복은 referenceDate, 1회성은 startDate(canonical event date) 사용.
+    private var canonicalCompletionDay: Date {
+        isRoutine
+            ? Calendar.gmt.startOfDay(for: referenceDate)
+            : Calendar.gmt.startOfDay(for: item.startDate ?? referenceDate)
+    }
+
+    /// 미래 일정 판정 — 적용 occurrence의 시작 instant가 now보다 미래면 true.
+    /// - 반복: `referenceOccurrenceStartDate(viewDate:)`로 적용 occurrence 결정 (오늘탭 swipe로 어제 routine 체크 시 미래 아님)
+    /// - 1회성: `effectiveStartInstant`
+    /// startDate 없음(Someday) → false.
+    private func isFutureSchedule(now: Date) -> Bool {
+        if isRoutine {
+            guard let occStart = item.referenceOccurrenceStartDate(viewDate: referenceDate),
+                  let inst = Item.localInstant(fromCalendarDate: occStart, hour: item.startHourInt)
+            else { return false }
+            return now < inst
+        }
+        guard let inst = item.effectiveStartInstant else { return false }
+        return now < inst
+    }
+
+    private func saveContext() {
         do {
             try context.save()
         } catch {
@@ -459,7 +506,11 @@ struct ItemRow: View {
         if hasExplicitTime {
             if isStartToday && isDueToday {
                 // 시작=종료=오늘. 단일시간(s==e)이거나 시작 전 → "s시 시작". 시작 후 → "e시 종료".
+                // 단일시간 + 오늘탭에서 오늘 페이지: "s시" (시작 prefix 생략 — view 자체가 "오늘"을 제공).
                 if startH == dueH {
+                    if isTodayMode && isViewToday {
+                        return hourLabel(forHour: startH)
+                    }
                     return startTimeLabel(startH)
                 }
                 if let inst = startInst, now < inst {
@@ -498,6 +549,10 @@ struct ItemRow: View {
             return formatDDay(days)
         }
         if !hasExplicitTime && isDueToday {
+            // 단일 일자(start==due==today) + 시간 미설정 → "오늘". 기간(start<today, due=today)이면 "오늘 종료".
+            if isSameDay {
+                return String(localized: "todo.list.today")
+            }
             return String(localized: "todo.list.ends_today")
         }
         let days = Calendar.gmt.dateComponents([.day], from: realTodayDay, to: dueDay).day ?? 0

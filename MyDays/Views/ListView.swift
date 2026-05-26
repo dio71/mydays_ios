@@ -52,7 +52,7 @@ struct ListView: View {
     var body: some View {
         // ItemRow가 자체 TimelineView로 실시간 갱신하므로 ListView 레벨 refresh 불필요.
         List {
-            // 진행 중 섹션 — 헤더 없이 (페이지 타이틀이 "목록"으로 정체성 제공).
+            // 진행 중 섹션 — 헤더 없이 (페이지 타이틀이 "전체 활동"으로 정체성 제공).
             Section {
                 if sortedActiveItems.isEmpty {
                     emptyRow("list.empty.active")
@@ -74,7 +74,7 @@ struct ListView: View {
         .listStyle(.insetGrouped)
         // 하단 (+) FAB(56pt + padding 20pt)에 마지막 row가 가리지 않도록 스크롤 여백 확보.
         .contentMargins(.bottom, 96, for: .scrollContent)
-        .navigationTitle("tab.list")
+        .navigationTitle("list.title")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

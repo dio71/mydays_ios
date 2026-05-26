@@ -6,11 +6,68 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A71E46C82FC545E100631C13 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A71E46C72FC545E100631C13 /* WidgetKit.framework */; };
+		A71E46CA2FC545E100631C13 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A71E46C92FC545E100631C13 /* SwiftUI.framework */; };
+		A71E46D72FC545E200631C13 /* MyDaysWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A71E46C52FC545E100631C13 /* MyDaysWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A71E46D52FC545E200631C13 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A78506E72FBD443C004E345B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A71E46C42FC545E100631C13;
+			remoteInfo = MyDaysWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A71E46DC2FC545E200631C13 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A71E46D72FC545E200631C13 /* MyDaysWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		A71E46C52FC545E100631C13 /* MyDaysWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MyDaysWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A71E46C72FC545E100631C13 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		A71E46C92FC545E100631C13 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		A71E46DD2FC5461900631C13 /* MyDaysWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MyDaysWidgetExtension.entitlements; sourceTree = "<group>"; };
 		A78506EF2FBD443C004E345B /* MyDays.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyDays.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A71E46DB2FC545E200631C13 /* Exceptions for "MyDaysWidget" folder in "MyDaysWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A71E46C42FC545E100631C13 /* MyDaysWidgetExtension */;
+		};
+		A71E46E42FC548D300631C13 /* Exceptions for "MyDays" folder in "MyDaysWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Localizable.xcstrings,
+				Models/CalendarDate.swift,
+				"Models/Item+Helpers.swift",
+				"Models/ItemEvent+Helpers.swift",
+				Models/ModelEnums.swift,
+				Models/RecurrenceConfig.swift,
+				"Models/RecurrenceRule+Helpers.swift",
+				MyDays.xcdatamodeld,
+				Services/NotificationService.swift,
+				Services/PersistenceController.swift,
+			);
+			target = A71E46C42FC545E100631C13 /* MyDaysWidgetExtension */;
+		};
 		A78507052FBD443D004E345B /* Exceptions for "MyDays" folder in "MyDays" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -21,10 +78,19 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A71E46CB2FC545E100631C13 /* MyDaysWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A71E46DB2FC545E200631C13 /* Exceptions for "MyDaysWidget" folder in "MyDaysWidgetExtension" target */,
+			);
+			path = MyDaysWidget;
+			sourceTree = "<group>";
+		};
 		A78506F12FBD443C004E345B /* MyDays */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				A78507052FBD443D004E345B /* Exceptions for "MyDays" folder in "MyDays" target */,
+				A71E46E42FC548D300631C13 /* Exceptions for "MyDays" folder in "MyDaysWidgetExtension" target */,
 			);
 			path = MyDays;
 			sourceTree = "<group>";
@@ -32,6 +98,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A71E46C22FC545E100631C13 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A71E46CA2FC545E100631C13 /* SwiftUI.framework in Frameworks */,
+				A71E46C82FC545E100631C13 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A78506EC2FBD443C004E345B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -42,10 +117,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A71E46C62FC545E100631C13 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A71E46C72FC545E100631C13 /* WidgetKit.framework */,
+				A71E46C92FC545E100631C13 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		A78506E62FBD443C004E345B = {
 			isa = PBXGroup;
 			children = (
+				A71E46DD2FC5461900631C13 /* MyDaysWidgetExtension.entitlements */,
 				A78506F12FBD443C004E345B /* MyDays */,
+				A71E46CB2FC545E100631C13 /* MyDaysWidget */,
+				A71E46C62FC545E100631C13 /* Frameworks */,
 				A78506F02FBD443C004E345B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +141,7 @@
 			isa = PBXGroup;
 			children = (
 				A78506EF2FBD443C004E345B /* MyDays.app */,
+				A71E46C52FC545E100631C13 /* MyDaysWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,6 +149,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A71E46C42FC545E100631C13 /* MyDaysWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A71E46D82FC545E200631C13 /* Build configuration list for PBXNativeTarget "MyDaysWidgetExtension" */;
+			buildPhases = (
+				A71E46C12FC545E100631C13 /* Sources */,
+				A71E46C22FC545E100631C13 /* Frameworks */,
+				A71E46C32FC545E100631C13 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A71E46CB2FC545E100631C13 /* MyDaysWidget */,
+			);
+			name = MyDaysWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = MyDaysWidgetExtension;
+			productReference = A71E46C52FC545E100631C13 /* MyDaysWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		A78506EE2FBD443C004E345B /* MyDays */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A78507062FBD443D004E345B /* Build configuration list for PBXNativeTarget "MyDays" */;
@@ -68,10 +178,12 @@
 				A78506EB2FBD443C004E345B /* Sources */,
 				A78506EC2FBD443C004E345B /* Frameworks */,
 				A78506ED2FBD443C004E345B /* Resources */,
+				A71E46DC2FC545E200631C13 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A71E46D62FC545E200631C13 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A78506F12FBD443C004E345B /* MyDays */,
@@ -93,6 +205,9 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					A71E46C42FC545E100631C13 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					A78506EE2FBD443C004E345B = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -114,11 +229,19 @@
 			projectRoot = "";
 			targets = (
 				A78506EE2FBD443C004E345B /* MyDays */,
+				A71E46C42FC545E100631C13 /* MyDaysWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A71E46C32FC545E100631C13 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A78506ED2FBD443C004E345B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -129,6 +252,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A71E46C12FC545E100631C13 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A78506EB2FBD443C004E345B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -138,7 +268,85 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		A71E46D62FC545E200631C13 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A71E46C42FC545E100631C13 /* MyDaysWidgetExtension */;
+			targetProxy = A71E46D52FC545E200631C13 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		A71E46D92FC545E200631C13 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = MyDaysWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W42FK7WLJ9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MyDaysWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MyDaysWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.snapplay.MyDays.MyDaysWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A71E46DA2FC545E200631C13 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = MyDaysWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W42FK7WLJ9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MyDaysWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MyDaysWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.snapplay.MyDays.MyDaysWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		A78507072FBD443D004E345B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -343,6 +551,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A71E46D82FC545E200631C13 /* Build configuration list for PBXNativeTarget "MyDaysWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A71E46D92FC545E200631C13 /* Debug */,
+				A71E46DA2FC545E200631C13 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A78506EA2FBD443C004E345B /* Build configuration list for PBXProject "MyDays" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -1,16 +1,29 @@
 import CoreData
 import Foundation
+import WidgetKit
 
 final class PersistenceController {
 
     static let shared = PersistenceController()
 
-    let container: NSPersistentCloudKitContainer
+    /// Widget Extension과 store를 공유하기 위한 App Group ID.
+    /// 두 target의 Signing & Capabilities → App Groups에 동일 ID가 등록돼 있어야 함.
+    static let appGroupID = "group.io.snapplay.MyDays"
+
+    /// NSPersistentCloudKitContainer는 NSPersistentContainer의 subclass.
+    /// Main app은 CloudKit 동기화 필요해 CloudKit container, Widget process는 메모리 부담 줄이기 위해 일반 container.
+    /// Widget은 sqlite를 read-only로만 접근 — sync는 main app이 처리.
+    let container: NSPersistentContainer
 
     var viewContext: NSManagedObjectContext { container.viewContext }
 
     private init(inMemory: Bool = false) {
-        container = NSPersistentCloudKitContainer(name: "MyDays")
+        if Self.isWidgetExtension {
+            // Widget memory limit(~30MB) 초과 회피 — CloudKit metadata/sync 인프라 제거.
+            container = NSPersistentContainer(name: "MyDays")
+        } else {
+            container = NSPersistentCloudKitContainer(name: "MyDays")
+        }
 
         guard let description = container.persistentStoreDescriptions.first else {
             fatalError("Failed to retrieve persistent store description.")
@@ -18,6 +31,13 @@ final class PersistenceController {
 
         if inMemory {
             description.url = URL(fileURLWithPath: "/dev/null")
+        } else {
+            // 기존 default location → App Group shared container로 1회 마이그레이션.
+            // sqlite 본체 + WAL + SHM 세 파일을 모두 이동. 이미 shared에 있으면 no-op.
+            Self.migrateStoreToSharedContainerIfNeeded()
+            if let sharedURL = Self.sharedStoreURL() {
+                description.url = sharedURL
+            }
         }
 
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
@@ -31,6 +51,58 @@ final class PersistenceController {
 
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+
+        // Widget process에서는 observer 등록 X — CloudKit background sync로 widget process가 save를 받으면
+        // observer가 reloadAllTimelines를 호출하고 그게 다시 widget process를 깨우는 self-trigger 루프가 생김.
+        // Main app process에서만 등록 → 사용자 변경(save) 시점에 위젯 갱신.
+        if !Self.isWidgetExtension {
+            NotificationCenter.default.addObserver(
+                forName: .NSManagedObjectContextDidSave,
+                object: nil,
+                queue: .main
+            ) { _ in
+                WidgetCenter.shared.reloadAllTimelines()
+            }
+        }
+    }
+
+    /// Bundle ID로 현재 process가 widget extension인지 판정.
+    /// `io.snapplay.MyDays.MyDaysWidget` 매칭 — Bundle.main이 host app이 아닌 widget appex임을 의미.
+    private static var isWidgetExtension: Bool {
+        Bundle.main.bundleIdentifier?.hasSuffix(".MyDaysWidget") == true
+    }
+
+    /// App Group shared container 내의 store URL. App Group이 설정 안 됐으면 nil.
+    private static func sharedStoreURL() -> URL? {
+        let fm = FileManager.default
+        return fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+            .appendingPathComponent("MyDays.sqlite")
+    }
+
+    /// 기존 default location(`Application Support/MyDays.sqlite`)에서 shared container로 1회 마이그레이션.
+    /// shared 위치에 이미 sqlite가 있거나 default 위치에 데이터가 없으면 no-op.
+    /// .sqlite / .sqlite-wal / .sqlite-shm 세 파일을 모두 복사 (write-ahead log + shared memory).
+    /// 마이그레이션 후 default 파일은 그대로 둠 — Core Data가 shared만 보니까 orphan이고 안전.
+    private static func migrateStoreToSharedContainerIfNeeded() {
+        let fm = FileManager.default
+        guard let sharedURL = sharedStoreURL() else { return }
+        if fm.fileExists(atPath: sharedURL.path) { return }
+
+        let defaultURL = NSPersistentContainer.defaultDirectoryURL()
+            .appendingPathComponent("MyDays.sqlite")
+        guard fm.fileExists(atPath: defaultURL.path) else { return }
+
+        let suffixes = ["", "-wal", "-shm"]
+        for suffix in suffixes {
+            let src = URL(fileURLWithPath: defaultURL.path + suffix)
+            let dst = URL(fileURLWithPath: sharedURL.path + suffix)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            do {
+                try fm.copyItem(at: src, to: dst)
+            } catch {
+                assertionFailure("PersistenceController migration copy failed: \(error)")
+            }
+        }
     }
 
     func newBackgroundContext() -> NSManagedObjectContext {

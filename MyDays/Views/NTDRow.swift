@@ -7,6 +7,7 @@ import SwiftUI
 //
 // 레이아웃:
 //   [stopwatch icon] [title]                     [countdown / 상태]  [(x) 포기 버튼]
+//                    [메모 (옵션)]
 //                    [🔥 streak (옵션)]
 //
 // - leading icon: display only (탭 X). 상태에 따라 stopwatch / stopwatch.fill / hand.raised.fill.
@@ -48,6 +49,15 @@ struct NTDRow: View {
                             .foregroundStyle(.secondary)
                             .layoutPriority(1)
                     }
+
+                    if let notes = item.notes, !notes.isEmpty {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
                     if hasAnyStatusIconOrMeta {
                         statusIcons
                     }
@@ -69,9 +79,12 @@ struct NTDRow: View {
             .contentShape(Rectangle())
         }
         .sheet(isPresented: $showGiveUpSheet) {
-            NTDGiveUpSheet { comment in
-                giveUp(comment: comment)
-            }
+            NTDGiveUpSheet(
+                descriptionText: giveUpDescription(now: Date()),
+                onConfirm: { comment in
+                    giveUp(comment: comment)
+                }
+            )
         }
     }
 
@@ -275,6 +288,26 @@ struct NTDRow: View {
     //
     // 1회성·반복 모두 RoutineCompletion(failed=true).comment=사유로 통일 — 1회성↔반복 전환 시 보존.
     // 1회성은 추가로 Item.status=failed + completedAt=now (ListView 완료 섹션 노출).
+
+    /// NTDGiveUpSheet 상단 설명 문구.
+    /// - 목표 시간 있음: "목표 완료까지 X 남았습니다. 정말로 포기하시겠습니까?"
+    /// - 목표 시간 없음: "현재 X 진행하셨습니다. 정말로 포기하시겠습니까?"
+    /// 시트가 떠 있는 동안은 갱신 안 함 (사용자 결정 시점의 스냅샷).
+    private func giveUpDescription(now: Date) -> String {
+        if let end = item.ntdEndInstant(on: occurrenceDate) {
+            let remaining = max(0, Int(end.timeIntervalSince(now)))
+            return String.localizedStringWithFormat(
+                NSLocalizedString("ntd.giveup_sheet.description.with_target", comment: ""),
+                Item.formatNTDDuration(seconds: remaining)
+            )
+        }
+        guard let start = item.ntdStartInstant(on: occurrenceDate) else { return "" }
+        let elapsed = max(0, Int(now.timeIntervalSince(start)))
+        return String.localizedStringWithFormat(
+            NSLocalizedString("ntd.giveup_sheet.description.without_target", comment: ""),
+            Item.formatNTDDuration(seconds: elapsed)
+        )
+    }
 
     private func giveUp(comment: String?) {
         let now = Date()

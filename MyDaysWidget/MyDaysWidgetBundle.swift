@@ -12,6 +12,5 @@ import SwiftUI
 struct MyDaysWidgetBundle: WidgetBundle {
     var body: some Widget {
         MyDaysWidget()
-        MyDaysWidgetControl()
     }
 }

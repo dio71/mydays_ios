@@ -849,6 +849,41 @@ extension Item {
         }
     }
 
+    /// 모든 Item의 reminders 중 같은 anchor에 중복된 레코드를 1개만 남기고 정리.
+    /// CloudKit 동기화 충돌 등으로 같은 anchor에 reminder가 누적되면 OS 알림이 N개 fire되는 문제를 방지.
+    /// 정리 시 stale reminder의 OS 알림은 prefix 일괄 cancel + Core Data에서 삭제.
+    /// 변경이 있을 때만 save + 남은 reminder로 알림 재동기화.
+    static func dedupeReminders(in context: NSManagedObjectContext) {
+        let request: NSFetchRequest<Item> = Item.fetchRequest()
+        do {
+            let items = try context.fetch(request)
+            var changed = false
+            for item in items {
+                let reminders = (item.reminders as? Set<Reminder>) ?? []
+                var buckets: [Int16: [Reminder]] = [:]
+                for r in reminders { buckets[r.anchor, default: []].append(r) }
+                for (_, group) in buckets where group.count > 1 {
+                    let sorted = group.sorted {
+                        ($0.id?.uuidString ?? "") < ($1.id?.uuidString ?? "")
+                    }
+                    for dup in sorted.dropFirst() {
+                        if let rid = dup.id {
+                            Item.cancelNotifications(forReminderID: rid)
+                        }
+                        context.delete(dup)
+                        changed = true
+                    }
+                }
+            }
+            if changed {
+                try context.save()
+                refreshAllRoutineNotifications(in: context)
+            }
+        } catch {
+            assertionFailure("dedupeReminders failed: \(error)")
+        }
+    }
+
     /// 모든 active(status=0) routine의 알림을 재등록 — scenePhase 복귀 시 refill.
     /// 과거 fire 후 빠진 미래 occurrence 슬롯을 채워 long-term routine이 끊기지 않게 함.
     static func refreshAllRoutineNotifications(in context: NSManagedObjectContext) {

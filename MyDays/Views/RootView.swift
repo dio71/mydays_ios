@@ -22,6 +22,9 @@ struct RootView: View {
         .task {
             Item.completeExpiredRoutines(in: context)
             Item.completeFinishedNTDs(in: context)
+            // CloudKit 충돌 등으로 같은 anchor에 reminder 중복이 쌓여 동일 알림이 N개 fire되는 문제 정리.
+            // 변경이 있을 때만 save + 알림 재동기화 (no-op이 일반).
+            Item.dedupeReminders(in: context)
             // routine 알림 refill — 4개 occurrence window를 다시 채워 long-term routine이 끊기지 않게.
             Item.refreshAllRoutineNotifications(in: context)
             // 첫 launch 시 알림 권한 명시 요청.

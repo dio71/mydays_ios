@@ -1516,8 +1516,23 @@ struct AddItemView: View {
     /// anchor별 1개 reminder 정책 (V1). 이미 있으면 offset 업데이트, 없으면 생성, 토글 OFF면 삭제.
     private func reconcileReminders(item: Item) {
         let existing = (item.reminders as? Set<Reminder>) ?? []
+        // 같은 anchor에 중복 reminder가 들어와 있으면 (CloudKit 충돌 등으로 발생 가능) 1개만 유지하고 나머지는 정리.
+        // 정리 안 하면 syncNotifications가 reminder마다 OS 알림을 등록해 동일 내용이 중복 fire.
+        var anchorBuckets: [Int16: [Reminder]] = [:]
+        for r in existing { anchorBuckets[r.anchor, default: []].append(r) }
         var byAnchor: [Int16: Reminder] = [:]
-        for r in existing { byAnchor[r.anchor] = r }
+        for (anchor, group) in anchorBuckets {
+            let sorted = group.sorted {
+                ($0.id?.uuidString ?? "") < ($1.id?.uuidString ?? "")
+            }
+            byAnchor[anchor] = sorted.first
+            for dup in sorted.dropFirst() {
+                if let rid = dup.id {
+                    Item.cancelNotifications(forReminderID: rid)
+                }
+                context.delete(dup)
+            }
+        }
 
         // (anchor, offset) target 목록 — UI state 기반.
         var targets: [(Int16, Int)] = []

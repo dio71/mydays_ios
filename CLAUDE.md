@@ -423,10 +423,11 @@ MyDays/MyDays/
 **Phase 3 (이후): NTD 히스토리 등에 month grid 인프라 재활용**
 - 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용
 
-### 2. WidgetKit 위젯 (병행 대기 — 회사에서 진행 가능)
+### 2. WidgetKit 위젯 (Phase 1 진행 중 — 2026-05-26 시작)
 **범위**: Home Screen Small + Medium만 (Lock Screen 제외, Live Activity는 추후 Phase)
-**목표**: NTD를 위젯으로 — 진행 중 카운트다운으로 핵심 기능 효과 검증
-**진행 step (회사에서 Apple Developer Portal 접근 필요)**:
+**Phase 1 (현재)**: NTD 전용 위젯 — 가장 relevant한 NTD occurrence 카운트다운. Apple Developer / Xcode 설정 + PersistenceController shared container 전환 + TimelineProvider/Views 완료. 실기기 동작 검증 단계.
+**Phase 2 (이후)**: Todo도 표시. NTD가 없을 때 Todo로 fallback할지, 별도 widget kind를 추가할지는 그때 결정. 지금은 Todo 분기를 미리 추상화하지 말 것 (단순성 원칙).
+**최초 진행 step (참고용 — 이미 완료)**:
 1. App Group ID 생성 (`group.io.snapplay.MyDays`)
 2. Main app Signing & Capabilities에 App Groups 추가
 3. Widget Extension target 추가 (Xcode → File → New → Target → Widget Extension)
