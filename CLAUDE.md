@@ -486,20 +486,46 @@ MyDays/MyDays/
 
 **참고**: PBXFileSystemSynchronizedRootGroup (Xcode 16+) 사용 중 — widget target file membership 방식 다를 수 있음. iOS 17.6 deployment 유지. CloudKit 동기화는 shared container로 자동.
 
-### 3. 알림 후속 개선
+### 3. Todo occurrence 취소 기능 (다음 작업 — 회사에서 진행 예정)
+**컨셉**: NTD 포기와 유사 — Todo occurrence를 "취소"(won't do)로 마킹. 삭제와 다름 (Item은 유지, 반복은 계속).
+**옵션 B 선택**: 기존 `RoutineCompletion.failed`를 Todo에서도 재사용 — Core Data 스키마 변경 없음. UX에서는 NTD="포기" / Todo="취소"로 라벨링 구분.
+
+**구현 항목**:
+1. **UI 트리거** — ItemRow에 취소 entry point. 후보:
+   - 우측 swipe action (목록탭 패턴 친숙)
+   - 또는 long press → context menu
+   - 또는 NTDRow처럼 (x) 버튼을 in-progress occurrence에 노출
+2. **사유 입력 시트** — `TodoCancelSheet`(가칭). NTDGiveUpSheet 구조 재활용 — preset chip 4종 + 직접 입력. preset reason은 Todo 컨텍스트로 (예: 변경됨/취소됨/우선순위변경/기타).
+3. **데이터 저장** — `RoutineCompletion(failed: true, comment: 사유)` 생성. 1회성 Todo는 추가로 `Item.status=.failed` + `completedAt=now`. 반복은 Item.status 유지 (rule 계속).
+4. **표시 차별화** —
+   - ItemRow에서 failed Todo: leadingControl 회색 fill checkmark.fill 또는 strikethrough.
+   - 라벨: "%@ 취소" — 새 localized key `todo.label.cancelled_at_format`.
+   - NTD `ntd.label.failed_at_format` ("%@ 포기")와 별개 키 (의미 구분).
+5. **활동 기록 표시** — AddItemView 활동 기록 section에서 Todo failed RC는 "취소", NTD failed RC는 "포기"로 분기 라벨. `activity.status.cancelled` 키 추가.
+6. **ItemEvent.log** — Todo 취소 시 `.failed` action 그대로 사용 (action enum은 의미 중복 OK), itemTitle snapshot으로 컨텍스트 유지.
+7. **자동 처리** —
+   - completeFinishedNTDs는 그대로 유지 (NTD 전용 path).
+   - Todo는 자동 취소 없음 — 사용자 명시 액션만.
+
+**고려할 점**:
+- "취소"와 "완료"의 시각 구분 (이미 done은 blue fill checkmark.fill, cancelled는 다른 색 필요).
+- 1회성 Todo 취소 후 되돌리기 가능해야 할지 (현재 NTD 포기는 되돌리기 없음 — 일관성 유지면 Todo도 없음).
+- failed RC가 routineHistoryRecords에 나타날 때 라벨이 Todo면 "취소", NTD면 "포기" — `activityRow` 분기 필요.
+
+### 4. 알림 후속 개선
 - 알림 탭 → 항목 편집 화면 deep link
 - 권한 거부 후 Settings 재안내 경로
 - pending 한계(64) 초과 시 graceful 처리
 
-### 4. 카테고리·태그 관리 UI
+### 5. 카테고리·태그 관리 UI
 - Category 입력/편집 화면
 - 목록·보관함에 필터 추가
 
-### 5. 3단계 계층 구조
+### 6. 3단계 계층 구조
 - AddItemView에 parent 선택 UI
 - 표시(들여쓰기) — 깊이 제한 3단계 앱 로직
 
-### 6. iPad 최적화
+### 7. iPad 최적화
 - 합의: **앱 완성 후 일괄 작업**
 - NavigationSplitView, 2-pane, Regular size class
 

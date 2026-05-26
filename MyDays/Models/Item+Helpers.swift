@@ -186,8 +186,9 @@ extension Item {
     /// - 단일 시각 미설정 (s==자정, d==다음날 자정): 0~24시 종일 진행 중
     /// - **단일 시각 있음 (s==d, 같은 instant)**: 시작 후 occurrence day 자정까지 진행 중 — todoSection의 단일 의미와 일관 ("시작 후 영속")
     /// - 기간/다일 occurrence: [start, due) 범위 안이면 진행 중
-    func isInProgress(viewDate: Date, now: Date) -> Bool {
-        guard let occStart = referenceOccurrenceStartDate(viewDate: viewDate) else { return false }
+    /// `occurrenceStartOverride` — multi-occurrence 그룹 내 특정 occurrence를 명시할 때 사용. nil이면 viewDate로 자동 계산.
+    func isInProgress(viewDate: Date, now: Date, occurrenceStartOverride: Date? = nil) -> Bool {
+        guard let occStart = occurrenceStartOverride ?? referenceOccurrenceStartDate(viewDate: viewDate) else { return false }
         let span = recurrenceRule != nil ? spanDays : 0
         let occDueDay: Date = (recurrenceRule != nil)
             ? (Calendar.gmt.date(byAdding: .day, value: span, to: occStart) ?? occStart)

@@ -106,9 +106,9 @@ struct ItemRow: View {
         }
     }
 
-    /// 진행 중 판정 — Item.isInProgress 위임.
+    /// 진행 중 판정 — Item.isInProgress 위임. occurrenceStartOverride 있으면 해당 occurrence 기준.
     private var isInProgress: Bool {
-        item.isInProgress(viewDate: referenceDate, now: Date())
+        item.isInProgress(viewDate: referenceDate, now: Date(), occurrenceStartOverride: occurrenceStartOverride)
     }
 
     /// 반복 Todo 아이콘 (목록탭 등 routineCheckable=false). NTD 4-state와 같은 의미.
@@ -259,7 +259,9 @@ struct ItemRow: View {
     /// startDate 없음(Someday) → false.
     private func isFutureSchedule(now: Date) -> Bool {
         if isRoutine {
-            guard let occStart = item.referenceOccurrenceStartDate(viewDate: referenceDate),
+            // override 있으면 그 occurrence 기준 — multi-occurrence 그룹 내 각 row가 자신의 시작 instant로 판정.
+            let occStartOpt = occurrenceStartOverride ?? item.referenceOccurrenceStartDate(viewDate: referenceDate)
+            guard let occStart = occStartOpt,
                   let inst = Item.localInstant(fromCalendarDate: occStart, hour: item.startHourInt)
             else { return false }
             return now < inst
