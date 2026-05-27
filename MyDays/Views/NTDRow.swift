@@ -20,10 +20,12 @@ struct NTDRow: View {
 
     @ObservedObject var item: Item
     let occurrenceDate: Date  // UTC anchor
-    /// compact 표시 — 그룹 내 마지막이 아닌 row용. notes/statusIcons/(x) 버튼 숨김.
+    /// compact 표시 — 그룹 내 마지막이 아닌 row용. notes/statusIcons 숨김.
+    /// (x) 버튼은 compactMode 무관 cancelMode 기준으로 표시.
     var compactMode: Bool = false
 
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.cancelMode) private var cancelMode
     @State private var showGiveUpSheet = false
 
     var body: some View {
@@ -65,8 +67,9 @@ struct NTDRow: View {
                     }
                 }
 
-                // 명시적 포기 버튼 — 진행 중/예정 + compact 아닐 때만.
-                if !compactMode && !completed && !failed {
+                // 포기 버튼 — 취소 모드 + 미완료 미포기일 때만 노출.
+                // 평시엔 숨김 (사용자 의도: 우발 액션 방지, 모드 진입 후 명시적 조작).
+                if cancelMode && !completed && !failed {
                     Button {
                         showGiveUpSheet = true
                     } label: {

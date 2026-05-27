@@ -269,6 +269,7 @@ extension Item {
     /// 1회성 Todo 섹션 분류 (TodayView / ItemRow 공유 helper).
     /// - **단일**: 시작 instant 전 → 시작, 이후 → 진행 중 (마감 섹션 안 감)
     /// - **기간**: 시작 전 → 시작, 종료일 → 마감, 중간 → 진행, 종료일 이후 → nil
+    ///   단 displayedDate가 오늘 + status==.pending이면 overdue로 .due 반환 (오늘 페이지에만 노출).
     func todoSection(on displayedDate: Date, now: Date) -> TodoTodaySection? {
         guard let startInst = effectiveStartInstant,
               let due = effectiveDueDate
@@ -284,6 +285,12 @@ extension Item {
         if now < startInst { return .start }
         if Calendar.gmt.isDate(displayedDay, inSameDayAs: dueDay) { return .due }
         if displayedDay < dueDay { return .inProgress }
+        // displayedDay > dueDay — overdue 미체크는 오늘 페이지에서만 노출.
+        let today = Calendar.gmt.startOfDay(for: .todayCalendarAnchor)
+        if Calendar.gmt.isDate(displayedDay, inSameDayAs: today),
+           itemStatus == .pending {
+            return .due
+        }
         return nil
     }
 
@@ -355,6 +362,35 @@ extension Item {
         return completions.first { c in
             guard let d = c.date else { return false }
             return Calendar.gmt.isDate(d, inSameDayAs: day)
+        }
+    }
+
+    /// 명시적 취소/포기 — NTD 포기(NTDRow.giveUp)와 Todo 취소가 공유하는 진입점.
+    /// per-occurrence 개념 → 1회성·반복 모두 `RoutineCompletion(failed=true, comment)` 기록.
+    /// 1회성은 추가로 `Item.status=.failed` + completedAt + 알림 취소.
+    /// 활동 로그는 `.failed`로 통일 (NTD/Todo 의미 구분은 view layer 라벨에서).
+    func cancel(occurrenceDate: Date, comment: String?, in context: NSManagedObjectContext) {
+        let now = Date()
+        let comp = RoutineCompletion(context: context)
+        comp.id = UUID()
+        comp.date = Calendar.gmt.startOfDay(for: occurrenceDate)
+        comp.done = false
+        comp.failed = true
+        comp.comment = comment
+        comp.completedAt = now
+        comp.item = self
+        updatedAt = now
+
+        if recurrenceRule == nil {
+            itemStatus = .failed
+            completedAt = now
+            cancelAllNotifications()
+        }
+        ItemEvent.log(.failed, on: self, in: context, note: comment)
+        do {
+            try context.save()
+        } catch {
+            assertionFailure("Item.cancel save failed: \(error)")
         }
     }
 
@@ -775,42 +811,57 @@ extension Item {
         }
     }
 
-    /// recurrenceEndDate가 지난 routine을 자동으로 done 처리.
+    /// 반복 routine의 status를 양방향으로 동기화.
     ///
-    /// Multi-day occurrence(spanDays>0) 고려:
-    ///   anchor 5/24, dueDate 5/27 (span=3), recurrenceEndDate 5/25인 routine은
-    ///   5/24 occurrence가 5/27까지 자연 종료되어야 함. recurrenceEndDate 단독 비교만으로 자동 완료하면
-    ///   5/26부터 status=done 되어 occurrence가 미리 사라짐.
-    ///   → 마지막 occurrence 종료일 = recurrenceEndDate + spanDays. today가 그보다 커야 자동 완료.
+    /// 정확한 조건: 마지막 occurrence start + spanDays < today → done.
+    /// = `rule.nextOccurrence(after: today - spanDays, endDate: recurrenceEndDate)` 가 nil이면 done.
+    ///   nextOccurrence(after:)는 referenceDate를 *포함* 검사하므로 pivot이 occurrence이면 그것을 반환 →
+    ///   그 occurrence가 today에 종료되거나 그 이후까지 진행 중 → not done.
+    ///   recurrenceEndDate=nil이면 무한 반복 → nextOccurrence가 항상 미래 occurrence 반환 → not done.
     ///
-    /// 1단계 fetch는 over-broad(`recurrenceEndDate < today`), 2단계 Swift filter로 span 보정.
-    /// NSPredicate에서 Date 산술 불가하므로 in-memory filter.
+    /// **양방향 처리** — status=0/1 routine 모두 검사 (recurrenceEndDate 유무 무관):
+    /// - .pending인데 새 알고리즘상 done이어야 → .done 처리 (cancelAllNotifications + log .completed)
+    /// - .done인데 새 알고리즘상 not done이어야 → .pending 복원 (syncNotifications + log .uncompleted)
+    /// 사용자가 recurrenceEndDate를 미래로 변경/제거하는 경우 저장 trigger로 자동 동기화.
+    /// routine은 명시적 .done UI가 없어 모두 자동 처리 — 의도와 자동의 구분 문제 없음.
     static func completeExpiredRoutines(in context: NSManagedObjectContext, now: Date = Date()) {
         let today = now.calendarDateAnchor
         let request: NSFetchRequest<Item> = Item.fetchRequest()
         request.predicate = NSPredicate(
-            format: "recurrenceRule != nil AND status == 0 AND recurrenceEndDate != nil AND recurrenceEndDate < %@",
-            today as NSDate
+            format: "recurrenceRule != nil AND (status == 0 OR status == 1)"
         )
         do {
             let candidates = try context.fetch(request)
-            let expired = candidates.filter { item in
-                guard let end = item.recurrenceEndDate else { return false }
-                // span=0인 경우(단일 day 또는 NTD)는 recurrenceEndDate < today만으로 충분.
-                // span>0이면 마지막 occurrence가 진행 중일 수 있으니 (end + span) < today 확인.
-                guard let lastDay = Calendar.gmt.date(byAdding: .day, value: item.spanDays, to: end)
-                else { return false }
-                return today > lastDay
+            for item in candidates {
+                guard let rule = item.recurrenceRule,
+                      let startAnchor = item.startDate
+                else { continue }
+                guard let pivot = Calendar.gmt.date(byAdding: .day, value: -item.spanDays, to: today)
+                else { continue }
+                let nextStart = rule.nextOccurrence(
+                    after: pivot,
+                    startDate: startAnchor,
+                    endDate: item.recurrenceEndDate
+                )
+                let shouldBeDone = (nextStart == nil)
+                let currentlyDone = (item.itemStatus == .done)
+                if shouldBeDone && !currentlyDone {
+                    item.itemStatus = .done
+                    item.completedAt = now
+                    item.updatedAt = now
+                    item.cancelAllNotifications()
+                    ItemEvent.log(.completed, on: item, in: context)
+                } else if !shouldBeDone && currentlyDone {
+                    item.itemStatus = .pending
+                    item.completedAt = nil
+                    item.updatedAt = now
+                    item.syncNotifications()
+                    ItemEvent.log(.uncompleted, on: item, in: context)
+                }
             }
-            guard !expired.isEmpty else { return }
-            for item in expired {
-                item.itemStatus = .done
-                item.completedAt = now
-                item.updatedAt = now
-                item.cancelAllNotifications()
-                ItemEvent.log(.completed, on: item, in: context)
+            if context.hasChanges {
+                try context.save()
             }
-            try context.save()
         } catch {
             assertionFailure("completeExpiredRoutines failed: \(error)")
         }

@@ -73,8 +73,9 @@ struct NTDEntry: TimelineEntry {
 
 struct NTDProvider: TimelineProvider {
 
-    /// Small은 2개 표시. Medium은 좌측 2개 + 우측 3개 = 총 5개까지. Provider는 5까지 fetch.
-    private static let maxSnapshotCount = 5
+    /// 최대 10개까지 fetch. View가 family·항목 종류별 높이에 따라 들어가는 만큼만 렌더.
+    /// NTD/할일 box 높이가 달라 family당 고정 개수가 아닌 budget 기반 fit으로 처리.
+    private static let maxSnapshotCount = 10
 
     func placeholder(in context: Context) -> NTDEntry {
         // iOS가 placeholder mode (loading)에서도 우리 layout이 보이도록 real data로 채움.
@@ -309,7 +310,8 @@ struct NTDProvider: TimelineProvider {
     static let fineGrainedThreshold: TimeInterval = 300  // 5분
 }
 
-private extension ItemSnapshot {
+// internal — lock screen widget(MyDaysNTDLockWidget) 등 같은 target의 다른 파일에서 정렬 helper 재사용.
+extension ItemSnapshot {
     /// 1순위: kind 그룹 — NTD(0) → Todo(1).
     var kindOrder: Int { kind == .notTodo ? 0 : 1 }
 
@@ -351,12 +353,64 @@ struct MyDaysWidgetEntryView: View {
         Group {
             switch family {
             case .systemMedium:
-                mediumLayout(snapshots: Array(entry.snapshots.prefix(5)))
+                mediumLayout(snapshots: entry.snapshots)
             default:
                 smallLayout(snapshots: entry.snapshots)
             }
         }
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    // MARK: 항목 fit 계산 — 항목 종류별 높이가 다르므로 budget(pt) 안에 들어가는 prefix만 렌더.
+    // ViewThatFits는 variant마다 SwiftUI layout pass가 돌아 부담 크고, 위젯 process 메모리 한계에
+    // 민감하므로 deterministic 높이 추정으로 처리.
+    //
+    // 추정 근거:
+    //   - widget content 영역(containerBackground 내부)은 iPhone small/medium에서 ~142pt
+    //   - dateLine(font 34) + summaryLine(caption) + 내부 spacing 합산 ≈ 64pt → headerHeight
+    //   - itemBox 내부: VStack spacing 2 + vertical padding 6 + caption 라인.
+    //     Todo는 1줄 (caption ~16pt) → 22pt. NTD는 2줄 (caption + caption2) → 36pt.
+    //   - VStack(spacing: 6)에서 항목 간 6pt.
+
+    private static let widgetContentHeight: CGFloat = 142
+    private static let headerHeight: CGFloat = 64
+    private static let itemSpacing: CGFloat = 6
+    private static let todoItemHeight: CGFloat = 22
+    private static let ntdItemHeight: CGFloat = 36
+
+    private static func itemHeight(_ snap: ItemSnapshot) -> CGFloat {
+        snap.kind == .notTodo ? ntdItemHeight : todoItemHeight
+    }
+
+    /// items 시작점부터 누적 높이가 budget 이하인 prefix 개수 반환.
+    private static func fitCount(in budget: CGFloat, items: ArraySlice<ItemSnapshot>) -> Int {
+        var used: CGFloat = 0
+        var count = 0
+        for snap in items {
+            let h = itemHeight(snap)
+            let need = count == 0 ? h : (used + itemSpacing + h)
+            if need > budget { break }
+            used = need
+            count += 1
+        }
+        return count
+    }
+
+    /// Medium: 왼쪽(header 포함) 먼저 채우고 남은 항목은 오른쪽으로. 우측 budget 초과분은 잘림.
+    private static func splitForMedium(snapshots: [ItemSnapshot]) -> (left: [ItemSnapshot], right: [ItemSnapshot]) {
+        let leftBudget = widgetContentHeight - headerHeight
+        let leftCount = fitCount(in: leftBudget, items: snapshots[...])
+        let rightStart = leftCount
+        let rightCount = fitCount(in: widgetContentHeight, items: snapshots[rightStart...])
+        return (
+            left: Array(snapshots[0..<leftCount]),
+            right: Array(snapshots[rightStart..<(rightStart + rightCount)])
+        )
+    }
+
+    /// Small: header 아래에 들어가는 항목 수.
+    private static func smallFitCount(snapshots: [ItemSnapshot]) -> Int {
+        fitCount(in: widgetContentHeight - headerHeight, items: snapshots[...])
     }
 
     /// 캘린더 풍 header: 큰 날짜 숫자 + 요일.
@@ -421,17 +475,20 @@ struct MyDaysWidgetEntryView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Spacer(minLength: 0)
-                stateLabel(for: snap)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                countdownText(for: snap)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
+            // 시간 표시는 NTD만 (할일은 아이콘 + 제목으로 충분).
+            if snap.kind == .notTodo {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Spacer(minLength: 0)
+                    stateLabel(for: snap)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    countdownText(for: snap)
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                }
+                .lineLimit(1)
             }
-            .lineLimit(1)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
@@ -442,13 +499,14 @@ struct MyDaysWidgetEntryView: View {
         )
     }
 
-    // MARK: Small — 캘린더 header + 최대 2개 항목 캡슐
+    // MARK: Small — 캘린더 header + budget 안에 들어가는 만큼 항목 캡슐 (Todo·NTD 혼합 가능)
 
     private func smallLayout(snapshots: [ItemSnapshot]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let count = Self.smallFitCount(snapshots: snapshots)
+        return VStack(alignment: .leading, spacing: Self.itemSpacing) {
             dateLine
             summaryLine
-            ForEach(Array(snapshots.prefix(2).enumerated()), id: \.offset) { _, snap in
+            ForEach(Array(snapshots.prefix(count).enumerated()), id: \.offset) { _, snap in
                 itemBox(snap: snap)
             }
             Spacer(minLength: 0)
@@ -456,20 +514,21 @@ struct MyDaysWidgetEntryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: Medium — 좌우 분할: 좌측 header + 2개, 우측 추가 2개 (동일 캡슐 디자인)
+    // MARK: Medium — 좌측(header 포함) 먼저 채우고 남은 항목은 우측. budget 초과분은 잘림.
 
     private func mediumLayout(snapshots: [ItemSnapshot]) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            leftHalf(snapshots: Array(snapshots.prefix(2)))
+        let split = Self.splitForMedium(snapshots: snapshots)
+        return HStack(alignment: .top, spacing: 12) {
+            leftHalf(snapshots: split.left)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-            rightHalf(snapshots: Array(snapshots.dropFirst(2).prefix(3)))
+            rightHalf(snapshots: split.right)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func leftHalf(snapshots: [ItemSnapshot]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Self.itemSpacing) {
             dateLine
             summaryLine
             ForEach(Array(snapshots.enumerated()), id: \.offset) { _, snap in
@@ -480,7 +539,7 @@ struct MyDaysWidgetEntryView: View {
     }
 
     private func rightHalf(snapshots: [ItemSnapshot]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Self.itemSpacing) {
             ForEach(Array(snapshots.enumerated()), id: \.offset) { _, snap in
                 itemBox(snap: snap)
             }
@@ -592,11 +651,9 @@ struct MyDaysWidgetEntryView: View {
         }
     }
 
-    /// 종류별 아이콘 — NTD/Todo 1회성/Routine 시각 구분.
+    /// 종류별 아이콘 — NTD / 할일 2가지로만 구분. 반복/단일은 시각 통일.
     private func iconName(for snap: ItemSnapshot) -> String {
-        if snap.kind == .notTodo { return "stopwatch" }
-        if snap.isRoutine { return "arrow.triangle.2.circlepath" }
-        return "circle"
+        snap.kind == .notTodo ? "stopwatch" : "circle"
     }
 
     /// row 카운트다운 색 — state 무관 .primary 통일.

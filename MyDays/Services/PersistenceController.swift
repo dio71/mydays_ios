@@ -63,6 +63,34 @@ final class PersistenceController {
             ) { _ in
                 WidgetCenter.shared.reloadAllTimelines()
             }
+
+            // Firebase 마이그레이션 prep: 모든 entity 객체에 id 채워졌는지 검증.
+            // 모델에 id 추가되기 전 빌드의 잔존 row가 있을 수 있어 부팅 시 한 번 검사 → 로그만.
+            // 백필 없이 로그만 — 테스트 중 노출되는지 사용자가 직접 모니터링.
+            logEntitiesWithMissingID()
+        }
+    }
+
+    /// 모든 entity 중 `id` attribute가 있는 것들을 fetch해서 id == nil인 row를 entity별로 카운트 + 로그.
+    /// 변경/저장은 하지 않음 — 데이터 정합성 모니터링 목적 (Firebase 마이그레이션 시 nil id는 sync 불가).
+    private func logEntitiesWithMissingID() {
+        let context = viewContext
+        for entity in container.managedObjectModel.entities {
+            guard let name = entity.name,
+                  entity.attributesByName["id"] != nil else { continue }
+            let request = NSFetchRequest<NSManagedObject>(entityName: name)
+            request.predicate = NSPredicate(format: "id == nil")
+            do {
+                let rows = try context.fetch(request)
+                guard !rows.isEmpty else { continue }
+                let sample = rows.prefix(3).map { obj -> String in
+                    if let title = obj.value(forKey: "title") as? String { return "title=\(title)" }
+                    return obj.objectID.uriRepresentation().lastPathComponent
+                }.joined(separator: ", ")
+                print("⚠️ [MigrationPrep] \(name): \(rows.count) row(s) with nil id — sample: \(sample)")
+            } catch {
+                print("⚠️ [MigrationPrep] \(name): fetch failed — \(error)")
+            }
         }
     }
 

@@ -84,7 +84,10 @@ extension RecurrenceRule {
     @discardableResult
     static func make(in context: NSManagedObjectContext) -> RecurrenceRule {
         let rule = RecurrenceRule(context: context)
+        let now = Date()
         rule.id = UUID()
+        rule.createdAt = now
+        rule.updatedAt = now
         rule.itemFrequency = .daily
         rule.interval = 1
         return rule

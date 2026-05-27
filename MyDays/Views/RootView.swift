@@ -20,7 +20,8 @@ struct RootView: View {
                 .tabItem { Label("tab.settings", systemImage: "gearshape") }
         }
         .task {
-            Item.completeExpiredRoutines(in: context)
+            // routine 자동 status 동기화는 사용자 trigger(ListView.task / AddItemView.save) 시점에만 수행 —
+            // launch 시 호출 제거. NTD 자동 완료는 알림/위젯 정확성 위해 유지.
             Item.completeFinishedNTDs(in: context)
             // CloudKit 충돌 등으로 같은 anchor에 reminder 중복이 쌓여 동일 알림이 N개 fire되는 문제 정리.
             // 변경이 있을 때만 save + 알림 재동기화 (no-op이 일반).
@@ -33,7 +34,6 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                Item.completeExpiredRoutines(in: context)
                 Item.completeFinishedNTDs(in: context)
                 // 백그라운드 동안 fire된 알림이 빠진 슬롯을 다시 채움.
                 Item.refreshAllRoutineNotifications(in: context)

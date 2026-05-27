@@ -53,5 +53,6 @@ struct RecurrenceConfig: Equatable {
         rule.setSelectedDays(days)
         rule.includesLastDay = includesLastDay
         rule.setSelectedMonths(months)
+        rule.updatedAt = Date()
     }
 }

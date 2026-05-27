@@ -1568,12 +1568,16 @@ struct AddItemView: View {
             context.delete(reminder)
         }
         // upsert.
+        let now = Date()
         for (anchor, offset) in targets {
             if let r = byAnchor[anchor] {
                 r.offsetMin = Int32(offset)
+                r.updatedAt = now
             } else {
                 let r = Reminder(context: context)
                 r.id = UUID()
+                r.createdAt = now
+                r.updatedAt = now
                 r.anchor = anchor
                 r.offsetMin = Int32(offset)
                 r.item = item

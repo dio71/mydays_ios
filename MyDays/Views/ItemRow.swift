@@ -17,7 +17,9 @@ struct ItemRow: View {
     /// compact 표시 — 그룹 내 마지막이 아닌 row용. 아이콘 + 제목 + d-day만 노출 (notes/status icons 숨김).
     var compactMode: Bool = false
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.cancelMode) private var cancelMode
     @State private var showCompleteSheet = false
+    @State private var showCancelSheet = false
 
     /// 루틴 체크박스 동작 여부. 목록탭은 referenceDate 컨텍스트가 명확하지 않아 비활성.
     private var routineCheckable: Bool { mode != .list }
@@ -34,6 +36,11 @@ struct ItemRow: View {
         .sheet(isPresented: $showCompleteSheet) {
             TodoCompleteSheet { comment in
                 performComplete(comment: comment)
+            }
+        }
+        .sheet(isPresented: $showCancelSheet) {
+            CancelTodoSheet { comment in
+                performCancel(comment: comment)
             }
         }
     }
@@ -77,6 +84,20 @@ struct ItemRow: View {
                     statusIcons
                 }
             }
+
+            // 취소 모드 + 미완료/미취소 row에만 (x) 노출.
+            // NTD는 NTDRow가 자체 처리하므로 여기는 Todo(1회성/루틴) 한정.
+            if cancelMode && !isNTD && !isCompletedForDate && !isCancelled {
+                Button {
+                    showCancelSheet = true
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 1)
+            }
         }
         .contentShape(Rectangle())
     }
@@ -90,20 +111,30 @@ struct ItemRow: View {
         } else if isRoutine && !routineCheckable {
             routineStatusIcon
         } else {
-            // 체크박스 색상:
-            // - 완료: 파란 fill
-            // - 진행 중 (시작 instant 후 ~ 종료 instant 전): 파란 outline
-            // - 그 외 (시작 전 또는 종료 후): 회색 outline
-            let color: Color = isCompletedForDate
-                ? Color.accentColor
-                : (isInProgress ? Color.accentColor : Color.secondary)
-            Button(action: toggleDone) {
-                Image(systemName: isCompletedForDate ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(color)
-            }
-            .buttonStyle(.plain)
+            todoCheckbox
         }
+    }
+
+    /// Todo/routine 일반 체크박스 아이콘:
+    /// - 완료: checkmark.circle.fill + accent
+    /// - 취소(.failed / RC failed=true): slash.circle (outline) + secondary
+    /// - 진행 중: circle + accent (파란 outline)
+    /// - 그 외 pending: circle + secondary (회색 outline)
+    private var todoCheckbox: some View {
+        let style = todoCheckboxStyle()
+        return Button(action: toggleDone) {
+            Image(systemName: style.icon)
+                .font(.title3)
+                .foregroundStyle(style.color)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func todoCheckboxStyle() -> (icon: String, color: Color) {
+        if isCompletedForDate { return ("checkmark.circle.fill", .accentColor) }
+        if isCancelled { return ("nosign", .secondary) }
+        if isInProgress { return ("circle", .accentColor) }
+        return ("circle", .secondary)
     }
 
     /// 진행 중 판정 — Item.isInProgress 위임. occurrenceStartOverride 있으면 해당 occurrence 기준.
@@ -181,6 +212,15 @@ struct ItemRow: View {
         return item.itemStatus == .done
     }
 
+    /// 취소(포기) 상태 — Todo cancel + NTD 포기 공용.
+    /// 반복은 RoutineCompletion(failed=true), 1회성은 Item.status=.failed.
+    private var isCancelled: Bool {
+        if isRoutine {
+            return item.routineRecord(on: canonicalCompletionDay)?.failed ?? false
+        }
+        return item.itemStatus == .failed
+    }
+
     /// 체크 토글 — 단일/반복 통일 처리.
     /// 1) 모든 항목은 `RoutineCompletion` 레코드 생성/삭제 (per-occurrence 기록 = 활동 기록 소스)
     /// 2) 1회성은 추가로 `Item.status`를 cache로 유지 → ListView 완료 섹션 fetch에서 빠른 분류
@@ -218,6 +258,12 @@ struct ItemRow: View {
             return
         }
         performComplete(comment: nil)
+    }
+
+    /// 취소 시트 확정 시 호출 — Item.cancel로 위임 (RC failed + .failed status + ItemEvent.log).
+    private func performCancel(comment: String?) {
+        let day = canonicalCompletionDay
+        item.cancel(occurrenceDate: day, comment: comment, in: context)
     }
 
     /// 시트 확정 또는 즉시 완료의 공통 경로.
@@ -473,6 +519,20 @@ struct ItemRow: View {
     /// Todo 라벨 entry — 적용 occurrence start/due 계산 후 scheduleLabel로 위임.
     /// occurrenceStartOverride가 있으면 그것 우선, 없으면 referenceDate로 자동 계산.
     private func todoUnifiedLabel(now: Date) -> String? {
+        // list mode + 1회성 + 완료/취소: completedAt 시각 표시 (NTD와 동일 패턴).
+        // 보관함·목록의 완료 섹션에서 "%@ 완료" / "%@ 취소" 형태로 라벨링.
+        // today mode에서는 일정 정보 기반 라벨 유지(원칙 1).
+        // 반복은 occurrence가 계속되므로 적용 안 함 (status는 pending 유지).
+        if mode == .list, !isRoutine,
+           (item.itemStatus == .done || item.itemStatus == .failed),
+           let inst = item.completedAt {
+            let occDate = item.startDate ?? inst.calendarDateAnchor
+            let key = (item.itemStatus == .failed) ? "todo.label.cancelled_at_format" : "todo.label.done_at_format"
+            return String.localizedStringWithFormat(
+                NSLocalizedString(key, comment: ""),
+                NTDRow.completionTimeText(instant: inst, occurrenceDate: occDate)
+            )
+        }
         guard let occStart = occurrenceStartOverride ?? item.referenceOccurrenceStartDate(viewDate: referenceDate) else {
             return nil
         }
@@ -552,6 +612,13 @@ struct ItemRow: View {
         //     · view=today + 종료일=today → "오늘 종료"
         //     · 그 외 → "M월 d일 종료" (절대 종료일자, D-N 아님)
         if isTodayMode {
+            // 오늘 페이지인데 dueDay가 과거 — overdue. 단일/기간 무관 D+N 빨강 라벨로 통일.
+            // (`isSameDay` 분기보다 먼저 — 단일 어제 일정도 라벨 노출되도록.)
+            // 색상은 ItemRow의 dueDayLabel 색이 isOverdue 검사로 자동 red 적용.
+            if isViewToday && dueDay < realTodayDay {
+                let days = Calendar.gmt.dateComponents([.day], from: realTodayDay, to: dueDay).day ?? 0
+                return formatDDay(days)
+            }
             if isSameDay { return nil }
             if isViewToday && isDueToday {
                 return String(localized: "todo.list.ends_today")

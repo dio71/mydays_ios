@@ -32,20 +32,25 @@
     </entity>
     <entity name="Category" representedClassName="Category" syncable="YES" codeGenerationType="class">
         <attribute name="colorHex" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="iconName" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="name" optional="YES" attributeType="String" defaultValueString=""/>
         <attribute name="sortOrder" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Item" inverseName="category" inverseEntity="Item"/>
     </entity>
     <entity name="Tag" representedClassName="Tag" syncable="YES" codeGenerationType="class">
         <attribute name="colorHex" optional="YES" attributeType="String" defaultValueString="#8E8E93"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="name" optional="YES" attributeType="String" defaultValueString=""/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Item" inverseName="tags" inverseEntity="Item"/>
     </entity>
     <entity name="RecurrenceRule" representedClassName="RecurrenceRule" syncable="YES" codeGenerationType="class">
         <attribute name="countPerWeek" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="dayOfMonth" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="dayOfMonthMask" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="endDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
@@ -54,6 +59,7 @@
         <attribute name="interval" optional="YES" attributeType="Integer 16" defaultValueString="1" usesScalarValueType="YES"/>
         <attribute name="monthMask" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="startDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="weekdayMask" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <relationship name="item" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Item" inverseName="recurrenceRule" inverseEntity="Item"/>
     </entity>
@@ -68,10 +74,12 @@
     </entity>
     <entity name="Reminder" representedClassName="Reminder" syncable="YES" codeGenerationType="class">
         <attribute name="anchor" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="fireDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="offsetMin" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="repeats" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <relationship name="item" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Item" inverseName="reminders" inverseEntity="Item"/>
     </entity>
     <entity name="ItemEvent" representedClassName="ItemEvent" syncable="YES" codeGenerationType="class">

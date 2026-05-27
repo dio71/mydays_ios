@@ -81,7 +81,7 @@ struct ListView: View {
                 Button {
                     showCompleted.toggle()
                 } label: {
-                    Image(systemName: showCompleted ? "eye" : "eye.slash")
+                    Image(systemName: showCompleted ? "checklist" : "checklist.unchecked")
                 }
             }
         }

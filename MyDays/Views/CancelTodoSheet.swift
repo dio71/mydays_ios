@@ -1,18 +1,22 @@
 import SwiftUI
 
-// MARK: - Todo 미리 완료 사유 입력 시트
+// MARK: - Todo 취소 사유 입력 시트
 //
-// 시작 instant 전(미래 일정)인 Todo를 사용자가 체크할 때 사유 입력.
-// 구조는 NTDGiveUpSheet와 동일 — chip + 자유 입력, comment String? 반환.
+// 사용자가 Todo(또는 routine occurrence)를 명시적으로 취소할 때 사용.
+// NTDGiveUpSheet/TodoCompleteSheet와 동일 구조 — chip + 자유 입력, comment String? 반환.
 //
 // 저장 위치 (호출 측 onConfirm에서):
-//   - RoutineCompletion(done=true).comment = 사유 (NTD 포기와 동일 컬럼)
-//   - ItemEvent.log(.completed, note: 사유)
+//   - RoutineCompletion(failed=true).comment = 사유 (NTD 포기와 동일 컬럼)
+//   - 1회성 Todo: Item.status = .failed + completedAt + cancelAllNotifications
+//   - ItemEvent.log(.failed, note: 사유)
 //
-// preset chip은 NTD 포기와 시각적 일관성을 유지하면서 라벨만 완료 맥락으로 교체.
-// 확인 버튼은 완료(중립 액션)이므로 NTD 포기의 destructive 스타일을 쓰지 않음.
+// NTD 포기는 "의지 실패", Todo 취소는 "의도 변경" — 데이터적으로는 같은 .failed, UI 라벨만 분기.
+// 확인 버튼은 destructive (사용자가 일정을 끝내는 액션).
 
-struct TodoCompleteSheet: View {
+struct CancelTodoSheet: View {
+
+    /// 시트 상단 설명 문구 — 호출 측에서 occurrence 상태 등에 따라 생성. nil이면 description 숨김.
+    var descriptionText: String? = nil
 
     /// 확정 시 호출. comment 값(nil 또는 사용자 입력/선택).
     let onConfirm: (String?) -> Void
@@ -22,16 +26,16 @@ struct TodoCompleteSheet: View {
     @State private var customText: String = ""
 
     private static let presetReasonKeys: [String] = [
-        "todo.complete_sheet.reason.early",
-        "todo.complete_sheet.reason.cancelled",
-        "todo.complete_sheet.reason.plan_change",
-        "todo.complete_sheet.reason.just_done"
+        "todo.cancel_sheet.reason.time_lack",
+        "todo.cancel_sheet.reason.cancelled",
+        "todo.cancel_sheet.reason.plan_change",
+        "todo.cancel_sheet.reason.skipped"
     ]
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("todo.complete_sheet.section.preset") {
+                Section("todo.cancel_sheet.section.preset") {
                     // 가변 폭 chip group — 가로 스크롤 대신 wrap.
                     FlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
                         ForEach(Self.presetReasonKeys, id: \.self) { key in
@@ -40,9 +44,9 @@ struct TodoCompleteSheet: View {
                     }
                     .padding(.vertical, 2)
                 }
-                Section("todo.complete_sheet.section.custom") {
+                Section("todo.cancel_sheet.section.custom") {
                     TextField(
-                        "todo.complete_sheet.input_placeholder",
+                        "todo.cancel_sheet.input_placeholder",
                         text: $customText,
                         axis: .vertical
                     )
@@ -50,17 +54,24 @@ struct TodoCompleteSheet: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                Text("todo.complete_sheet.description")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-                    .background(Color(.systemGroupedBackground))
+                // descriptionText 명시되면 그대로, 아니면 default 안내 문구.
+                Group {
+                    if let desc = descriptionText, !desc.isEmpty {
+                        Text(verbatim: desc)
+                    } else {
+                        Text("todo.cancel_sheet.description")
+                    }
+                }
+                .font(.title3)
+                .fontWeight(.semibold)
+                .multilineTextAlignment(.center)
+                .lineSpacing(6)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .background(Color(.systemGroupedBackground))
             }
-            .navigationTitle("todo.complete_sheet.title")
+            .navigationTitle("todo.cancel_sheet.title")
             .navigationBarTitleDisplayMode(.inline)
             .presentationDetents([.medium, .large])
             .presentationBackground(Color(.systemGroupedBackground))
@@ -69,7 +80,7 @@ struct TodoCompleteSheet: View {
                     Button("common.close") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("common.done") {
+                    Button("todo.cancel.confirm", role: .destructive) {
                         onConfirm(resolvedComment)
                         dismiss()
                     }
@@ -113,8 +124,8 @@ struct TodoCompleteSheet: View {
 #Preview {
     Text("Preview host")
         .sheet(isPresented: .constant(true)) {
-            TodoCompleteSheet { comment in
-                print("confirmed: \(comment ?? "nil")")
+            CancelTodoSheet { comment in
+                print("cancelled: \(comment ?? "nil")")
             }
         }
 }

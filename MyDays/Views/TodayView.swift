@@ -1,6 +1,23 @@
 import CoreData
 import SwiftUI
 
+// MARK: - Cancel Mode Environment
+//
+// 취소 모드 플래그를 ItemRow/NTDRow까지 prop drilling 없이 전파.
+// TodayView가 inject, child rows가 @Environment(\.cancelMode)로 read.
+// 다른 view(ListView 등)는 default false 그대로라 영향 없음.
+
+private struct CancelModeKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    var cancelMode: Bool {
+        get { self[CancelModeKey.self] }
+        set { self[CancelModeKey.self] = newValue }
+    }
+}
+
 struct TodayView: View {
 
     // displayedDate는 calendar date 의미 → UTC anchor Date로 관리.
@@ -11,6 +28,13 @@ struct TodayView: View {
     @State private var sheet: ItemSheetMode?
     // 일자 이동 방향 — slide 애니메이션 방향 제어. forward(미래) → 새 view가 우측에서 진입.
     @State private var lastNavigationForward: Bool = true
+    // 취소 모드 — 메뉴에서 진입, 모든 미완료 row에 (x) 버튼 노출.
+    @State private var cancelMode: Bool = false
+    // 상단 영역 모드 — Day (WeekStrip) / Month (MonthGrid). TodayList 본문은 두 모드 공통.
+    @State private var viewMode: TodayViewMode = .day
+    // 특정일 이동 시트.
+    @State private var showDatePicker: Bool = false
+    @State private var datePickerSelection: Date = Date()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -34,6 +58,8 @@ struct TodayView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { value in
+                    // 취소 모드에서는 일자 이동 차단 — 사용자가 취소 액션에만 집중하도록.
+                    guard !cancelMode else { return }
                     let h = value.translation.width
                     let v = value.translation.height
                     guard abs(h) > abs(v) * 2, abs(h) > 60 else { return }
@@ -41,57 +67,140 @@ struct TodayView: View {
                     shiftDay(h > 0 ? -1 : 1)
                 }
         )
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { shiftDay(-1) } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Text(navigationTitle)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { shiftDay(1) } label: {
-                    Image(systemName: "chevron.right")
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+        // 상단 영역 — Day 모드는 7-cell week strip, Month 모드는 7×6 month grid.
+        // 두 모드 모두 일자 cell 탭 + 가로 swipe 지원. 본문의 일 단위 swipe와 영역 분리.
+        // 취소 모드에서는 일자 이동 차단 (본문 swipe와 동일 정책).
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Group {
+                switch viewMode {
+                case .day:
+                    WeekStripView(
+                        selectedDate: displayedDate,
+                        forward: lastNavigationForward,
+                        onSelectDate: { date in
+                            guard !cancelMode else { return }
+                            guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
+                            navigateTo(date, forward: date > displayedDate)
+                        },
+                        onShiftWeek: { days in
+                            guard !cancelMode else { return }
+                            shiftDay(days)
+                        }
+                    )
+                case .month:
+                    MonthGridView(
+                        selectedDate: displayedDate,
+                        forward: lastNavigationForward,
+                        onSelectDate: { date in
+                            guard !cancelMode else { return }
+                            guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
+                            navigateTo(date, forward: date > displayedDate)
+                        },
+                        onShiftMonth: { delta in
+                            guard !cancelMode else { return }
+                            shiftMonth(delta)
+                        }
+                    )
                 }
             }
         }
-        // 하단 leading: "오늘" 버튼 항상 노출. 색상으로 상태 표시:
-        //   - 오늘: accent fill + 흰 글자 (현재 위치 indicator)
-        //   - 다른 날: gray fill + secondary 글자 (탭하면 jump)
-        .overlay(alignment: .bottomLeading) {
-            let isToday = daysFromToday == 0
-            Button(action: jumpToToday) {
-                Text("nav.jump_home")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isToday ? .white : Color.secondary)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
-                    .background(Capsule().fill(isToday ? Color.accentColor : Color(.systemGray4)))
-                    .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+        .navigationTitle(navigationTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .environment(\.cancelMode, cancelMode)
+        .toolbar {
+            if cancelMode {
+                // 취소 모드 — 우측에 체크 아이콘 버튼 (iOS 편집 모드 표준 위치).
+                // iOS 26 prominent style이 자동 contrast(흰색) 처리 안 하는 환경 회피 — Image 자체에 .white 강제.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        cancelMode = false
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.accentColor)
+                    .accessibilityLabel("common.done")
+                }
+            } else {
+                // 평시 — 우측 달력 + 더보기 메뉴.
+                // ToolbarItemGroup으로 묶어 같은 capsule 안에 두 버튼.
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        viewMode = (viewMode == .day) ? .month : .day
+                    } label: {
+                        Image(systemName: viewMode == .day ? "calendar" : "list.bullet")
+                    }
+                    Menu {
+                        Button {
+                            datePickerSelection = displayedDate.localCalendarSameDay
+                            showDatePicker = true
+                        } label: {
+                            Label("today.menu.jump_date", systemImage: "calendar.badge.clock")
+                        }
+                        Button {
+                            cancelMode = true
+                        } label: {
+                            Label("today.menu.cancel_mode", systemImage: "xmark.circle")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                }
             }
-            .padding(20)
+        }
+        // 하단 leading: [<] [오늘] [>] 네비게이션 그룹.
+        //   - "오늘" 버튼 색상으로 상태 표시 (오늘 = accent fill, 다른 날 = gray fill)
+        //   - 좌우 chevron은 일자 ±1 이동
+        //   - 취소 모드 중에는 숨김 — 사용자가 취소 액션에만 집중하도록 (iOS 편집 모드 표준 패턴)
+        .overlay(alignment: .bottomLeading) {
+            if !cancelMode {
+                let isToday = daysFromToday == 0
+                HStack(spacing: 8) {
+                    Button { shiftDay(-1) } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color(.systemGray4)))
+                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                    }
+                    Button(action: jumpToToday) {
+                        Text("nav.jump_home")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(isToday ? .white : Color.secondary)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 14)
+                            .background(Capsule().fill(isToday ? Color.accentColor : Color(.systemGray4)))
+                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                    }
+                    Button { shiftDay(1) } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color(.systemGray4)))
+                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                    }
+                }
+                .padding(20)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
-            Button {
-                sheet = .new(baseDate: displayedDate)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
-                    .background(Circle().fill(Color.accentColor))
-                    .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+            // 새 항목 추가 FAB — 취소 모드 중에는 숨김.
+            if !cancelMode {
+                Button {
+                    sheet = .new(baseDate: displayedDate)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Circle().fill(Color.accentColor))
+                        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                }
+                .padding(20)
             }
-            .padding(20)
         }
             .sheet(item: $sheet) { mode in
                 switch mode {
@@ -101,6 +210,38 @@ struct TodayView: View {
                     AddItemView(editing: item)
                 }
             }
+            // 특정일 이동 sheet — graphical DatePicker로 년/월/일 선택.
+            // 명시적 "이동" 버튼으로 confirm — DatePicker가 wheel scroll과 일자 탭 onChange를 구분 못해서
+            // 자동 닫힘 방식은 wheel 조작 시 의도 못 살림. 인접월 cell 탭도 자연 처리.
+            // selection은 local Date, displayedDate는 UTC anchor — 양방향 변환 필요.
+            .sheet(isPresented: $showDatePicker) {
+                NavigationStack {
+                    DatePicker(
+                        "today.menu.jump_date",
+                        selection: $datePickerSelection,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    .padding(.horizontal)
+                    .navigationTitle("today.menu.jump_date")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("common.close") { showDatePicker = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("today.menu.jump_date.confirm") {
+                                let target = datePickerSelection.calendarDateAnchor
+                                if !Calendar.gmt.isDate(target, inSameDayAs: displayedDate) {
+                                    navigateTo(target, forward: target > displayedDate)
+                                }
+                                showDatePicker = false
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
             // 자정 넘김 시 — Foreground 중이면 NSCalendarDayChanged fire,
             // 백그라운드에서 자정 통과 후 복귀하면 scenePhase==.active로 잡음.
             .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
@@ -108,6 +249,10 @@ struct TodayView: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active { handleDayChange() }
+            }
+            // 다른 탭으로 이동 시 취소 모드 자동 종료 — 사용자가 돌아왔을 때 clean state.
+            .onDisappear {
+                cancelMode = false
             }
     }
 
@@ -160,9 +305,17 @@ struct TodayView: View {
     }
 
     private var navigationTitle: String {
-        // 모든 케이스 동일 포맷: "M월 d일 (요일)" — 오늘/어제/내일도 절대 날짜로 표시.
-        // 상대 마커는 하단 (오늘) floating 버튼이 대체. UTC anchor → formatter도 UTC로.
+        // Day 모드: "M월 d일 (요일)" — 오늘/어제/내일도 절대 날짜로 표시.
+        // Month 모드: "yyyy년 M월" — 현재 표시 중인 월 명시.
+        // UTC anchor → formatter도 UTC로.
         let utc = TimeZone(identifier: "UTC") ?? .gmt
+        if viewMode == .month {
+            let f = DateFormatter()
+            f.locale = Locale.current
+            f.timeZone = utc
+            f.setLocalizedDateFormatFromTemplate("yMMMM")
+            return f.string(from: displayedDate)
+        }
         let weekdayFormatter = DateFormatter()
         weekdayFormatter.locale = Locale.current
         weekdayFormatter.timeZone = utc
@@ -177,16 +330,31 @@ struct TodayView: View {
 
         return "\(dateStr) (\(weekday))"
     }
+
+    /// Month 모드용 — displayedDate를 ±N개월 이동. 같은 day-of-month로 매핑 (월 일수 부족 시 systemClamping).
+    /// 본문 ZStack의 slide transition도 함께 발동.
+    private func shiftMonth(_ delta: Int) {
+        let cal = Calendar.current
+        let local = displayedDate.localCalendarSameDay
+        guard let nextLocal = cal.date(byAdding: .month, value: delta, to: local) else { return }
+        let next = nextLocal.calendarDateAnchor
+        navigateTo(next, forward: delta > 0)
+    }
 }
+
+/// TodayView 상단 영역 모드 — Day(week strip) / Month(month grid).
+enum TodayViewMode { case day, month }
 
 struct TodayList: View {
 
     let date: Date
     @Binding var sheet: ItemSheetMode?
+    /// 취소 모드 — 부모 TodayView가 environment로 inject. row tap 시 편집 sheet 차단.
+    @Environment(\.cancelMode) private var cancelMode
 
-    /// 루틴 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
-    /// 같은 date 내에서 체크 토글 시 즉시 reorder되지 않게 cache. 다음 navigation 시 재계산.
-    @State private var stableRoutineOrder: [String] = []
+    /// 할일(1회성+루틴) 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
+    /// 같은 date 내에서 체크/취소 토글 시 즉시 reorder되지 않게 cache. 다음 navigation 시 재계산.
+    @State private var stableActivityOrder: [String] = []
 
     /// 통합 fetch — displayedDay가 [startDate, dueDate] 구간 안에 있는 모든 active 1회성 Todo.
     /// 시작·진행·마감 섹션 분류는 view-side `classify(_:now:)`에서 시간 instant 기반으로 동적.
@@ -206,14 +374,27 @@ struct TodayList: View {
         // displayedDay가 [startDate, dueDate] 구간 안에 있는 1회성:
         //   (startDate == nil OR startDate < end) AND (dueDate == nil OR dueDate >= start)
         // status != 2 — pending(0) + done(1) + failed(3) 모두 포함. 완료 항목도 그날 화면에 잔류 표시.
+        //
+        // 오늘 페이지(date == .todayCalendarAnchor)에 한해 overdue 미체크(dueDate < start AND status==0) 추가.
+        // 다른 날짜 페이지는 기존 범위 그대로.
+        let todayAnchor = Date.todayCalendarAnchor
+        let isTodayPage = Calendar.gmt.isDate(date, inSameDayAs: todayAnchor)
+        let predicateFormat: String
+        let predicateArgs: [NSDate]
+        if isTodayPage {
+            predicateFormat = "status != 2 AND recurrenceRule == nil AND kind == 0 AND isSomeday == NO "
+                            + "AND (startDate == nil OR startDate < %@) "
+                            + "AND ((dueDate == nil OR dueDate >= %@) OR (dueDate < %@ AND status == 0))"
+            predicateArgs = [end as NSDate, start as NSDate, start as NSDate]
+        } else {
+            predicateFormat = "status != 2 AND recurrenceRule == nil AND kind == 0 AND isSomeday == NO "
+                            + "AND (startDate == nil OR startDate < %@) "
+                            + "AND (dueDate == nil OR dueDate >= %@)"
+            predicateArgs = [end as NSDate, start as NSDate]
+        }
         _allActiveTodos = FetchRequest(
             sortDescriptors: sort,
-            predicate: NSPredicate(
-                format: "status != 2 AND recurrenceRule == nil AND kind == 0 AND isSomeday == NO "
-                      + "AND (startDate == nil OR startDate < %@) "
-                      + "AND (dueDate == nil OR dueDate >= %@)",
-                end as NSDate, start as NSDate
-            ),
+            predicate: NSPredicate(format: predicateFormat, argumentArray: predicateArgs),
             animation: .default
         )
         _routineItems = FetchRequest(
@@ -281,18 +462,18 @@ struct TodayList: View {
         return result
     }
 
-    /// 루틴 섹션 표시 list — snapshot 적용.
-    /// stableRoutineOrder가 비어있으면 fresh sort (첫 render), 있으면 cached order로 재배치.
-    /// 새 occurrence는 cache에 없는 ID라 끝에 append됨.
-    private func displayRoutines() -> [OccurrenceRow] {
-        let current = routinesForDate
-        if stableRoutineOrder.isEmpty {
-            return sortedRoutines()
+    /// 할일(1회성+루틴) 표시 list — snapshot 적용.
+    /// stableActivityOrder가 비어있으면 fresh sort (첫 render), 있으면 cached order로 재배치.
+    /// 새 row는 cache에 없는 ID라 끝에 append됨.
+    private func displayActivities() -> [OccurrenceRow] {
+        let current = todoActivityRows()
+        if stableActivityOrder.isEmpty {
+            return sortedActivities()
         }
         let idMap = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
         var result: [OccurrenceRow] = []
         var seen: Set<String> = []
-        for id in stableRoutineOrder {
+        for id in stableActivityOrder {
             if let row = idMap[id] {
                 result.append(row)
                 seen.insert(id)
@@ -304,17 +485,40 @@ struct TodayList: View {
         return result
     }
 
-    /// 루틴 섹션 정렬 — 같은 Item occurrence 인접 유지 + 그룹 단위 pending/done 정렬.
-    /// 1) 같은 Item의 occurrence들은 항상 인접 (chronological 순서 — 그룹 마지막=가장 최근)
-    /// 2) Item 그룹 순서: 어떤 occurrence라도 pending인 그룹 먼저, 전부 done인 그룹은 섹션 끝으로
-    /// 단순 occurrence별 split하면 같은 Item이 pending/done bucket으로 쪼개져 인접 깨짐 → 그룹 단위 split.
-    private func sortedRoutines() -> [OccurrenceRow] {
-        let routinesRaw = routinesForDate
+    /// 1회성 Todo + 반복 Todo(루틴)를 OccurrenceRow 단일 list로 통합.
+    /// 1회성은 occurrence 1개 (startDate). 루틴은 occurrenceStartsCovering이 multi-occurrence.
+    private func todoActivityRows() -> [OccurrenceRow] {
+        let now = Date()
+        var result: [OccurrenceRow] = []
+        // 1회성 Todo: todoSection 매치되는 항목을 OccurrenceRow(occurrence = startDate)로 변환.
+        for item in allActiveTodos {
+            guard item.recurrenceRule == nil else { continue }
+            guard item.todoSection(on: date, now: now) != nil else { continue }
+            let occ = item.startDate ?? date
+            result.append(OccurrenceRow(item: item, occurrenceDate: occ))
+        }
+        // 루틴: 어제 작업의 occurrenceStartsCovering 그대로 수집.
+        result.append(contentsOf: routinesForDate)
+        return result
+    }
+
+    /// 할일 섹션 정렬:
+    ///   1) 같은 Item의 occurrence들은 항상 인접 (chronological)
+    ///   2) Item 그룹 단위: pending 그룹 먼저 → 전부 done인 그룹은 끝
+    ///   3) 같은 bucket 내: priority desc (high → none) → sortAnchor asc (시간 가까운 것 먼저)
+    /// 그룹 단위 split으로 같은 Item이 bucket 사이 쪼개지지 않음.
+    private func sortedActivities() -> [OccurrenceRow] {
+        let now = Date()
+        let raw = todoActivityRows()
         var byItem: [NSManagedObjectID: [OccurrenceRow]] = [:]
         var itemOrder: [NSManagedObjectID] = []
-        for row in routinesRaw {
+        for row in raw {
             if byItem[row.item.objectID] == nil { itemOrder.append(row.item.objectID) }
             byItem[row.item.objectID, default: []].append(row)
+        }
+        // 각 그룹 내 occurrence를 chronological 순으로.
+        for id in itemOrder {
+            byItem[id]?.sort { $0.occurrenceDate < $1.occurrenceDate }
         }
         var pendingGroups: [[OccurrenceRow]] = []
         var doneGroups: [[OccurrenceRow]] = []
@@ -323,7 +527,60 @@ struct TodayList: View {
             let hasAnyPending = group.contains { !$0.item.isCompletedForDate($0.occurrenceDate) }
             if hasAnyPending { pendingGroups.append(group) } else { doneGroups.append(group) }
         }
+        // 그룹 정렬 키 — pending 그룹은 첫 pending occurrence 기준, done 그룹은 첫 row 기준.
+        pendingGroups.sort { a, b in
+            let ra = Self.pendingRepresentative(of: a)
+            let rb = Self.pendingRepresentative(of: b)
+            let pa = Self.priorityOrder(ra.item.itemPriority)
+            let pb = Self.priorityOrder(rb.item.itemPriority)
+            if pa != pb { return pa < pb }
+            return Self.sortAnchor(for: ra, now: now) < Self.sortAnchor(for: rb, now: now)
+        }
+        doneGroups.sort { a, b in
+            let pa = Self.priorityOrder(a[0].item.itemPriority)
+            let pb = Self.priorityOrder(b[0].item.itemPriority)
+            if pa != pb { return pa < pb }
+            return Self.sortAnchor(for: a[0], now: now) < Self.sortAnchor(for: b[0], now: now)
+        }
         return (pendingGroups + doneGroups).flatMap { $0 }
+    }
+
+    /// 그룹의 대표 row — 첫 pending occurrence, 없으면 첫 row.
+    private static func pendingRepresentative(of group: [OccurrenceRow]) -> OccurrenceRow {
+        group.first { !$0.item.isCompletedForDate($0.occurrenceDate) } ?? group[0]
+    }
+
+    /// priority 정렬 키 — high(0) → medium(1) → low(2) → none(3).
+    private static func priorityOrder(_ p: Priority) -> Int {
+        switch p {
+        case .high:   return 0
+        case .medium: return 1
+        case .low:    return 2
+        case .none:   return 3
+        }
+    }
+
+    /// sort anchor — 위젯과 동일한 정책.
+    /// - 진행 중/지남: 종료 instant (없으면 시작+24h)
+    /// - 예정: 시작 instant
+    /// - 시간 없음: 시작+24h (시간 있는 항목 뒤로)
+    private static func sortAnchor(for row: OccurrenceRow, now: Date) -> TimeInterval {
+        let item = row.item
+        let occ = row.occurrenceDate
+        guard let start = Item.localInstant(fromCalendarDate: occ, hour: item.startHourInt) else { return 0 }
+        let span = item.spanDays
+        let endDay = Calendar.gmt.date(byAdding: .day, value: span, to: occ) ?? occ
+        let end = Item.localInstant(fromCalendarDate: endDay, hour: item.dueHourInt)
+        if !item.hasExplicitTime {
+            return start.addingTimeInterval(24 * 3600).timeIntervalSince1970
+        }
+        if now < start {
+            return start.timeIntervalSince1970
+        }
+        if let end = end, now >= end {
+            return end.timeIntervalSince1970
+        }
+        return (end ?? start).timeIntervalSince1970
     }
 
     /// Item 단위 그룹 — 같은 Item의 연속 occurrence를 한 group으로 묶음.
@@ -368,17 +625,9 @@ struct TodayList: View {
     }
 
     var body: some View {
-        // body 한 render 동안 동일 now 사용 — 분류 안정성 확보.
-        let now = Date()
-        let groups = grouped(now: now)
-        // 3-섹션 모델: NTD / 할일 / 루틴. 할일 섹션은 시작·진행 중·마감 모두 통합 노출.
-        // 순서: 미완료 항목(.start → .inProgress → .due) 먼저, 완료 항목은 섹션 끝으로.
-        let todoGroupRaw = (groups[.start] ?? []) + (groups[.inProgress] ?? []) + (groups[.due] ?? [])
-        let pendingTodos = todoGroupRaw.filter { $0.itemStatus == .pending }
-        let doneTodos = todoGroupRaw.filter { $0.itemStatus != .pending }
-        let todoGroup = pendingTodos + doneTodos
-        // 루틴 섹션: snapshot 적용 list (같은 date 내에서 체크 토글에 의한 reorder 회피).
-        let routinesSorted = displayRoutines()
+        // 2-섹션 모델: NTD / 할일(1회성+루틴 통합).
+        // 할일 섹션: pending 그룹 먼저 → done 그룹 끝, 같은 bucket 내 priority desc → 시간 가까운 순.
+        let activitiesSorted = displayActivities()
         List {
             Section("today.section.not_todo") {
                 if ntdsForDate.isEmpty {
@@ -390,6 +639,8 @@ struct TodayList: View {
                             ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
                                 let isLast = (idx == group.occurrences.count - 1)
                                 Button {
+                                    // 취소 모드에서는 편집 sheet 차단 — (x) 버튼 액션만 활성.
+                                    guard !cancelMode else { return }
                                     sheet = .edit(group.item)
                                 } label: {
                                     NTDRow(
@@ -406,24 +657,17 @@ struct TodayList: View {
             }
 
             Section("today.section.todo") {
-                if todoGroup.isEmpty {
+                if activitiesSorted.isEmpty {
                     emptyRow("today.empty.todo")
                 } else {
-                    ForEach(todoGroup, id: \.objectID) { rowButton(for: $0) }
-                }
-            }
-
-            Section("today.section.routine") {
-                if routinesSorted.isEmpty {
-                    emptyRow("today.empty.routine")
-                } else {
-                    ForEach(itemGroups(routinesSorted)) { group in
+                    ForEach(itemGroups(activitiesSorted)) { group in
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
                                 let isLast = (idx == group.occurrences.count - 1)
+                                // 1회성은 occurrence 1개 (group 첫 row=마지막=last). 루틴은 multi 가능.
                                 rowButton(
                                     for: group.item,
-                                    occurrenceStart: occ.occurrenceDate,
+                                    occurrenceStart: group.item.recurrenceRule != nil ? occ.occurrenceDate : nil,
                                     compact: !isLast
                                 )
                             }
@@ -435,11 +679,11 @@ struct TodayList: View {
         .listStyle(.insetGrouped)
         // 하단 (+) FAB(56pt + padding 20pt)에 마지막 row가 가리지 않도록 스크롤 여백 확보.
         .contentMargins(.bottom, 96, for: .scrollContent)
-        // 첫 render 후 루틴 정렬 snapshot 캡처 — 이후 체크 토글로 인한 reorder 회피.
+        // 첫 render 후 할일(1회성+루틴) 정렬 snapshot 캡처 — 이후 체크/취소 토글로 인한 reorder 회피.
         // date 변경 시 부모 .id(displayedDate)로 view 재생성 → @State 초기화 → 다시 캡처.
         .onAppear {
-            if stableRoutineOrder.isEmpty {
-                stableRoutineOrder = sortedRoutines().map { $0.id }
+            if stableActivityOrder.isEmpty {
+                stableActivityOrder = sortedActivities().map { $0.id }
             }
         }
     }
@@ -448,6 +692,8 @@ struct TodayList: View {
     /// compact=true면 ItemRow가 아이콘+제목+d-day만 노출 (그룹 마지막 외 row용).
     private func rowButton(for item: Item, occurrenceStart: Date? = nil, compact: Bool = false) -> some View {
         Button {
+            // 취소 모드에서는 편집 sheet 차단 — (x) 버튼 액션만 활성.
+            guard !cancelMode else { return }
             sheet = .edit(item)
         } label: {
             ItemRow(

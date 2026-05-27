@@ -46,10 +46,12 @@
 - 1회성 NTD도 포기 시 동일하게 사용 — 1회성↔반복 전환 시 기록 보존
 - Streak 계산 기반
 
-### Category / Tag / Reminder
-- Category: name, colorHex, iconName, sortOrder
-- Tag: name, colorHex(현재 단일 색)
-- Reminder: fireDate, offsetMin, anchor, repeats
+### Category / Tag / Reminder / RecurrenceRule
+- Category: id, name, colorHex, iconName, sortOrder, createdAt, updatedAt
+- Tag: id, name, colorHex(현재 단일 색), createdAt, updatedAt
+- Reminder: id, fireDate, offsetMin, anchor, repeats, createdAt, updatedAt
+- RecurrenceRule: id, frequency, interval, weekdayMask, dayOfMonthMask, monthMask, createdAt, updatedAt, (legacy attrs)
+- 모든 entity에 `id: UUID?` + `createdAt/updatedAt: Date?` — Firebase 마이그레이션 prep (last-writer-wins 충돌 해결, cross-platform ID stable). 자세한 정책은 "마이그레이션 prep" 섹션 참조.
 
 ### ItemEvent (활동 로그)
 - timestamp, action, itemTitle(snapshot), **note**(부가 정보 — 포기 사유 등), item(Nullify) — Item 삭제돼도 보존
@@ -433,106 +435,117 @@ MyDays/MyDays/
 - 12h/24h 표시 감지: `DateFormatter.dateFormat(fromTemplate: "j", ...)` 결과의 'a' 포함 여부
 - 일본어/중국어는 catalog에 번역만 추가하면 됨
 
+## Firebase 마이그레이션 prep (진행 중)
+
+3단계(Android 추가) 시점에 동기화를 CloudKit → Firebase로 전환할 때를 대비해 미리 준비한 항목들. 지금은 CloudKit으로 동작 중이지만 모든 변경은 Firebase 호환 모델을 유지한다.
+
+### 완료된 준비
+- **모든 entity에 `id: UUID?` 필드**: Core Data objectID는 local-only라 cross-platform sync에 못 씀. UUID가 stable cross-platform 식별자. 모든 entity의 `make()`/생성 지점에서 `id = UUID()` 설정 보장.
+- **모든 entity에 `createdAt`/`updatedAt`** (또는 의미상 동등 필드):
+  - `Item`: createdAt + updatedAt + completedAt
+  - `Category` / `Tag` / `RecurrenceRule` / `Reminder`: createdAt + updatedAt
+  - `RoutineCompletion`: completedAt (immutable record → createdAt 역할)
+  - `ItemEvent`: timestamp (immutable log)
+- **updatedAt bump 일관성**: Item 변경 지점(`toggleDone`, `cancel`, `AddItemView.save`, `completeFinishedNTDs`, `completeExpiredRoutines` 등)에서 모두 `updatedAt = now` 호출. RecurrenceRule.apply()도 자동 bump. Reminder upsert도 동일.
+- **nil id 모니터링**: 부팅 시 `PersistenceController.logEntitiesWithMissingID()`가 id == nil row를 entity별로 카운트해 콘솔에 로그 출력. 백필은 안 함 — 출시 전 까지 사용자가 직접 모니터링.
+
+### 남은 준비 (Firebase 도입 시점에)
+- **Soft delete (tombstone)**: 현재 hard delete. Cross-device 환경에서 한쪽 오프라인 시 삭제 전파 안 되는 문제. `deletedAt: Date?` 추가 + 모든 fetch predicate에 `deletedAt == nil` 필터 — 영향 범위 큼, 도입 직전에 처리.
+- **사용자 scope**: Firestore path `/users/{uid}/items/...`로 사용자 격리. 데이터에는 uid 불필요.
+- **clock skew**: Firestore `serverTimestamp()` 또는 가벼운 서버 동기화로 처리. sync 레이어 작성 시.
+- **Auth 화면**: Apple Sign In / Google Sign In. 첫 진입 화면 추가.
+- **충돌 해결**: updatedAt 기반 last-writer-wins 또는 Firestore transaction. sync 엔진 작성 시.
+
+### 마이그레이션 작업 추정 (3단계 시점)
+- Auth + Firestore CRUD wrapper: 3~4일
+- 동기화 엔진 (offline queue, conflict, observer): 1.5~2주
+- 데이터 마이그레이션 + 테스트: 1주
+- 합 ~3~4주
+
+## 최근 완료 (2026-05-27 세션)
+
+### Week strip + Month view (CLAUDE.md 미구현 1번 — 완료)
+- `Views/WeekStripView.swift`: 7-cell 요일 strip (요일 + 날짜). 일자 탭 / ±7일 swipe / 슬라이드 transition.
+  - 선택일 = solid accent circle. 오늘 = `opacity 0.5` accent circle (선택돼도 selection 우선).
+  - `Calendar.current.firstWeekday` 기반 주 시작 (한국=일, 유럽=월).
+- `Views/MonthGridView.swift`: 7×N grid (N=4~6 동적, 5주 월은 5행만).
+  - 일자 cell 탭 / ±1개월 swipe / 월 단위 슬라이드 transition.
+  - **인디케이터**: 단일일자 항목 = dot, 다일 항목 = horizontal bar(slot 할당, 같은 week 안에서 겹치면 stack).
+  - **색상**: Todo는 priority 깃발 색(red/orange/blue/secondary), NTD는 항상 teal.
+  - **state별 시각**:
+    - dot: pending=hollow stroke, completed=filled+opacity 0.25, cancelled=filled+opacity 0.25 (dot에선 완료/취소 동일)
+    - bar: pending=솔리드, completed=솔리드 opacity 0.25, cancelled=점선(StrokeStyle dash)
+  - dot 최대 12개(6×2행), 초과 시 "+N" overflow.
+  - 인접 월 cell도 indicator 렌더 (월 경계는 날짜 숫자 텍스트 dim으로만 구분).
+  - HStack(spacing: 0, alignment: .top) 사용 — bar 연속성 + 같은 row cell 정렬.
+- TodayView 통합:
+  - `@State viewMode: TodayViewMode = .day` — `.day`/`.month` 분기로 `.safeAreaInset(edge: .top)`에 WeekStripView ↔ MonthGridView 교체.
+  - Toolbar `calendar` 버튼 = D/M 토글. M 모드 아이콘 = `list.bullet`.
+  - navigationTitle: D = "M월 d일 (요일)" / M = "yyyy년 M월".
+  - `shiftMonth(±1)` helper로 본문 ZStack 슬라이드도 함께 발동.
+
+### 특정일 이동 (Jump to date)
+- Toolbar ellipsis 메뉴에 "특정일로 이동" 항목 (`calendar.badge.clock`).
+- DatePicker(`.graphical`) sheet + 우측 상단 **"이동"** confirmation 버튼.
+- 자동 닫힘 방식은 wheel scroll과 일자 탭 onChange 구분 못해서 명시적 confirm으로 결정.
+- D/M 모드 양쪽에서 사용 가능. local Date ↔ UTC anchor 변환은 `localCalendarSameDay`/`calendarDateAnchor`.
+
+### Lock screen widget (NTD 전용)
+- `MyDaysWidget/MyDaysNTDLockWidget.swift`: accessoryRectangular. 자동 회전 (60초 cycle, 30분 window).
+  - 3-line layout: icon + 제목 / 큰 카운트다운 (widgetAccentable) / 상태 라벨 "남음/진행/대기".
+  - 카운트다운 포맷: "1일 5시간 30분" 형태 (초 안 보임 — iOS가 잠금화면 초를 "--"로 가림).
+- `MyDaysWidget/MyDaysNTDLockCircleWidget.swift`: accessoryCircular. 동일 패턴 + 압축 layout.
+  - 3-stack: icon (10pt) + HH:mm 카운트다운 (14pt bold) + 상태 라벨 (9pt).
+  - `AccessoryWidgetBackground()` 사용 — 캘린더 widget과 같은 원형 배경 효과.
+- 둘 다 `NTDLockProvider.fetchRelevantNTDSnapshots(now:)` 공유 — kind 필터 NTD 한정.
+- `MyDaysWidgetBundle`에 등록.
+
+### Firebase 마이그레이션 prep (완료 — 상세는 "Firebase 마이그레이션 prep" 섹션 참조)
+- 모든 entity에 `id: UUID?` 보유 + 생성 지점 `id = UUID()` 보장.
+- `Category`/`Tag`/`RecurrenceRule`/`Reminder`에 `createdAt`/`updatedAt` 필드 추가 (Item·ItemEvent·RC는 이전부터 보유).
+- 모든 변경 지점에서 `updatedAt = now` 일관 적용.
+- `PersistenceController.logEntitiesWithMissingID()` 부팅 시 nil id row 콘솔 로그 (백필 X).
+
+### 기타 폴리시 (이번 세션)
+- ArchiveView/ListView 완료 섹션 토글 아이콘: `checklist`/`checklist.unchecked` (eye/eye.slash 대체).
+- 완료 항목 라벨: list mode + 1회성 + done/failed인 Todo는 d-day 자리에 "%@ 완료" / "%@ 취소" (completedAt 시각). `todo.label.done_at_format`, `todo.label.cancelled_at_format` 추가.
+- Widget 항목 fetch 최대 10개. budget 기반 cell 자르기 (deterministic 높이 추정 — `widgetContentHeight=142`, `headerHeight=64`, `ntdItemHeight=36`, `todoItemHeight=22`).
+
 ## 미구현 (다음 후보, 우선순위 순)
 
-### 1. Week strip → Month view (다음 작업 — 회사에서 이어받기)
-**컨셉**: TodayView 상단 타이틀 아래에 week strip(요일+날짜 가로 줄)을 두고, 추후 [D][M] 토글로 월간 grid 진입. Week view는 별도 구현 안 함 — strip이 그 효과 대체. 일자 시간격자 일정이 없는 todo+NTD 앱이라 month view가 더 유용.
+### 1. 카테고리·태그 관리 UI
+- Category 입력/편집 화면 (현재 모델은 있지만 UI 없음 — 생성 진입점 X).
+- 목록·보관함에 category/tag 필터 추가.
+- Tag도 동일 (다중 선택 가능 모델).
+- 새 생성 지점에서 `id = UUID()` + `createdAt`/`updatedAt = now` 필수 (Firebase prep).
 
-**Phase 1: Week strip만 (다음 작업, 회사에서 시작)**
-- 위치: TodayView toolbar(title) 아래. 옵션 (a) `safeAreaInset(edge: .top)` (b) ZStack 위로 VStack 묶기
-- 구성: 7 cell — 요일(일/월/...토) + 날짜 숫자만 (indicator 없음)
-- **주 시작 요일**: `Calendar.current.firstWeekday` 따라감 — 한국=일요일, 유럽=월요일 자동
-- 일자 cell 탭 → `displayedDate` 변경 (기존 `navigateTo(_:forward:)` 재사용 — slide transition 그대로 작동)
-- **주 단위 swipe**: Week strip 영역에서만 detect (TodayView 본문의 일 단위 swipe와 분리). 한 swipe = 7일 shift.
-- **선택일 표시**: 선택된 일자 cell에 accent fill background (circle 또는 capsule)
-- **오늘 일자**: 별도 시각 표시 (예: 요일 라벨 색 accent, 또는 작은 dot)
-- 구현 단위: 새 view `Views/WeekStripView.swift`, `@Binding var selectedDate: Date` 받음
-- 주 시작점 계산: `Calendar.current.dateInterval(of: .weekOfYear, for: someDate)` 로 주 시작일 얻기. **주의**: 우리는 UTC anchor로 저장하지만 firstWeekday 계산은 `Calendar.current`로 (사용자 로케일 따름). 날짜 비교는 UTC startOfDay 통일.
-- 컴포넌트 분리 — 추후 Phase 2/3에서 Month grid와 같은 prop 패턴 공유 가능하게.
+### 2. 3단계 계층 구조 (parent/children)
+- AddItemView에 parent picker.
+- 표시(들여쓰기) — 깊이 제한 3단계 (앱 로직, Core Data는 unlimited).
+- 부모 완료 시 자식 처리 정책 결정 필요.
 
-**Phase 2 (이후): [D][M] toggle + Month view**
-- Day mode (D, default): 현재 + week strip
-- Month mode (M): week strip 숨김, 풀 month grid (LazyVGrid 7열)
-- Month grid: cell당 날짜 + indicator (NTD bar, 완료 dot 등) — 점진적 추가
-- 일자 탭 → D mode로 복귀 + displayedDate 변경
-- 토글 위치: week strip 우측 small segmented control 또는 toolbar trailing
+### 3. 알림 후속 개선
+- 알림 탭 → 항목 편집 화면 deep link.
+- 권한 거부 후 Settings 재안내 경로.
+- pending 한계(64) 초과 시 graceful 처리.
 
-**Phase 3 (이후): NTD 히스토리 등에 month grid 인프라 재활용**
-- 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용
+### 4. 항목별 활동 기록 view
+- 현재 AddItemView 활동 기록 섹션은 최근 10건만.
+- 별도 화면에서 전체 시계열 (Todo/NTD 공통).
+- ActivityLogView ↔ RoutineCompletion 이원화 유지 (lifecycle vs per-occurrence).
 
-### 2. WidgetKit 위젯 (Phase 1 진행 중 — 2026-05-26 시작)
-**범위**: Home Screen Small + Medium만 (Lock Screen 제외, Live Activity는 추후 Phase)
-**Phase 1 (현재)**: NTD 전용 위젯 — 가장 relevant한 NTD occurrence 카운트다운. Apple Developer / Xcode 설정 + PersistenceController shared container 전환 + TimelineProvider/Views 완료. 실기기 동작 검증 단계.
-**Phase 2 (이후)**: Todo도 표시. NTD가 없을 때 Todo로 fallback할지, 별도 widget kind를 추가할지는 그때 결정. 지금은 Todo 분기를 미리 추상화하지 말 것 (단순성 원칙).
-**최초 진행 step (참고용 — 이미 완료)**:
-1. App Group ID 생성 (`group.io.snapplay.MyDays`)
-2. Main app Signing & Capabilities에 App Groups 추가
-3. Widget Extension target 추가 (Xcode → File → New → Target → Widget Extension)
-   - Include Live Activity: ☐
-4. Widget target에도 App Groups capability + group ID 체크
-5. PersistenceController 수정 — shared store URL:
-   ```swift
-   let storeURL = FileManager.default
-       .containerURL(forSecurityApplicationGroupIdentifier: "group.io.snapplay.MyDays")!
-       .appendingPathComponent("MyDays.sqlite")
-   ```
-6. Widget target에 file membership 추가:
-   - Models/Item+Helpers.swift, CalendarDate.swift, ModelEnums.swift, RecurrenceRule+Helpers.swift
-   - MyDays.xcdatamodeld
-   - Services/PersistenceController.swift
-7. TimelineProvider — `ntdRelevantOccurrenceDate` 기반 entries (시작/중간/종료 instant)
-8. Widget views: Small (icon + countdown + 제목), Medium (제목 + countdown + progress bar)
-9. 실기기 home에 추가 → 동작 확인
+### 5. Month view Phase 3 — grid 인프라 재활용
+- 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용 (성공/실패 색 dot 등 indicator만 교체).
+- MonthGridView를 prop 기반(`cellDecorator: (Date) -> some View`)으로 일반화 필요.
 
-**참고**: PBXFileSystemSynchronizedRootGroup (Xcode 16+) 사용 중 — widget target file membership 방식 다를 수 있음. iOS 17.6 deployment 유지. CloudKit 동기화는 shared container로 자동.
+### 6. iPad 최적화
+- 합의: **앱 완성 후 일괄 작업**.
+- NavigationSplitView, 2-pane, Regular size class.
 
-### 3. Todo occurrence 취소 기능 (다음 작업 — 회사에서 진행 예정)
-**컨셉**: NTD 포기와 유사 — Todo occurrence를 "취소"(won't do)로 마킹. 삭제와 다름 (Item은 유지, 반복은 계속).
-**옵션 B 선택**: 기존 `RoutineCompletion.failed`를 Todo에서도 재사용 — Core Data 스키마 변경 없음. UX에서는 NTD="포기" / Todo="취소"로 라벨링 구분.
-
-**구현 항목**:
-1. **UI 트리거** — ItemRow에 취소 entry point. 후보:
-   - 우측 swipe action (목록탭 패턴 친숙)
-   - 또는 long press → context menu
-   - 또는 NTDRow처럼 (x) 버튼을 in-progress occurrence에 노출
-2. **사유 입력 시트** — `TodoCancelSheet`(가칭). NTDGiveUpSheet 구조 재활용 — preset chip 4종 + 직접 입력. preset reason은 Todo 컨텍스트로 (예: 변경됨/취소됨/우선순위변경/기타).
-3. **데이터 저장** — `RoutineCompletion(failed: true, comment: 사유)` 생성. 1회성 Todo는 추가로 `Item.status=.failed` + `completedAt=now`. 반복은 Item.status 유지 (rule 계속).
-4. **표시 차별화** —
-   - ItemRow에서 failed Todo: leadingControl 회색 fill checkmark.fill 또는 strikethrough.
-   - 라벨: "%@ 취소" — 새 localized key `todo.label.cancelled_at_format`.
-   - NTD `ntd.label.failed_at_format` ("%@ 포기")와 별개 키 (의미 구분).
-5. **활동 기록 표시** — AddItemView 활동 기록 section에서 Todo failed RC는 "취소", NTD failed RC는 "포기"로 분기 라벨. `activity.status.cancelled` 키 추가.
-6. **ItemEvent.log** — Todo 취소 시 `.failed` action 그대로 사용 (action enum은 의미 중복 OK), itemTitle snapshot으로 컨텍스트 유지.
-7. **자동 처리** —
-   - completeFinishedNTDs는 그대로 유지 (NTD 전용 path).
-   - Todo는 자동 취소 없음 — 사용자 명시 액션만.
-
-**고려할 점**:
-- "취소"와 "완료"의 시각 구분 (이미 done은 blue fill checkmark.fill, cancelled는 다른 색 필요).
-- 1회성 Todo 취소 후 되돌리기 가능해야 할지 (현재 NTD 포기는 되돌리기 없음 — 일관성 유지면 Todo도 없음).
-- failed RC가 routineHistoryRecords에 나타날 때 라벨이 Todo면 "취소", NTD면 "포기" — `activityRow` 분기 필요.
-
-### 4. 알림 후속 개선
-- 알림 탭 → 항목 편집 화면 deep link
-- 권한 거부 후 Settings 재안내 경로
-- pending 한계(64) 초과 시 graceful 처리
-
-### 5. 카테고리·태그 관리 UI
-- Category 입력/편집 화면
-- 목록·보관함에 필터 추가
-
-### 6. 3단계 계층 구조
-- AddItemView에 parent 선택 UI
-- 표시(들여쓰기) — 깊이 제한 3단계 앱 로직
-
-### 7. iPad 최적화
-- 합의: **앱 완성 후 일괄 작업**
-- NavigationSplitView, 2-pane, Regular size class
-
-### 폴리시 / 후속 개선
-- 항목별 전체 활동 기록 view (Todo/NTD 공통 — 현재 AddItemView 활동 기록 section은 최근 10건만)
-- ActivityLogView ↔ RoutineCompletion 이원화 유지 (의도된 분리: lifecycle vs per-occurrence — ItemEvent는 uncomplete 등 lifecycle 보존, RC는 현재 occurrence snapshot)
-- SpeechRecognizer Phase B 발전 — 현재 우리 자체 mic은 hands-free 용 (키보드 안 떠있을 때만). 키보드 활성 시 시스템 dictation에 위임 중. 향후 발전 시 자체 mic UI를 더 풍부하게 (waveform 등) 가능
+### 폴리시 / 후속
+- SpeechRecognizer Phase B 발전 — 자체 mic UI 풍부화 (waveform 등). 현재는 hands-free 용.
+- Settings "모든 데이터 삭제" 버튼 출시 전 `#if DEBUG` 가드 또는 제거.
+- `completeExpiredRoutines` 호출 위치(현재 4곳) 성능 측정 후 최적화 후보 — 현재 보류.
 
 ## 디자인 / 코드 가이드라인
 

@@ -41,16 +41,13 @@ struct NTDGiveUpSheet: View {
         NavigationStack {
             Form {
                 Section("ntd.giveup_sheet.section.preset") {
-                    // chip flow — ScrollView 가로 또는 wrap이 필요하나, 4개 짧은 텍스트라
-                    // 한 줄 ScrollView로 충분. 길어지면 LazyVGrid로 재구성.
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Self.presetReasonKeys, id: \.self) { key in
-                                reasonChip(catalogKey: key)
-                            }
+                    // 가변 폭 chip group — 가로 스크롤 대신 wrap. 영문은 단어 길어 multi-line 자연스러움.
+                    FlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                        ForEach(Self.presetReasonKeys, id: \.self) { key in
+                            reasonChip(catalogKey: key)
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 2)
                 }
                 Section("ntd.giveup_sheet.section.custom") {
                     TextField(
@@ -77,9 +74,10 @@ struct NTDGiveUpSheet: View {
             .navigationTitle("ntd.giveup_sheet.title")
             .navigationBarTitleDisplayMode(.inline)
             .presentationDetents([.medium, .large])
+            .presentationBackground(Color(.systemGroupedBackground))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("common.cancel") { dismiss() }
+                    Button("common.close") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("ntd.giveup.confirm", role: .destructive) {

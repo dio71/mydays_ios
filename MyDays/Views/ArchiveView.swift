@@ -7,6 +7,7 @@ struct ArchiveView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: ItemSheetMode?
     @State private var entryText: String = ""
+    @State private var showCompleted = false
     // ArchiveView는 isSomeday=true 항목만 보여주므로 사실상 referenceDate 영향 작지만,
     // 일관성을 위해 UTC anchor로 통일.
     @State private var referenceDate: Date = .todayCalendarAnchor
@@ -17,6 +18,14 @@ struct ArchiveView: View {
         animation: .default
     )
     private var items: FetchedResults<Item>
+
+    // 완료/취소 보관함 항목 — status 1(done) OR 3(failed).
+    @FetchRequest(
+        sortDescriptors: [SortDescriptor(\Item.completedAt, order: .reverse)],
+        predicate: NSPredicate(format: "isSomeday == YES AND (status == 1 OR status == 3)"),
+        animation: .default
+    )
+    private var completedItems: FetchedResults<Item>
 
     var body: some View {
         List {
@@ -36,10 +45,38 @@ struct ArchiveView: View {
                     }
                 }
             }
+
+            if showCompleted {
+                Section("list.section.completed") {
+                    if completedItems.isEmpty {
+                        Text("list.empty.completed")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                    } else {
+                        ForEach(completedItems, id: \.objectID) { item in
+                            Button {
+                                sheet = .edit(item)
+                            } label: {
+                                ItemRow(item: item, referenceDate: referenceDate, mode: .list)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.immediately)
         .navigationTitle("archive.title")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showCompleted.toggle()
+                } label: {
+                    Image(systemName: showCompleted ? "checklist" : "checklist.unchecked")
+                }
+            }
+        }
         // 마지막 row가 입력 바에 가리지 않도록 스크롤 여백 확보 (입력 바 높이 + margin).
         .contentMargins(.bottom, 96, for: .scrollContent)
         // 하단 inline 입력 바 — overlay로 고정 위치 (탭 이동 시 위치 흔들림 방지).

@@ -883,6 +883,23 @@
         }
       }
     },
+    "common.close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫기"
+          }
+        }
+      }
+    },
     "common.delete" : {
       "localizations" : {
         "en" : {
@@ -1243,7 +1260,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Now"
+            "value" : "Today"
           }
         },
         "ko" : {
@@ -1703,23 +1720,6 @@
         }
       }
     },
-    "ntd.giveup_sheet.reason.limit" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "At limit"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "한계"
-          }
-        }
-      }
-    },
     "ntd.giveup_sheet.reason.interruption" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1733,6 +1733,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "주변방해"
+          }
+        }
+      }
+    },
+    "ntd.giveup_sheet.reason.limit" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At limit"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한계"
           }
         }
       }
@@ -1814,7 +1831,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "포기 사유"
+            "value" : "목표 포기"
           }
         }
       }
@@ -2792,6 +2809,7 @@
       }
     },
     "today.empty.routine" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2836,6 +2854,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "할일이 없습니다"
+          }
+        }
+      }
+    },
+    "today.menu.cancel_mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel items"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "활동 취소하기"
+          }
+        }
+      }
+    },
+    "today.menu.jump_date" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jump to date"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "특정일로 이동"
+          }
+        }
+      }
+    },
+    "today.menu.jump_date.confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이동"
           }
         }
       }
@@ -2942,6 +3011,7 @@
       }
     },
     "today.section.routine" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2990,6 +3060,176 @@
         }
       }
     },
+    "todo.cancel_sheet.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel this task?\nFor recurring items, only this occurrence is cancelled."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "해당 할일을 취소하시겠습니까?\n반복 일정인 경우 해당 일의 일정만 취소됩니다."
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.input_placeholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a reason"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사유를 입력하세요"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.reason.cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelled"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소됨"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.reason.plan_change" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plan changed"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계획변경"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.reason.skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skipped"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그냥 안함"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.reason.time_lack" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Out of time"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시간부족"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.section.custom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 입력"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.section.preset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reason"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사유 선택"
+          }
+        }
+      }
+    },
+    "todo.cancel_sheet.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel Reason"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할일 취소"
+          }
+        }
+      }
+    },
+    "todo.cancel.confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirm"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확인"
+          }
+        }
+      }
+    },
     "todo.complete_sheet.description" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3002,7 +3242,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "아직 시작하지 않은 일정입니다.\n정말로 완료하시겠습니까?"
+            "value" : "아직 시작하지 않은 활동입니다.\n정말로 완료하시겠습니까?"
           }
         }
       }
@@ -3121,7 +3361,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "사유"
+            "value" : "사유 선택"
           }
         }
       }
@@ -3138,7 +3378,41 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "완료 사유"
+            "value" : "할일 완료"
+          }
+        }
+      }
+    },
+    "todo.label.cancelled_at_format" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelled %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 취소"
+          }
+        }
+      }
+    },
+    "todo.label.done_at_format" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 완료"
           }
         }
       }
@@ -3257,6 +3531,159 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 종료"
+          }
+        }
+      }
+    },
+    "widget.countdown.h_m_format" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%dh %dm"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d시간 %d분"
+          }
+        }
+      }
+    },
+    "widget.countdown.m_format" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%dm"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d분"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock_circle.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pin a Fast countdown to Lock Screen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "잠금화면에 절제 목표 1개 고정 표시"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock_circle.display_name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fast (Pinned)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "절제 목표 (고정)"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock_circle.status.elapsed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "진행"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock_circle.status.remaining" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Left"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "남음"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock_circle.status.scheduled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wait"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대기"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Most relevant Fast on Lock Screen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "잠금화면에 절제 목표 카운트다운 표시"
+          }
+        }
+      }
+    },
+    "widget.ntd_lock.display_name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fast (Lock Screen)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "절제 목표 (잠금화면)"
           }
         }
       }
@@ -3380,40 +3807,6 @@
         }
       }
     },
-    "widget.countdown.h_m_format" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%dh %dm"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%d시간 %d분"
-          }
-        }
-      }
-    },
-    "widget.countdown.m_format" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%dm"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%d분"
-          }
-        }
-      }
-    },
     "widget.ntd.state.scheduled" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3427,40 +3820,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "시작까지"
-          }
-        }
-      }
-    },
-    "widget.state.scheduled" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Starts in"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "시작까지"
-          }
-        }
-      }
-    },
-    "widget.state.remaining" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends in"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "종료까지"
           }
         }
       }
@@ -3495,6 +3854,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "지남"
+          }
+        }
+      }
+    },
+    "widget.state.remaining" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ends in"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종료까지"
+          }
+        }
+      }
+    },
+    "widget.state.scheduled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starts in"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작까지"
           }
         }
       }
