@@ -33,15 +33,31 @@ struct WeekStripView: View {
         let removalEdge: Edge = forward ? .leading : .trailing
 
         ZStack {
-            HStack(spacing: 0) {
-                ForEach(days, id: \.self) { day in
-                    cell(for: day)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            onSelectDate(day)
-                        }
+            VStack(spacing: 0) {
+                // 요일 row.
+                HStack(spacing: 0) {
+                    ForEach(days, id: \.self) { day in
+                        weekdayCell(for: day)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
+                .padding(.vertical, 4)
+                // 요일 아래 분리선.
+                Divider()
+                // 날짜 row — tap 가능.
+                HStack(spacing: 0) {
+                    ForEach(days, id: \.self) { day in
+                        dayCell(for: day)
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onSelectDate(day)
+                            }
+                    }
+                }
+                .padding(.vertical, 4)
+                // 날짜 아래 분리선.
+                Divider()
             }
             .id(weekStart)
             .transition(.asymmetric(
@@ -52,7 +68,7 @@ struct WeekStripView: View {
         .clipped()
         .animation(.easeInOut(duration: 0.22), value: weekStart)
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.top, 6)
         .gesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { value in
@@ -85,30 +101,34 @@ struct WeekStripView: View {
 
     // MARK: - Cell
 
+    /// 요일 라벨 cell (상단 row) — tap 비활성. 오늘 column은 accent 강조.
     @ViewBuilder
-    private func cell(for date: Date) -> some View {
+    private func weekdayCell(for date: Date) -> some View {
+        let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
+        Text(verbatim: Self.weekdayLabel(date))
+            .font(.caption2)
+            .foregroundStyle(isToday ? Color.accentColor : .secondary)
+    }
+
+    /// 날짜 cell (하단 row) — tap 활성. selectedDate=accent fill, today=반투명 accent fill.
+    @ViewBuilder
+    private func dayCell(for date: Date) -> some View {
         let isSelected = Calendar.gmt.isDate(date, inSameDayAs: selectedDate)
         let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
-        // 배경 원: 선택일은 solid accent, 오늘(미선택)은 반투명 accent. 둘 다면 selection 우선.
         let bgFill: Color? = {
             if isSelected { return Color.accentColor }
             if isToday { return Color.accentColor.opacity(0.5) }
             return nil
         }()
-        VStack(spacing: 4) {
-            Text(verbatim: Self.weekdayLabel(date))
-                .font(.caption2)
-                .foregroundStyle(isToday ? Color.accentColor : .secondary)
-            Text(verbatim: Self.dayNumber(date))
-                .font(.callout.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .frame(width: 28, height: 28)
-                .background {
-                    if let bgFill {
-                        Circle().fill(bgFill)
-                    }
+        Text(verbatim: Self.dayNumber(date))
+            .font(.callout.weight(isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .frame(width: 28, height: 28)
+            .background {
+                if let bgFill {
+                    Circle().fill(bgFill)
                 }
-        }
+            }
     }
 
     /// 요일 라벨 — EEE 템플릿. 한국어 "수" / 영어 "Wed" 자동.

@@ -513,32 +513,101 @@ MyDays/MyDays/
 
 ## 미구현 (다음 후보, 우선순위 순)
 
-### 1. 카테고리·태그 관리 UI
+### 1. 활동 목표 (Activity Goal) — 3번째 핵심 기능 (다음 진행 예정)
+
+**개념**: 기기 센서 데이터로 자동 판정되는 목표. Todo(사용자 체크)·NTD(사용자 포기)와 구분되는 자동 평가가 정체성.
+
+**예시 (full scope)**:
+- HealthKit: 매일 N보 걷기 / N km 뛰기 / N시 이전 자기 / N시간 이상 자기
+- Screen Time: 특정 시간 window에 폰 N분 이상 사용 안 함
+
+**MVP 범위 (Phase 1 — 합의)**:
+- HealthKit 3종만: 걸음수, 거리, 수면 시간 (취침 시각·ScreenTime 보류)
+- ScreenTime API는 entitlement·App Store 승인 복잡 + family/parental 시나리오 최적화라 self-tracking에 제약 큼 → 1차 출시 보류
+- 취침 시각은 데이터 정확도 편차(Apple Watch 의존) + "잤다" 정의 모호 → 후순위
+
+**데이터 모델 — 기존 Item entity 확장 (새 entity 추가 X, CloudKit 스키마 영향 최소화)**:
+```
+Item:
+  kind: 0=todo, 1=ntd, 2=activity  ← 추가
+  activityType: Int16?              ← 추가 (enum: steps/distance/sleep/...)
+  activityTargetValue: Double?      ← 추가 (10000, 5.0, 8.0 etc.)
+  activityComparison: Int16?        ← 추가 (gte=0, lte=1, between=2)
+```
+- `startDate`/`dueDate`/`recurrenceRule`/`startHour`/`dueHour` 재활용:
+  - 일자: 기존 그대로
+  - 시간 window: `startHour`~`dueHour` 재활용 (예: 22~23시 = "10pm~11pm 평가 window"). 별도 필드 추가 X.
+- `RoutineCompletion` 재활용: 자동 평가 결과를 `done=true`로 기록. 사용자 수동 체크 없음 (시스템 평가).
+
+**평가 방식 — iOS 백그라운드 제약 고려**:
+- 일별 목표: `scenePhase==.active` / app launch에서 활성 활동 목표 fetch + 평가 → RC 생성/업데이트.
+- 시간 window 목표: window 종료 시점에 로컬 알림 trigger → 사용자가 앱 열면 평가 (HKObserverQuery로 일부 백그라운드 가능하지만 모든 항목 지원 X).
+- 진행 중 표시: 가능한 한 최근 fetch 값으로 ("7,500 / 10,000 보" 식 progress).
+
+**크로스 플랫폼 추상화**:
+```swift
+protocol ActivityDataProvider {
+    func dailyValue(for type: ActivityType, on date: Date) async -> Double?
+    func requestPermission(for type: ActivityType) async -> Bool
+}
+```
+- iOS: `HealthKitProvider` (HKHealthStore + HKQuery).
+- Android (이후): `HealthConnectProvider`.
+- 모델 자체는 OS-independent.
+- **합의**: iOS 먼저 구현 + 안정화 후 Android port. 동시 설계 시 lowest-common-denominator로 가서 OS 강점 사라짐.
+
+**UI**:
+- AddItemView: kind picker에 "활동 목표" 추가. type 선택 시 unit/comparison 동적 라벨 (예: steps → "이상", "보"; sleep → "이상", "시간").
+- TodayView: NTD 섹션 옆 또는 별도 섹션. 진행률 bar 또는 "7,500 / 10,000 보" 텍스트. 자동 완료 시 체크 표시 (회색 + 라벨 dim).
+- ItemRow: leadingControl을 활동 목표 전용 아이콘(달성 X = outline / 달성 O = fill)으로 분기.
+
+**구현 순서 (Phase 1)**:
+1. `Item` 모델 확장 — activityType / activityTargetValue / activityComparison + ItemKind enum 확장. CloudKit migration 1회.
+2. `ActivityDataProvider` 프로토콜 + `HealthKitProvider` 구현 (걸음수·거리·수면 3종). 권한 요청 흐름.
+3. AddItemView 활동 목표 입력 UI.
+4. TodayView 활동 목표 노출 (4번째 섹션 또는 NTD에 통합 검토).
+5. `MyDaysApp` launch / `scenePhase==.active`에서 활동 목표 평가 실행 → RC 생성.
+6. window 목표 시 로컬 알림 trigger.
+7. ItemRow leadingControl 분기.
+8. (이후) Android port + Health Connect.
+
+**결정 필요 (시작 전)**:
+- MVP type 범위 — 위 3종 확정?
+- 직접 완료 마킹 허용? (백업 경로 — 데이터 fetch 실패 케이스). 권장: 허용 (NTD처럼 사용자 override 가능)
+- 데이터 부족(Apple Watch 없음 등) 사용자 안내 정책.
+- HealthKit 권한 거부 사용자 처리 — 활동 목표 생성 비활성화 vs 생성은 허용하되 평가 불가 표시.
+
+**참고**:
+- HealthKit: `NSHealthShareUsageDescription` + entitlement 필요.
+- HKObserverQuery + `enableBackgroundDelivery`로 백그라운드 wake-up 가능 (Steps·Sleep 지원). 단 빈도 제한.
+- 권한 prompt UX 신중히 — 한 번에 여러 type 요청보다 type별 lazy 요청 권장.
+
+### 2. 카테고리·태그 관리 UI
 - Category 입력/편집 화면 (현재 모델은 있지만 UI 없음 — 생성 진입점 X).
 - 목록·보관함에 category/tag 필터 추가.
 - Tag도 동일 (다중 선택 가능 모델).
 - 새 생성 지점에서 `id = UUID()` + `createdAt`/`updatedAt = now` 필수 (Firebase prep).
 
-### 2. 3단계 계층 구조 (parent/children)
+### 3. 3단계 계층 구조 (parent/children)
 - AddItemView에 parent picker.
 - 표시(들여쓰기) — 깊이 제한 3단계 (앱 로직, Core Data는 unlimited).
 - 부모 완료 시 자식 처리 정책 결정 필요.
 
-### 3. 알림 후속 개선
+### 4. 알림 후속 개선
 - 알림 탭 → 항목 편집 화면 deep link.
 - 권한 거부 후 Settings 재안내 경로.
 - pending 한계(64) 초과 시 graceful 처리.
 
-### 4. 항목별 활동 기록 view
+### 5. 항목별 활동 기록 view
 - 현재 AddItemView 활동 기록 섹션은 최근 10건만.
 - 별도 화면에서 전체 시계열 (Todo/NTD 공통).
 - ActivityLogView ↔ RoutineCompletion 이원화 유지 (lifecycle vs per-occurrence).
 
-### 5. Month view Phase 3 — grid 인프라 재활용
+### 6. Month view Phase 3 — grid 인프라 재활용
 - 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용 (성공/실패 색 dot 등 indicator만 교체).
 - MonthGridView를 prop 기반(`cellDecorator: (Date) -> some View`)으로 일반화 필요.
 
-### 6. iPad 최적화
+### 7. iPad 최적화
 - 합의: **앱 완성 후 일괄 작업**.
 - NavigationSplitView, 2-pane, Regular size class.
 

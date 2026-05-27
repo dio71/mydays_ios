@@ -41,7 +41,7 @@ struct MonthGridView: View {
         let insertionEdge: Edge = forward ? .trailing : .leading
         let removalEdge: Edge = forward ? .leading : .trailing
 
-        VStack(spacing: 4) {
+        VStack(spacing: 0) {
             // 요일 헤더 — firstWeekday 기준으로 회전된 short symbols.
             HStack(spacing: 0) {
                 ForEach(Self.weekdaySymbols(), id: \.self) { sym in
@@ -51,13 +51,16 @@ struct MonthGridView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+            .padding(.vertical, 4)
+            // 요일 아래 분리선.
+            Divider()
 
             // 일자 grid — 월 단위 transition.
             // LazyVGrid 대신 VStack of HStacks(spacing: 0)로 직접 배치 — cell 사이 간격을 정확히 0으로
             // 제어해야 다일 항목 bar가 인접 cell 경계를 넘어 시각적으로 연속됨.
             // (LazyVGrid는 column flexible 안에서 cell content를 cell width까지 늘리지 않는 quirk가 있음.)
             ZStack {
-                VStack(spacing: 4) {
+                VStack(spacing: 0) {
                     ForEach(0..<weekCount, id: \.self) { weekIdx in
                         // alignment: .top — cell 마다 content 높이(dot 수 등)가 달라도 위쪽 기준 정렬해
                         // 같은 slot의 bar가 같은 y 위치에 와서 연속 line으로 보이게 함.
@@ -72,6 +75,9 @@ struct MonthGridView: View {
                                     }
                             }
                         }
+                        .padding(.vertical, 4)
+                        // 각 주(row) 아래 분리선.
+                        Divider()
                     }
                 }
                 .id(monthAnchor)
@@ -188,13 +194,15 @@ struct MonthGridView: View {
             if maxSlots > 0 {
                 VStack(spacing: 2) {
                     ForEach(0..<maxSlots, id: \.self) { slot in
-                        barSlotView(slot: slot, cellBars: cellBars)
+                        barSlotView(slot: slot, cellBars: cellBars, cellDate: date)
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
             // Dot zone — 단일일자 항목만. NTD는 teal, Todo는 priority 깃발 색.
+            // bar zone과 dot zone 사이 시각 분리를 위해 추가 2pt 여백 (VStack spacing 2pt + padding 2pt = 4pt).
             dotsRow(indicators: dotIndicators)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
     }
@@ -206,30 +214,42 @@ struct MonthGridView: View {
     ///   - pending: 솔리드 fill
     ///   - completed: 솔리드 fill + opacity 0.4 (희미)
     ///   - cancelled: 점선 (Path + StrokeStyle.dash)
+    /// **양 끝 padding**: cellDate가 bar.startDay면 leading 2pt, bar.endDay면 trailing 2pt.
+    /// 같은 항목의 중간 cell들은 padding 없음 → 연속 line 유지.
+    /// 다른 항목이 인접 cell의 같은 slot에 오면 양쪽에서 2pt씩 padding → 시각 분리.
     @ViewBuilder
-    private func barSlotView(slot: Int, cellBars: [BarSegment]) -> some View {
+    private func barSlotView(slot: Int, cellBars: [BarSegment], cellDate: Date) -> some View {
         if let bar = cellBars.first(where: { $0.slot == slot }) {
             let color = Self.indicatorColor(kind: bar.kind, priority: bar.priority)
+            let isStart = Calendar.gmt.isDate(cellDate, inSameDayAs: bar.startDay)
+            let isEnd = Calendar.gmt.isDate(cellDate, inSameDayAs: bar.endDay)
+            let leadingPad: CGFloat = isStart ? 2 : 0
+            let trailingPad: CGFloat = isEnd ? 2 : 0
             switch bar.state {
             case .pending:
                 Rectangle()
                     .fill(color)
                     .frame(maxWidth: .infinity)
                     .frame(height: 3)
+                    .padding(.leading, leadingPad)
+                    .padding(.trailing, trailingPad)
             case .completed:
                 Rectangle()
                     .fill(color)
                     .opacity(0.25)
                     .frame(maxWidth: .infinity)
                     .frame(height: 3)
+                    .padding(.leading, leadingPad)
+                    .padding(.trailing, trailingPad)
             case .cancelled:
                 // GeometryReader로 cell width 측정 후 Path로 가로선을 dash 패턴 stroke.
                 // 인접 cell의 dash 시작점이 0이라 cell width가 일정하면 패턴 거의 연속.
+                // 시작/끝 cell은 padding 적용해 dash line이 그만큼 줄어듦.
                 GeometryReader { proxy in
                     Path { path in
                         let y: CGFloat = 1.5
-                        path.move(to: CGPoint(x: 0, y: y))
-                        path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                        path.move(to: CGPoint(x: leadingPad, y: y))
+                        path.addLine(to: CGPoint(x: proxy.size.width - trailingPad, y: y))
                     }
                     .stroke(color, style: StrokeStyle(lineWidth: 3, dash: [3, 2]))
                 }
@@ -270,6 +290,8 @@ struct MonthGridView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                // row1과 동일하게 stroke spill 포함 높이.
+                .frame(height: 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -282,13 +304,15 @@ struct MonthGridView: View {
                 dotView(priority: ind.priority, kind: ind.kind, state: ind.state)
             }
         }
-        .frame(height: 5)
+        // dot path 5pt + stroke lineWidth 1pt(spill 양옆 0.5pt) = 6pt 확보 → 하단 잘림 회피.
+        .frame(height: 6)
     }
 
     /// 단일 dot 렌더 — state에 따라 hollow/opacity 분기.
-    /// - pending: hollow circle (stroke only) — 미체크 체크박스 느낌
+    /// - pending: hollow circle (stroke) — 미체크 체크박스 느낌. lineWidth=1 → path 양옆 0.5pt씩 spill.
     /// - completed/cancelled: filled + opacity 0.25 (희미)
     /// 완료와 취소는 dot에선 동일 시각. 다일 항목은 bar 점선 vs 솔리드 희미로 구분됨.
+    /// stroke spill을 layout에 반영하려면 부모 row가 `dotSize + lineWidth` 높이를 확보해야 함 (dotsLine 참고).
     @ViewBuilder
     private func dotView(priority: Priority, kind: ItemKind, state: IndicatorState) -> some View {
         let color = Self.indicatorColor(kind: kind, priority: priority)
