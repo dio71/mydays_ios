@@ -156,13 +156,14 @@ struct ArchiveView: View {
             QuickEntryBar(
                 text: $entryText,
                 onSubmit: quickSave,
-                onEmptyTap: { sheet = .new(baseDate: nil) }
+                // 필터 적용 중이면 그 카테고리를 신규 항목에도 preset.
+                onEmptyTap: { sheet = .new(baseDate: nil, categoryID: filterCategoryID) }
             )
         }
         .sheet(item: $sheet) { mode in
             switch mode {
-            case .new(let baseDate):
-                AddItemView(baseDate: baseDate)
+            case .new(let baseDate, let categoryID):
+                AddItemView(baseDate: baseDate, categoryID: categoryID)
             case .edit(let item):
                 AddItemView(editing: item)
             }
@@ -207,9 +208,9 @@ struct ArchiveView: View {
     private func categorySectionHeader(_ cat: Category) -> some View {
         HStack(spacing: 8) {
             Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .frame(width: 20, height: 20)
                 .background(Circle().fill(CategoryRowView.categoryColor(for: cat)))
             Text(verbatim: cat.name ?? "")
         }
@@ -254,11 +255,16 @@ struct ArchiveView: View {
 
     /// 보관함 즉시 등록 — 제목만 받고 isSomeday=true로 저장. 나중에 탭해서 상세 편집.
     /// text reset은 QuickEntryBar가 책임짐.
+    /// 카테고리 필터 적용 중이면 그 카테고리로 자동 분류.
     private func quickSave() {
         let title = entryText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let item = Item.make(in: context, kind: .todo, title: title)
         item.isSomeday = true
+        if let id = filterCategoryID,
+           let cat = categories.first(where: { $0.id == id }) {
+            item.category = cat
+        }
         ItemEvent.log(.created, on: item, in: context)
         do {
             try context.save()

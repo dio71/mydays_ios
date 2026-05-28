@@ -35,7 +35,16 @@ struct TodayView: View {
     // 특정일 이동 시트.
     @State private var showDatePicker: Bool = false
     @State private var datePickerSelection: Date = Date()
+    // 카테고리 필터 — nil이면 "모두". ListView와 동일 패턴.
+    @State private var filterCategoryID: UUID?
     @Environment(\.scenePhase) private var scenePhase
+
+    /// 필터 메뉴용 카테고리 목록 — sortOrder 오름차순.
+    @FetchRequest(
+        sortDescriptors: [SortDescriptor(\Category.sortOrder), SortDescriptor(\Category.name)],
+        animation: .default
+    )
+    private var categories: FetchedResults<Category>
 
     var body: some View {
         // ZStack + .id로 view identity 변경 시 transition 발동.
@@ -44,7 +53,7 @@ struct TodayView: View {
         let insertionEdge: Edge = lastNavigationForward ? .trailing : .leading
         let removalEdge: Edge = lastNavigationForward ? .leading : .trailing
         ZStack {
-            TodayList(date: displayedDate, sheet: $sheet)
+            TodayList(date: displayedDate, categoryFilter: filterCategoryID, sheet: $sheet)
                 .id(displayedDate)
                 .transition(.asymmetric(
                     insertion: .move(edge: insertionEdge),
@@ -70,7 +79,7 @@ struct TodayView: View {
         // 상단 영역 — Day 모드는 7-cell week strip, Month 모드는 7×6 month grid.
         // 두 모드 모두 일자 cell 탭 + 가로 swipe 지원. 본문의 일 단위 swipe와 영역 분리.
         // 취소 모드에서는 일자 이동 차단 (본문 swipe와 동일 정책).
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaInset(edge: .top, spacing: 8) {
             Group {
                 switch viewMode {
                 case .day:
@@ -99,7 +108,8 @@ struct TodayView: View {
                         onShiftMonth: { delta in
                             guard !cancelMode else { return }
                             shiftMonth(delta)
-                        }
+                        },
+                        categoryFilter: filterCategoryID
                     )
                 }
             }
@@ -123,7 +133,7 @@ struct TodayView: View {
                     .accessibilityLabel("common.done")
                 }
             } else {
-                // 평시 — 우측 달력 + 더보기 메뉴.
+                // 평시 — 우측 달력 + 카테고리 필터 + 더보기 메뉴.
                 // ToolbarItemGroup으로 묶어 같은 capsule 안에 두 버튼.
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -131,6 +141,7 @@ struct TodayView: View {
                     } label: {
                         Image(systemName: viewMode == .day ? "calendar" : "list.bullet")
                     }
+                    categoryFilterMenu
                     Menu {
                         Button {
                             datePickerSelection = displayedDate.localCalendarSameDay
@@ -190,7 +201,8 @@ struct TodayView: View {
             // 새 항목 추가 FAB — 취소 모드 중에는 숨김.
             if !cancelMode {
                 Button {
-                    sheet = .new(baseDate: displayedDate)
+                    // 카테고리 필터 적용 중이면 그 카테고리를 신규 항목에도 preset.
+                    sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID)
                 } label: {
                     Image(systemName: "plus")
                         .font(.title2.weight(.semibold))
@@ -204,8 +216,8 @@ struct TodayView: View {
         }
             .sheet(item: $sheet) { mode in
                 switch mode {
-                case .new(let baseDate):
-                    AddItemView(baseDate: baseDate)
+                case .new(let baseDate, let categoryID):
+                    AddItemView(baseDate: baseDate, categoryID: categoryID)
                 case .edit(let item):
                     AddItemView(editing: item)
                 }
@@ -298,6 +310,42 @@ struct TodayView: View {
         }
     }
 
+    /// 카테고리 필터 Menu — "모두" + 각 카테고리. 활성 시 아이콘 filled.
+    /// ListView.categoryFilterMenu와 동일 패턴.
+    @ViewBuilder
+    private var categoryFilterMenu: some View {
+        Menu {
+            Button {
+                filterCategoryID = nil
+            } label: {
+                if filterCategoryID == nil {
+                    Label("list.filter.all", systemImage: "checkmark")
+                } else {
+                    Text("list.filter.all")
+                }
+            }
+            ForEach(categories, id: \.id) { cat in
+                Button {
+                    filterCategoryID = cat.id
+                } label: {
+                    if filterCategoryID == cat.id {
+                        Label(cat.name ?? "", systemImage: "checkmark")
+                    } else {
+                        Label {
+                            Text(verbatim: cat.name ?? "")
+                        } icon: {
+                            Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: filterCategoryID == nil
+                  ? "line.3.horizontal.decrease.circle"
+                  : "line.3.horizontal.decrease.circle.fill")
+        }
+    }
+
     private var daysFromToday: Int {
         // 둘 다 UTC anchor → UTC 캘린더로 일수 차 계산.
         let today: Date = .todayCalendarAnchor
@@ -348,6 +396,8 @@ enum TodayViewMode { case day, month }
 struct TodayList: View {
 
     let date: Date
+    /// 카테고리 필터 — nil이면 "모두". 매 fetch 결과를 view-side filter (ListView와 동일 패턴).
+    let categoryFilter: UUID?
     @Binding var sheet: ItemSheetMode?
     /// 취소 모드 — 부모 TodayView가 environment로 inject. row tap 시 편집 sheet 차단.
     @Environment(\.cancelMode) private var cancelMode
@@ -362,8 +412,16 @@ struct TodayList: View {
     @FetchRequest var routineItems: FetchedResults<Item>
     @FetchRequest var ntdItems: FetchedResults<Item>
 
-    init(date: Date, sheet: Binding<ItemSheetMode?>) {
+    /// section header에서 활성 카테고리 lookup용.
+    @FetchRequest(
+        sortDescriptors: [SortDescriptor(\Category.sortOrder), SortDescriptor(\Category.name)],
+        animation: .default
+    )
+    private var categories: FetchedResults<Category>
+
+    init(date: Date, categoryFilter: UUID?, sheet: Binding<ItemSheetMode?>) {
         self.date = date
+        self.categoryFilter = categoryFilter
         self._sheet = sheet
         // date는 UTC anchor. FetchRequest predicate의 [start, end) 범위도 UTC 자정 기준으로 계산해
         // 저장된 startDate/dueDate(UTC anchor)와 정확히 비교되도록 한다.
@@ -434,11 +492,17 @@ struct TodayList: View {
     ///     · end = duration 없음 + 진행 중: now의 local 일자
     ///   - 완료/포기 occurrence도 노출 범위 안에 있는 한 표시 (NTDRow가 상태 라벨 처리)
     ///   - 같은 Item의 multi-day 겹침 시 **모든 매치 occurrence 노출** (그룹핑은 추후).
+    /// categoryFilter 적용 — nil이면 모두 통과, 그 외 item.category?.id 매칭.
+    private func matchesCategoryFilter(_ item: Item) -> Bool {
+        guard let id = categoryFilter else { return true }
+        return item.category?.id == id
+    }
+
     private var ntdsForDate: [OccurrenceRow] {
         let now = Date()
         var result: [OccurrenceRow] = []
 
-        for item in ntdItems {
+        for item in ntdItems where matchesCategoryFilter(item) {
             let candidates = item.ntdOccurrenceStartCandidates(coveringDate: date)
             for occDate in candidates {
                 let range = item.ntdOccurrenceCalendarRange(occurrenceDate: occDate, now: now)
@@ -454,7 +518,7 @@ struct TodayList: View {
     /// `Item.occurrenceStartsCovering(date:)`로 cover하는 모든 start dates 수집.
     private var routinesForDate: [OccurrenceRow] {
         var result: [OccurrenceRow] = []
-        for item in routineItems {
+        for item in routineItems where matchesCategoryFilter(item) {
             for start in item.occurrenceStartsCovering(date: date) {
                 result.append(OccurrenceRow(item: item, occurrenceDate: start))
             }
@@ -491,13 +555,14 @@ struct TodayList: View {
         let now = Date()
         var result: [OccurrenceRow] = []
         // 1회성 Todo: todoSection 매치되는 항목을 OccurrenceRow(occurrence = startDate)로 변환.
-        for item in allActiveTodos {
+        // categoryFilter 적용 — nil이면 모두 통과.
+        for item in allActiveTodos where matchesCategoryFilter(item) {
             guard item.recurrenceRule == nil else { continue }
             guard item.todoSection(on: date, now: now) != nil else { continue }
             let occ = item.startDate ?? date
             result.append(OccurrenceRow(item: item, occurrenceDate: occ))
         }
-        // 루틴: 어제 작업의 occurrenceStartsCovering 그대로 수집.
+        // 루틴: routinesForDate가 자체적으로 filter 적용.
         result.append(contentsOf: routinesForDate)
         return result
     }
@@ -617,11 +682,39 @@ struct TodayList: View {
     /// body에서 한 번만 계산 — `now`를 body 내에서 생성·전달.
     private func grouped(now: Date) -> [TodoTodaySection: [Item]] {
         var groups: [TodoTodaySection: [Item]] = [.start: [], .inProgress: [], .due: []]
-        for item in allActiveTodos {
+        for item in allActiveTodos where matchesCategoryFilter(item) {
             guard let section = item.todoSection(on: date, now: now) else { continue }
             groups[section, default: []].append(item)
         }
         return groups
+    }
+
+    /// 활성 카테고리 — categoryFilter prop으로 lookup. nil이면 미적용.
+    private var activeCategory: Category? {
+        guard let id = categoryFilter else { return nil }
+        return categories.first(where: { $0.id == id })
+    }
+
+    /// section header — 평소엔 title text. 카테고리 필터 활성 시 title 바로 옆에
+    /// 카테고리 색 filled circle + white symbol (CategoryListView와 동일 스타일).
+    @ViewBuilder
+    private func sectionHeader(_ titleKey: LocalizedStringKey) -> some View {
+        HStack(spacing: 6) {
+            Text(titleKey)
+            if let cat = activeCategory {
+                let color: Color = {
+                    guard let raw = cat.colorHex, let cc = CategoryColor(rawValue: raw) else {
+                        return Color.accentColor
+                    }
+                    return cc.color
+                }()
+                Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(color))
+            }
+        }
     }
 
     var body: some View {
@@ -629,7 +722,7 @@ struct TodayList: View {
         // 할일 섹션: pending 그룹 먼저 → done 그룹 끝, 같은 bucket 내 priority desc → 시간 가까운 순.
         let activitiesSorted = displayActivities()
         List {
-            Section("today.section.not_todo") {
+            Section {
                 if ntdsForDate.isEmpty {
                     emptyRow("today.empty.not_todo")
                 } else {
@@ -654,9 +747,11 @@ struct TodayList: View {
                         }
                     }
                 }
+            } header: {
+                sectionHeader("today.section.not_todo")
             }
 
-            Section("today.section.todo") {
+            Section {
                 if activitiesSorted.isEmpty {
                     emptyRow("today.empty.todo")
                 } else {
@@ -674,6 +769,8 @@ struct TodayList: View {
                         }
                     }
                 }
+            } header: {
+                sectionHeader("today.section.todo")
             }
         }
         .listStyle(.insetGrouped)

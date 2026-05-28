@@ -75,7 +75,7 @@ struct AddItemView: View {
     )
     private var categories: FetchedResults<Category>
 
-    init(editing: Item? = nil, baseDate: Date? = nil) {
+    init(editing: Item? = nil, baseDate: Date? = nil, categoryID: UUID? = nil) {
         self.editingItem = editing
         // 모든 startDate/dueDate state는 UTC anchor Date로 통일.
         // 새 항목의 default 또는 nil fallback도 todayCalendarAnchor 사용.
@@ -163,7 +163,8 @@ struct AddItemView: View {
             _todoStartAlertOffset = State(initialValue: nil)
             _todoDueAlertOffset = State(initialValue: nil)
             _recurrenceConfig = State(initialValue: nil)
-            _selectedCategoryID = State(initialValue: nil)
+            // 카테고리 — 호출자가 명시한 categoryID 우선 (필터 적용 상태에서 신규 추가 등).
+            _selectedCategoryID = State(initialValue: categoryID)
         }
     }
 

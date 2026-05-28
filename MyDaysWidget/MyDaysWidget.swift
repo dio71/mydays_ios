@@ -102,35 +102,41 @@ struct NTDProvider: TimelineProvider {
         let now = Date()
         let items = Self.fetchActiveItems()
 
-        // 첫 entry는 now 기준.
-        var entries: [NTDEntry] = [
-            NTDEntry(
-                date: now,
-                snapshots: Self.makeSnapshots(items: items, now: now, limit: Self.maxSnapshotCount),
-                summary: Self.computeSummary(items: items, now: now)
-            )
-        ]
-
-        // 첫 entry에 노출되지 않더라도 우리가 미리 알 수 있는 모든 transition instant (시작/종료) 수집.
-        // 각 transition에서 state가 자동 갱신된 entry를 미리 발급 → OS reload 지연돼도 view가 stale 안 됨.
-        // 안전 한도(maxFutureEntries)로 entry 수 제한 — WidgetKit budget + 60-entry 한계 보호.
+        // Lock widget과 동일 tiered granularity: >1h 30min / 20m-1h 5min / <20m 1min / 미설정 1h.
+        // transitionInstants는 각 항목의 시작/종료 + 5분전 instants 반환 (이미 sorted).
+        // 5분전 instants는 tier 자동 처리이므로 무시해도 무관 — 그대로 사용해도 결과는 동일 수렴.
         let transitions = Self.transitionInstants(items: items, after: now)
-            .prefix(Self.maxFutureEntries)
-        for instant in transitions {
-            let snaps = Self.makeSnapshots(items: items, now: instant, limit: Self.maxSnapshotCount)
-            let summary = Self.computeSummary(items: items, now: instant)
-            entries.append(NTDEntry(date: instant, snapshots: snaps, summary: summary))
+        let horizon = now.addingTimeInterval(6 * 60 * 60)
+        var dates: Set<Date> = []
+        var t = now
+        while t <= horizon {
+            dates.insert(t)
+            let nextT = transitions.first { $0 > t }
+            let step: TimeInterval
+            if let nt = nextT {
+                let ttt = nt.timeIntervalSince(t)
+                if ttt > 60 * 60 { step = 30 * 60 }
+                else if ttt > 20 * 60 { step = 5 * 60 }
+                else { step = 60 }
+            } else {
+                step = 60 * 60  // transition 없음 → 1시간 step
+            }
+            let next = t.addingTimeInterval(step)
+            if let nt = nextT, nt > t && nt < next {
+                dates.insert(nt)
+            }
+            t = next
         }
-
-        // 마지막 entry 시점 + 30분 후 reload — 새 NTD 추가 등 외부 변화 재확인.
-        let lastDate = entries.last?.date ?? now
-        let reloadAt = lastDate.addingTimeInterval(30 * 60)
+        let entries: [NTDEntry] = dates.sorted().map { date in
+            NTDEntry(
+                date: date,
+                snapshots: Self.makeSnapshots(items: items, now: date, limit: Self.maxSnapshotCount),
+                summary: Self.computeSummary(items: items, now: date)
+            )
+        }
+        let reloadAt = (entries.last?.date ?? now).addingTimeInterval(60)
         completion(Timeline(entries: entries, policy: .after(reloadAt)))
     }
-
-    /// 미리 발급할 미래 transition entry 한도. Widget process memory(~30MB) 안전 마진 위해 보수적.
-    /// 22 items × 6 anchors 정도가 안정 — Provider가 그 이후엔 30분 후 reload.
-    private static let maxFutureEntries = 6
 
     // MARK: - 데이터 fetch
 
@@ -486,6 +492,10 @@ struct MyDaysWidgetEntryView: View {
                         .font(.caption.weight(.semibold))
                         .monospacedDigit()
                         .foregroundStyle(.primary)
+                        // Text(date, style: .relative)는 최대 폭으로 reserve해 좌측 정렬처럼 보일 수 있음.
+                        // multilineTextAlignment(.trailing) + frame trailing alignment로 강제 우측 정렬.
+                        .multilineTextAlignment(.trailing)
+                        .frame(alignment: .trailing)
                 }
                 .lineLimit(1)
             }
@@ -564,79 +574,37 @@ struct MyDaysWidgetEntryView: View {
 
     // MARK: helpers
 
-    /// 카운트다운 / 경과 / 마감지남 / 시간 미설정 텍스트. TimelineView로 갱신 주기 분기.
-    /// - 5분 이내: 1초 주기, "M:SS" 형식
-    /// - 5분 초과: 60초 주기, "Xh Ym" / "Ym" 형식
-    /// Provider가 target 5분 전 시점에 transition entry를 발급하므로 view가 그때 재build되며 schedule 전환.
+    /// 카운트다운 / 경과 / 마감지남 / 시간 미설정 텍스트.
+    /// - 1분 이상: 미리 계산된 단위 명시 포맷 ("20분" / "16시간 30분" / "5일 3시간"). Provider tiered entries로 매분 갱신.
+    /// - 1분 이내 + target 있음: `Text(timerInterval:countsDown:showsHours:false)` — 시스템 timer로 매초 tick ("0:45" → "0:44"...). Widget budget 소비 X.
+    /// - inProgress + 종료 없음(한계까지 count up): 분 단위 (target 없어 timer 사용 불가).
     @ViewBuilder
     private func countdownText(for snap: ItemSnapshot) -> some View {
         switch snap.state {
         case .scheduled:
-            countdownTimeline(targetType: .toTarget(snap.startInstant))
+            countdownInner(target: snap.startInstant, snap: snap)
         case .inProgress:
             if let end = snap.endInstant {
-                countdownTimeline(targetType: .toTarget(end))
+                countdownInner(target: end, snap: snap)
             } else {
-                countdownTimeline(targetType: .elapsedFrom(snap.startInstant))
+                // 한계까지 count up — timer 사용 불가, 분 단위 표시.
+                Text(verbatim: MyDaysNTDLockWidgetEntryView.formatDuration(for: snap, now: entry.date))
             }
-        case .overdue:
-            // Todo 마감 지남 — 시간 텍스트 없음 (stateLabel만 "지남" 표시).
-            EmptyView()
-        case .untimed:
-            // 시간 미설정 — 시간 텍스트 없음.
+        case .overdue, .untimed:
             EmptyView()
         }
     }
 
-    private enum CountdownTargetType {
-        case toTarget(Date)      // 미래 target까지 남은 시간
-        case elapsedFrom(Date)   // 과거 anchor부터 경과 시간 (한계까지 진행 중)
-    }
-
+    /// target까지 남은 시간에 따라 표시 분기.
+    /// 1분 이내 → 시스템 timer (초 단위 live), 그 외 → 분 단위 pre-computed.
     @ViewBuilder
-    private func countdownTimeline(targetType: CountdownTargetType) -> some View {
-        let now = Date()
-        let initialSeconds = Self.computeSeconds(targetType: targetType, now: now)
-        // 5분 이내면 1초 schedule, 외 60초. Provider transition entry가 경계 시점에 재build trigger.
-        let interval: TimeInterval = (initialSeconds <= Int(NTDProvider.fineGrainedThreshold)) ? 1 : 60
-        TimelineView(.periodic(from: now, by: interval)) { context in
-            let seconds = Self.computeSeconds(targetType: targetType, now: context.date)
-            Text(verbatim: Self.formatCountdown(seconds: seconds))
+    private func countdownInner(target: Date, snap: ItemSnapshot) -> some View {
+        let remaining = target.timeIntervalSince(entry.date)
+        if remaining > 0 && remaining <= 60 {
+            Text(timerInterval: entry.date...target, countsDown: true, showsHours: false)
+        } else {
+            Text(verbatim: MyDaysNTDLockWidgetEntryView.formatDuration(for: snap, now: entry.date))
         }
-    }
-
-    private static func computeSeconds(targetType: CountdownTargetType, now: Date) -> Int {
-        switch targetType {
-        case .toTarget(let target):
-            return max(0, Int(target.timeIntervalSince(now)))
-        case .elapsedFrom(let anchor):
-            return max(0, Int(now.timeIntervalSince(anchor)))
-        }
-    }
-
-    /// 카운트다운/경과 시간 표시 format.
-    /// - 5분 이내: "M:SS" (예: "4:30") — 초까지 표시
-    /// - 5분 초과 & 1시간 미만: "Ym" (예: "23분")
-    /// - 1시간 이상: "Xh Ym" (예: "5시간 23분")
-    /// 분 단위는 30초 반올림으로 시각적 점프 완화.
-    static func formatCountdown(seconds: Int) -> String {
-        let s = max(0, seconds)
-        if s < Int(NTDProvider.fineGrainedThreshold) {
-            return String(format: "%d:%02d", s / 60, s % 60)
-        }
-        let totalMinutes = (s + 30) / 60
-        let h = totalMinutes / 60
-        let m = totalMinutes % 60
-        if h > 0 {
-            return String.localizedStringWithFormat(
-                NSLocalizedString("widget.countdown.h_m_format", comment: ""),
-                h, m
-            )
-        }
-        return String.localizedStringWithFormat(
-            NSLocalizedString("widget.countdown.m_format", comment: ""),
-            m
-        )
     }
 
     private func stateLabel(for snap: ItemSnapshot) -> Text {

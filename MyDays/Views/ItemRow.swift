@@ -57,6 +57,9 @@ struct ItemRow: View {
                         Rectangle()
                             .fill(categoryBarColor)
                             .frame(width: 3, height: 14)
+                            // firstTextBaseline 정렬 시 Rectangle은 bottom이 baseline에 매칭됨 → 텍스트 descender 영역만큼 위로 떠 보임.
+                            // baseline anchor를 height의 80% 위치로 옮겨 (텍스트 baseline 위치와 매칭) 시각적으로 텍스트와 센터 정렬.
+                            .alignmentGuide(.firstTextBaseline) { d in d.height * 0.9 }
                     }
                     Text(item.title ?? "")
                         .foregroundStyle(isCompletedForDate ? .secondary : .primary)

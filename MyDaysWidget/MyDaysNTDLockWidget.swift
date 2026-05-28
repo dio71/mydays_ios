@@ -36,25 +36,50 @@ struct NTDLockProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NTDLockEntry>) -> Void) {
         let now = Date()
-        // 활성 NTD 여러 개면 rotationInterval 마다 round-robin으로 교체.
-        // 각 entry는 그 시점 기준으로 list를 다시 평가 → window 안에서 transition(시작/종료)이 발생해도
-        // 다음 entry가 새 list를 반영함. snapshot은 view layer의 TimelineView가 분 단위로 countdown 갱신.
-        var entries: [NTDLockEntry] = []
-        for i in 0..<Self.maxEntries {
-            let entryDate = now.addingTimeInterval(TimeInterval(i) * Self.rotationInterval)
+        // Tiered granularity — 다음 transition까지 거리에 따라 step 동적 변경:
+        //   - > 1시간 남음: 30분 step
+        //   - 20분 ~ 1시간: 5분 step
+        //   - < 20분: 1분 step
+        // transition 시점(시작/종료)은 정확히 entry로 포함 (state flip).
+        // horizon: 6시간 — 그 이상은 reload에 위임.
+        let activeSnaps = Self.fetchRelevantNTDSnapshots(now: now)
+        var transitions: [Date] = []
+        for snap in activeSnaps {
+            if snap.startInstant > now { transitions.append(snap.startInstant) }
+            if let end = snap.endInstant, end > now { transitions.append(end) }
+        }
+        let horizon = now.addingTimeInterval(6 * 60 * 60)
+        var dates: Set<Date> = []
+        var t = now
+        while t <= horizon {
+            dates.insert(t)
+            // t로부터 다음 transition까지 거리. 없으면 1h step (duration 미설정 NTD나 빈 상태).
+            let nextT = transitions.filter { $0 > t }.min()
+            let step: TimeInterval
+            if let nt = nextT {
+                let ttt = nt.timeIntervalSince(t)
+                if ttt > 60 * 60 { step = 30 * 60 }
+                else if ttt > 20 * 60 { step = 5 * 60 }
+                else { step = 60 }
+            } else {
+                step = 60 * 60  // transition 없음 → 1시간 step
+            }
+            let next = t.addingTimeInterval(step)
+            // 다음 step 사이에 transition 있으면 그 시점도 entry로 포함 (state flip 보장).
+            if let nt = nextT, nt > t && nt < next {
+                dates.insert(nt)
+            }
+            t = next
+        }
+        let sortedDates = dates.sorted()
+        let entries: [NTDLockEntry] = sortedDates.enumerated().map { i, entryDate in
             let snaps = Self.fetchRelevantNTDSnapshots(now: entryDate)
             let snapshot: ItemSnapshot? = snaps.isEmpty ? nil : snaps[i % snaps.count]
-            entries.append(NTDLockEntry(date: entryDate, snapshot: snapshot))
+            return NTDLockEntry(date: entryDate, snapshot: snapshot)
         }
-        // 마지막 entry 직후 reload — 다음 rotation cycle을 위해 fresh fetch.
-        let reloadAt = (entries.last?.date ?? now).addingTimeInterval(Self.rotationInterval)
+        let reloadAt = (entries.last?.date ?? now).addingTimeInterval(60)
         completion(Timeline(entries: entries, policy: .after(reloadAt)))
     }
-
-    /// Round-robin 회전 간격(초). 60초 = 분 단위 갱신과 일치 → 카운트다운/회전이 동시에 부드럽게.
-    private static let rotationInterval: TimeInterval = 60
-    /// 미리 발급할 entry 한도. 60초 × 30 = 30분 window. WidgetKit 60-entry 한계 + lock screen budget 보수.
-    private static let maxEntries = 30
 
     // MARK: - 데이터
 
@@ -140,15 +165,18 @@ struct MyDaysNTDLockWidgetEntryView: View {
             }
 
             // 홈 위젯과 같은 패턴 — Spacer로 trailing 정렬, state(caption2 secondary) → countdown(semibold) 순.
+            // Text(date, style: .relative)는 "1시간 23분 뒤" 같은 긴 텍스트가 될 수 있어 .footnote + scaleFactor로 lock screen 좁은 폭에 맞춤.
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Spacer(minLength: 0)
                 stateLabel(for: snap)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 countdownText(for: snap)
-                    .font(.callout.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
                     .monospacedDigit()
                     .widgetAccentable()
+                    .multilineTextAlignment(.trailing)
+                    .minimumScaleFactor(0.7)
             }
             .lineLimit(1)
 
@@ -158,30 +186,28 @@ struct MyDaysNTDLockWidgetEntryView: View {
     }
 
     /// 직선 progress bar — inProgress일 때만 fill, 대기는 invisible (layout 자리는 유지).
+    /// entry.date 기준으로 1회 render — Lock Screen TimelineView 갱신 신뢰 X, transition entry로 라이프사이클 처리.
     /// 진행도 계산: MyDaysNTDLockCircleWidgetEntryView.progressValue와 동일 규칙.
     @ViewBuilder
     private func progressBar(for snap: ItemSnapshot) -> some View {
-        let now = Date()
-        TimelineView(.periodic(from: now, by: 60)) { context in
-            GeometryReader { proxy in
-                let progress: CGFloat = snap.state == .inProgress
-                    ? CGFloat(MyDaysNTDLockCircleWidgetEntryView.progressValue(for: snap, now: context.date))
-                    : 0
-                ZStack(alignment: .leading) {
-                    // 배경 — secondary 흐림.
+        GeometryReader { proxy in
+            let progress: CGFloat = snap.state == .inProgress
+                ? CGFloat(MyDaysNTDLockCircleWidgetEntryView.progressValue(for: snap, now: entry.date))
+                : 0
+            ZStack(alignment: .leading) {
+                // 배경 — secondary 흐림.
+                Capsule()
+                    .fill(.secondary)
+                    .opacity(0.3)
+                // 진행 fill — widgetAccentable tint.
+                if progress > 0 {
                     Capsule()
-                        .fill(.secondary)
-                        .opacity(0.3)
-                    // 진행 fill — widgetAccentable tint.
-                    if progress > 0 {
-                        Capsule()
-                            .frame(width: proxy.size.width * progress)
-                            .widgetAccentable()
-                    }
+                        .frame(width: proxy.size.width * progress)
+                        .widgetAccentable()
                 }
             }
-            .frame(height: 3)
         }
+        .frame(height: 3)
     }
 
     private var emptyContent: some View {
@@ -195,83 +221,62 @@ struct MyDaysNTDLockWidgetEntryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// 잠금화면용 카운트다운/경과 텍스트.
-    /// `Text(timerInterval:)`은 초 단위로 표시되는데 iOS가 잠금화면에서 초를 "--"로 가려서 가독성 나쁨 →
-    /// TimelineView + 1분 갱신으로 직접 포맷. "1일 5시간 30분" 형식, 초 단위 생략.
-    /// - scheduled: 시작 instant까지 count down
-    /// - inProgress + 종료 있음: 종료 instant까지 count down
-    /// - inProgress + 종료 없음 (NTD 한계까지): 시작 instant부터 count up
+    /// 잠금화면용 카운트다운/경과 텍스트 — 단위 명시 포맷 (예: "20분" / "16시간 30분" / "5일 3시간").
+    /// entry.date 기준 미리 계산. Provider가 분 granularity 별 entry 발급해 iOS가 entry swap으로 갱신.
+    /// - scheduled: 시작 instant - entry.date 남은 시간
+    /// - inProgress + 종료 있음: 종료 instant - entry.date 남은 시간
+    /// - inProgress + 종료 없음 (NTD 한계까지): entry.date - 시작 instant 경과 시간
     @ViewBuilder
     private func countdownText(for snap: ItemSnapshot) -> some View {
-        switch snap.state {
-        case .scheduled, .inProgress:
-            durationTimeline(for: snap)
-        case .overdue, .untimed:
-            // NTD는 자동 완료라 overdue 도달 X. untimed도 발생 X (NTD는 항상 hasTime).
-            EmptyView()
-        }
+        Text(verbatim: Self.formatDuration(for: snap, now: entry.date))
     }
 
-    /// 1분 주기로 갱신되는 duration 텍스트. 잠금화면 widget OS update 주기와 일치.
-    @ViewBuilder
-    private func durationTimeline(for snap: ItemSnapshot) -> some View {
-        let now = Date()
-        TimelineView(.periodic(from: now, by: 60)) { context in
-            let secs = Self.remainingSeconds(for: snap, now: context.date)
-            Text(verbatim: Self.formatDHM(seconds: secs))
-        }
-    }
-
-    /// snap 상태별 표시할 초.
-    /// - scheduled: 시작까지 남은 초
-    /// - inProgress + end: 종료까지 남은 초
-    /// - inProgress + no end: 시작부터 경과 초
-    /// internal — circular widget 재사용.
-    static func remainingSeconds(for snap: ItemSnapshot, now: Date) -> Int {
+    /// 단위 명시 duration 포맷. ntd.countdown.* localized 키 재사용.
+    /// - < 1분: "1분" (초 노출 회피, 1분 floor)
+    /// - < 1시간: "M분"
+    /// - < 24시간 + 분 있음: "H시간 M분"
+    /// - < 24시간 + 분 0: "H시간"
+    /// - ≥ 24시간 + 시간 있음: "D일 H시간"
+    /// - ≥ 24시간 + 시간 0: "D일"
+    static func formatDuration(for snap: ItemSnapshot, now: Date) -> String {
+        let seconds: Int
         switch snap.state {
         case .scheduled:
-            return max(0, Int(snap.startInstant.timeIntervalSince(now)))
+            seconds = max(0, Int(snap.startInstant.timeIntervalSince(now)))
         case .inProgress:
             if let end = snap.endInstant {
-                return max(0, Int(end.timeIntervalSince(now)))
+                seconds = max(0, Int(end.timeIntervalSince(now)))
+            } else {
+                seconds = max(0, Int(now.timeIntervalSince(snap.startInstant)))
             }
-            return max(0, Int(now.timeIntervalSince(snap.startInstant)))
         case .overdue, .untimed:
-            return 0
+            return ""
         }
-    }
-
-    /// "1일 5시간 30분" 형식. 0인 leading/trailing unit은 생략. 1분 미만은 "1분"으로 floor (초 노출 회피).
-    /// 단위 텍스트는 기존 ntd.countdown.{d,h,m}_format 재사용 — "1d 5h 30m" / "1일 5시간 30분" 자동 로컬라이즈.
-    /// internal — circular lock widget이 동일 포맷 사용.
-    static func formatDHM(seconds: Int) -> String {
-        let s = max(0, seconds)
-        // < 1분 → "1분"으로 표시 (실제 초는 가리고, 임박했음만 전달)
-        if s < 60 {
-            return String.localizedStringWithFormat(
-                NSLocalizedString("ntd.countdown.m_format", comment: ""), 1
-            )
-        }
-        let totalMin = s / 60
+        let totalMin = seconds < 60 ? 1 : seconds / 60
         let days = totalMin / (24 * 60)
         let hours = (totalMin % (24 * 60)) / 60
         let minutes = totalMin % 60
 
-        var parts: [String] = []
         if days > 0 {
-            parts.append(String.localizedStringWithFormat(
-                NSLocalizedString("ntd.countdown.d_format", comment: ""), days))
+            if hours > 0 {
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("ntd.countdown.d_h_format", comment: ""), days, hours)
+            }
+            return String.localizedStringWithFormat(
+                NSLocalizedString("ntd.countdown.d_format", comment: ""), days)
         }
         if hours > 0 {
-            parts.append(String.localizedStringWithFormat(
-                NSLocalizedString("ntd.countdown.h_format", comment: ""), hours))
+            if minutes > 0 {
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("ntd.countdown.h_m_format", comment: ""), hours, minutes)
+            }
+            return String.localizedStringWithFormat(
+                NSLocalizedString("ntd.countdown.h_format", comment: ""), hours)
         }
-        if minutes > 0 {
-            parts.append(String.localizedStringWithFormat(
-                NSLocalizedString("ntd.countdown.m_format", comment: ""), minutes))
-        }
-        return parts.joined(separator: " ")
+        return String.localizedStringWithFormat(
+            NSLocalizedString("ntd.countdown.m_format", comment: ""), minutes)
     }
+
 
     /// 상태 라벨 — 홈 위젯과 통일 ("시작까지/종료까지/진행 중"). widget.state.* 키 재사용.
     private func stateLabel(for snap: ItemSnapshot) -> Text {

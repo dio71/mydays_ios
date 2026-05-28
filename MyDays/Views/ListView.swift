@@ -167,7 +167,8 @@ struct ListView: View {
         .overlay(alignment: .bottomTrailing) {
             Button {
                 // 신규 항목 default: 오늘 일정으로 preset (TodayView와 동일).
-                sheet = .new(baseDate: .todayCalendarAnchor)
+                // 카테고리 필터 적용 중이면 그 카테고리를 신규 항목에도 preset.
+                sheet = .new(baseDate: .todayCalendarAnchor, categoryID: filterCategoryID)
             } label: {
                 Image(systemName: "plus")
                     .font(.title2.weight(.semibold))
@@ -180,8 +181,8 @@ struct ListView: View {
         }
         .sheet(item: $sheet) { mode in
             switch mode {
-            case .new(let baseDate):
-                AddItemView(baseDate: baseDate)
+            case .new(let baseDate, let categoryID):
+                AddItemView(baseDate: baseDate, categoryID: categoryID)
             case .edit(let item):
                 AddItemView(editing: item)
             }
@@ -212,9 +213,9 @@ struct ListView: View {
     private func categorySectionHeader(_ cat: Category) -> some View {
         HStack(spacing: 8) {
             Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .frame(width: 20, height: 20)
                 .background(Circle().fill(CategoryRowView.categoryColor(for: cat)))
             Text(verbatim: cat.name ?? "")
         }

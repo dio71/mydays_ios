@@ -48,6 +48,8 @@ struct NTDRow: View {
                             Rectangle()
                                 .fill(categoryBarColor)
                                 .frame(width: 3, height: 14)
+                                // ItemRow와 동일 패턴 — baseline anchor를 height의 80% 위치로 옮겨 텍스트 센터 정렬.
+                                .alignmentGuide(.firstTextBaseline) { d in d.height * 0.9 }
                         }
                         Text(item.title ?? "")
                             .lineLimit(1)

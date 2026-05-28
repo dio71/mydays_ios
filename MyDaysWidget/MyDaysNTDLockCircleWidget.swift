@@ -31,21 +31,43 @@ struct NTDLockCircleProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NTDLockCircleEntry>) -> Void) {
         let now = Date()
-        // Rectangular와 동일 패턴 — 60초 주기로 round-robin, 30분 window.
-        // NTD가 1개면 매 entry가 같은 항목 → 회전 없는 효과.
-        var entries: [NTDLockCircleEntry] = []
-        for i in 0..<Self.maxEntries {
-            let entryDate = now.addingTimeInterval(TimeInterval(i) * Self.rotationInterval)
+        // Rectangular와 동일 tiered granularity: >1h 30min step / 20m~1h 5min step / <20m 1min step.
+        let activeSnaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: now)
+        var transitions: [Date] = []
+        for snap in activeSnaps {
+            if snap.startInstant > now { transitions.append(snap.startInstant) }
+            if let end = snap.endInstant, end > now { transitions.append(end) }
+        }
+        let horizon = now.addingTimeInterval(6 * 60 * 60)
+        var dates: Set<Date> = []
+        var t = now
+        while t <= horizon {
+            dates.insert(t)
+            let nextT = transitions.filter { $0 > t }.min()
+            let step: TimeInterval
+            if let nt = nextT {
+                let ttt = nt.timeIntervalSince(t)
+                if ttt > 60 * 60 { step = 30 * 60 }
+                else if ttt > 20 * 60 { step = 5 * 60 }
+                else { step = 60 }
+            } else {
+                step = 60 * 60  // transition 없음 → 1시간 step
+            }
+            let next = t.addingTimeInterval(step)
+            if let nt = nextT, nt > t && nt < next {
+                dates.insert(nt)
+            }
+            t = next
+        }
+        let sortedDates = dates.sorted()
+        let entries: [NTDLockCircleEntry] = sortedDates.enumerated().map { i, entryDate in
             let snaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: entryDate)
             let snapshot: ItemSnapshot? = snaps.isEmpty ? nil : snaps[i % snaps.count]
-            entries.append(NTDLockCircleEntry(date: entryDate, snapshot: snapshot))
+            return NTDLockCircleEntry(date: entryDate, snapshot: snapshot)
         }
-        let reloadAt = (entries.last?.date ?? now).addingTimeInterval(Self.rotationInterval)
+        let reloadAt = (entries.last?.date ?? now).addingTimeInterval(60)
         completion(Timeline(entries: entries, policy: .after(reloadAt)))
     }
-
-    private static let rotationInterval: TimeInterval = 60
-    private static let maxEntries = 30
 }
 
 // MARK: - View
@@ -76,17 +98,15 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
     /// - 목표 시간 설정: elapsed / total
     /// - 목표 시간 미설정: elapsed / 30일, cap 1.0
     /// 대기(scheduled)/완료/포기 상태에서는 본 view 자체가 호출되지 않음.
+    /// entry.date 기준 1회 render — Lock Screen TimelineView 갱신 제약 회피, transition entry로 라이프사이클 처리.
     @ViewBuilder
     private func progressArc(for snap: ItemSnapshot) -> some View {
-        let now = Date()
-        TimelineView(.periodic(from: now, by: 60)) { context in
-            Circle()
-                .trim(from: 0, to: Self.progressValue(for: snap, now: context.date))
-                .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .padding(1)
-                .widgetAccentable()
-        }
+        Circle()
+            .trim(from: 0, to: Self.progressValue(for: snap, now: entry.date))
+            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .padding(1)
+            .widgetAccentable()
     }
 
     /// 진행도 0.0~1.0. 목표 시간 있으면 elapsed/total, 없으면 30일 기준 cap.
@@ -110,9 +130,12 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
             Image(systemName: "clock")
                 .font(.system(size: 10))
             countdownTimeline(for: snap)
-                .font(.system(size: 18, weight: .bold))
+                .font(.system(size: 13, weight: .bold))
                 .monospacedDigit()
                 .widgetAccentable()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .multilineTextAlignment(.center)
             statusLabel(for: snap)
                 .font(.system(size: 9, weight: .medium))
         }
@@ -125,14 +148,12 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
             .widgetAccentable()
     }
 
-    /// HH:mm 형식 카운트다운. 분 단위 갱신.
+    /// 카운트다운 — 단위 명시 포맷 (예: "20분" / "16시간" / "5일"). entry.date 기준 미리 계산.
+    /// Provider가 분 granularity 별 entry 발급 → iOS entry swap으로 갱신 (Lock Screen TimelineView 제약 회피).
+    /// 좁은 원형 영역이라 minimumScaleFactor + multilineTextAlignment center가 처리.
     @ViewBuilder
     private func countdownTimeline(for snap: ItemSnapshot) -> some View {
-        let now = Date()
-        TimelineView(.periodic(from: now, by: 60)) { context in
-            let secs = MyDaysNTDLockWidgetEntryView.remainingSeconds(for: snap, now: context.date)
-            Text(verbatim: Self.formatHHMM(seconds: secs))
-        }
+        Text(verbatim: MyDaysNTDLockWidgetEntryView.formatDuration(for: snap, now: entry.date))
     }
 
     /// 좁은 공간 위한 짧은 라벨 (남음/진행/대기 / Left/On/Wait).
@@ -149,15 +170,6 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
         }
     }
 
-    /// "H:mm" 포맷. < 1분이면 "0:01"로 floor (초 노출 회피).
-    /// >= 24h여도 total hours로 표시 (예: "125:30") — NTD는 보통 16h 단식 등이라 24h 미만이 일반적.
-    static func formatHHMM(seconds: Int) -> String {
-        let s = max(0, seconds)
-        let totalMinutes = s < 60 ? 1 : s / 60
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        return String(format: "%d:%02d", hours, minutes)
-    }
 }
 
 // MARK: - Widget Configuration

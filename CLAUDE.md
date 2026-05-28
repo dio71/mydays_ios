@@ -562,6 +562,49 @@ MyDays/MyDays/
 - CategoryPickerSheet 옵션도 동일 패턴.
 - bar 양끝 round padding 등 MonthGridView 미세 시각 조정.
 
+### Widget budget 최적화 (3 위젯 공통)
+- **Tiered granularity timeline** — 다음 transition(NTD 시작/종료 instant)까지 거리 기반 step:
+  - `> 1h`: 30분 step / `20m~1h`: 5분 step / `< 20m`: 1분 step
+  - transition 없음 (duration 미설정 NTD / 빈 상태): 1시간 step (fallback)
+- Transition 시점은 step 무시하고 entry에 강제 포함 — 시작 전 → 진행 중 → 종료 state flip 보장.
+- Horizon 6시간, `reloadAt = entries.last + 60s`. Timeline당 ~13~30 entries, 일일 reload ~4~10회 — Apple budget(~40~70/day) 안에 여유.
+- **Home widget만 <1분일 때 시스템 라이브 카운트다운** 사용:
+  ```swift
+  if remaining > 0 && remaining <= 60 {
+      Text(timerInterval: entry.date...target, countsDown: true, showsHours: false)
+  } else {
+      Text(verbatim: formatDuration(for: snap, now: entry.date))
+  }
+  ```
+  - `Text(timerInterval:)`는 시스템이 budget 없이 직접 갱신.
+  - Lock 위젯은 OS가 잠금화면 초를 `--`로 가려서 의미 없음 → pre-computed `formatDuration` 유지.
+- Progress bar/arc도 entry.date 기반 (별도 inner TimelineView 제거 — budget 차감 회피).
+
+### 오늘탭 카테고리 필터 (ListView 패턴 이식)
+- TodayView에 `@State filterCategoryID: UUID?` + `@FetchRequest categories` + `categoryFilterMenu` 추가. ListView/ArchiveView와 동일 UX (`line.3.horizontal.decrease.circle` Menu).
+- `categoryFilter` prop으로 TodayList + MonthGridView에 전파. MonthGridView는 `filteredItems` computed로 dot/bar 인디케이터 적용.
+- TodayList `matchesCategoryFilter` helper를 `ntdsForDate` / `routinesForDate` / `todoActivityRows` 모두에 적용. (초기에 todoActivityRows 누락 → 필터 미동작 버그 fix).
+- **필터 활성 시 신규 항목 카테고리 자동 preset**: `ItemSheetMode.new(baseDate:categoryID:)` 추가 + `AddItemView(editing:baseDate:categoryID:)`에서 `_selectedCategoryID = State(initialValue: categoryID)`. TodayView/ListView/ArchiveView (QuickEntryBar quickSave 포함)의 모든 신규 시트 진입에 적용.
+
+### Section header 카테고리 아이콘 (오늘/목록/보관함 통일)
+- 필터 활성 시 section header에 filled circle + white SF Symbol 표시 (카테고리 색상). 명칭은 표시 안 함 (오늘탭 정책 — 단순화 우선).
+- 크기 통일: `font: .system(size: 11, weight: .semibold)`, `frame: 20×20`. (기존 ListView/ArchiveView는 18×18이었음 → 20×20으로 맞춤.)
+- 위치: 섹션 타이틀 바로 오른쪽 (`HStack(spacing: 6)`, Spacer 없음 — 완전 우측 정렬 X).
+- ListView/ArchiveView는 그룹 모드일 때 이름과 함께 표시 (카테고리별 섹션 분리이므로 식별 필요).
+
+### Row 카테고리 bar 정렬
+- 제목 앞 3pt × 14pt 세로 bar (카테고리 색). 기본 baseline 정렬 시 위로 튀어 보이는 문제 해결:
+  ```swift
+  .alignmentGuide(.firstTextBaseline) { d in d.height * 0.9 }
+  ```
+- ItemRow + NTDRow 동일 적용. multiplier 0.9로 정착 (0.8 너무 내려감, 0.85 살짝 부족).
+
+### 빈 상태 / 라벨 변경
+- `today.section.not_todo` 한글: "절제 목표" → "목표" (영문 "Fast" 유지)
+- `today.empty.not_todo`: "진행 중인 목표 활동이 없습니다" / "No active fasts"
+- `today.empty.todo`: "진행 중인 할일 일정이 없습니다" / "No active todos"
+- `archive.empty`: "보관 중인 할일이 없습니다" / "No archived tasks"
+
 ## 미구현 (다음 후보, 우선순위 순)
 
 ### 1. 활동 목표 (Activity Goal) — 3번째 핵심 기능 (다음 진행 예정)

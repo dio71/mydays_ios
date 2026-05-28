@@ -27,6 +27,9 @@ struct MonthGridView: View {
     /// 가로 swipe로 ±1개월 shift callback.
     let onShiftMonth: (Int) -> Void
 
+    /// 카테고리 필터 — nil이면 "모두". TodayView 상단 필터 메뉴와 sync.
+    var categoryFilter: UUID? = nil
+
     /// 모든 active 항목 — Someday 제외, 삭제(status=2) 제외. cell 인디케이터(dot) 계산용.
     /// 일자별로 어떤 항목이 cover하는지 매 render마다 계산. 100여개 항목 × 42 cells 정도면 무시 가능 비용.
     @FetchRequest(
@@ -35,6 +38,12 @@ struct MonthGridView: View {
         animation: .default
     )
     private var allItems: FetchedResults<Item>
+
+    /// categoryFilter 적용된 items — view-side filter. nil이면 모두 통과.
+    private var filteredItems: [Item] {
+        guard let id = categoryFilter else { return Array(allItems) }
+        return allItems.filter { $0.category?.id == id }
+    }
 
     var body: some View {
         // TodayView/WeekStripView와 동일한 transition 패턴.
@@ -444,7 +453,7 @@ struct MonthGridView: View {
         var noTime: [DotIndicator] = []
         var am: [DotIndicator] = []
         var pm: [DotIndicator] = []
-        for item in allItems {
+        for item in filteredItems {
             let span = Self.occurrenceSpan(of: item)
             guard span == 1, singleDayItemCovers(item, day: day) else { continue }
             let state = indicatorState(of: item, occurrenceStart: day)
@@ -485,7 +494,7 @@ struct MonthGridView: View {
     private var multiDayOccurrences: [(item: Item, startDay: Date, endDay: Date, startHour: Int, endHour: Int)] {
         var result: [(Item, Date, Date, Int, Int)] = []
         let cal = Calendar.gmt
-        for item in allItems {
+        for item in filteredItems {
             let span = Self.occurrenceSpan(of: item)
             guard span > 1 else { continue }
             // 시작·종료 hour 계산 — 모든 occurrence가 같은 값 (반복도 동일 시간).

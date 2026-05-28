@@ -859,13 +859,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No someday tasks"
+            "value" : "No archived tasks"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "막연한 할일이 없습니다"
+            "value" : "보관 중인 할일이 없습니다"
           }
         }
       }
@@ -3478,13 +3478,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No Fasts"
+            "value" : "No active fasts"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "절제 목표가 없습니다"
+            "value" : "진행 중인 목표 활동이 없습니다"
           }
         }
       }
@@ -3528,13 +3528,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No tasks"
+            "value" : "No active todos"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "할일이 없습니다"
+            "value" : "진행 중인 할일 일정이 없습니다"
           }
         }
       }
@@ -3686,7 +3686,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "절제 목표"
+            "value" : "목표"
           }
         }
       }
