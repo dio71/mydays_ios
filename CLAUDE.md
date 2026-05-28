@@ -676,16 +676,15 @@ protocol ActivityDataProvider {
 - HKObserverQuery + `enableBackgroundDelivery`로 백그라운드 wake-up 가능 (Steps·Sleep 지원). 단 빈도 제한.
 - 권한 prompt UX 신중히 — 한 번에 여러 type 요청보다 type별 lazy 요청 권장.
 
-### 2. 카테고리·태그 관리 UI
-- Category 입력/편집 화면 (현재 모델은 있지만 UI 없음 — 생성 진입점 X).
-- 목록·보관함에 category/tag 필터 추가.
-- Tag도 동일 (다중 선택 가능 모델).
-- 새 생성 지점에서 `id = UUID()` + `createdAt`/`updatedAt = now` 필수 (Firebase prep).
+### 2. 태그 관리 UI (카테고리는 완료)
+- 카테고리는 2026-05-28 세션에서 완료 (CRUD + 필터 + 그룹핑).
+- Tag는 모델만 있고 UI 없음 — 다중 선택 가능 모델로 별도 진행 필요.
+- 사용자 결정: 일반 사용자에게 2단계(카테고리 + 하위 분류)는 과함 → 3단계 계층 구조는 진행 안 함.
 
-### 3. 3단계 계층 구조 (parent/children)
-- AddItemView에 parent picker.
-- 표시(들여쓰기) — 깊이 제한 3단계 (앱 로직, Core Data는 unlimited).
-- 부모 완료 시 자식 처리 정책 결정 필요.
+### 3. iPad 최적화 (Stage 1 완료, Stage 2/3 진행 예정)
+- Stage 1 완료 (2026-05-28 세션): NavigationSplitView 분기, 사이드바 selection 동작.
+- Stage 2: content 폭 cap, 키보드 단축키, 멀티 컬럼 디테일 (오늘+편집 동시).
+- Stage 3: Mac Catalyst 변환 + Mac native 폴리시.
 
 ### 4. 알림 후속 개선
 - 알림 탭 → 항목 편집 화면 deep link.
@@ -700,10 +699,6 @@ protocol ActivityDataProvider {
 ### 6. Month view Phase 3 — grid 인프라 재활용
 - 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용 (성공/실패 색 dot 등 indicator만 교체).
 - MonthGridView를 prop 기반(`cellDecorator: (Date) -> some View`)으로 일반화 필요.
-
-### 7. iPad 최적화
-- 합의: **앱 완성 후 일괄 작업**.
-- NavigationSplitView, 2-pane, Regular size class.
 
 ### 폴리시 / 후속
 - SpeechRecognizer Phase B 발전 — 자체 mic UI 풍부화 (waveform 등). 현재는 hands-free 용.
