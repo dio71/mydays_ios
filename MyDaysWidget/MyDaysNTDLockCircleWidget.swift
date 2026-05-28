@@ -56,10 +56,14 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
     var body: some View {
         // ZStack에 AccessoryWidgetBackground를 깔아 캘린더 위젯과 같은 원형 배경 효과.
         // 시스템이 잠금화면 tint를 자동 적용 — 배경 원은 secondary, widgetAccentable() 영역은 강조.
+        // 진행 중일 때만 테두리에 progress arc (Circle.trim) 오버레이.
         ZStack {
             AccessoryWidgetBackground()
             if let snap = entry.snapshot {
                 content(for: snap)
+                if snap.state == .inProgress {
+                    progressArc(for: snap)
+                }
             } else {
                 emptyContent
             }
@@ -67,12 +71,43 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
+    /// 진행 중 NTD의 progress arc — 위젯 테두리에 원형 호로 진행도 표시.
+    /// 0시 방향(12시) 시작, 시계 방향으로 fill.
+    /// - 목표 시간 설정: elapsed / total
+    /// - 목표 시간 미설정: elapsed / 30일, cap 1.0
+    /// 대기(scheduled)/완료/포기 상태에서는 본 view 자체가 호출되지 않음.
+    @ViewBuilder
+    private func progressArc(for snap: ItemSnapshot) -> some View {
+        let now = Date()
+        TimelineView(.periodic(from: now, by: 60)) { context in
+            Circle()
+                .trim(from: 0, to: Self.progressValue(for: snap, now: context.date))
+                .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .padding(1)
+                .widgetAccentable()
+        }
+    }
+
+    /// 진행도 0.0~1.0. 목표 시간 있으면 elapsed/total, 없으면 30일 기준 cap.
+    static func progressValue(for snap: ItemSnapshot, now: Date) -> Double {
+        guard snap.state == .inProgress else { return 0 }
+        let elapsed = now.timeIntervalSince(snap.startInstant)
+        if let end = snap.endInstant {
+            let total = max(end.timeIntervalSince(snap.startInstant), 1)
+            return max(0, min(elapsed / total, 1.0))
+        }
+        // 목표 시간 미설정 — 30일 기준 (이후로는 100%로 cap).
+        let thirtyDays: TimeInterval = 30 * 24 * 3600
+        return max(0, min(elapsed / thirtyDays, 1.0))
+    }
+
     /// 3단 stack — icon / HH:mm 카운트다운(크게) / 상태 라벨(작게).
     /// countdown은 widgetAccentable로 강조, 아이콘/라벨은 secondary 톤.
     @ViewBuilder
     private func content(for snap: ItemSnapshot) -> some View {
         VStack(spacing: 0) {
-            Image(systemName: "stopwatch")
+            Image(systemName: "clock")
                 .font(.system(size: 10))
             countdownTimeline(for: snap)
                 .font(.system(size: 18, weight: .bold))
@@ -85,7 +120,7 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
     }
 
     private var emptyContent: some View {
-        Image(systemName: "stopwatch")
+        Image(systemName: "clock")
             .font(.system(size: 20))
             .widgetAccentable()
     }

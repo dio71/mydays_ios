@@ -46,6 +46,7 @@ enum Frequency: Int16, CaseIterable {
     case weekdays = 3
     case weekend = 4
     case weeklyCount = 5
+    case yearly = 6
 }
 
 enum ReminderAnchor: Int16, CaseIterable {

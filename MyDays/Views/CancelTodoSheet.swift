@@ -78,6 +78,7 @@ struct CancelTodoSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("common.close") { dismiss() }
+                        .tint(.secondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("todo.cancel.confirm", role: .destructive) {

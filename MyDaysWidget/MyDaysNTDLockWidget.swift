@@ -124,14 +124,14 @@ struct MyDaysNTDLockWidgetEntryView: View {
 
     /// 3줄 layout (캘린더 위젯 스타일):
     ///   - 1행: 아이콘 + NTD 제목 (작은 폰트)
-    ///   - 2행: 카운트다운 (큰 폰트, widgetAccentable로 tint 강조 — main glanceable signal)
-    ///   - 3행: 상태 라벨 "남음/진행/대기" (작은 폰트)
+    ///   - 2행: 카운트다운(큰 폰트, widgetAccentable) + 상태 라벨(작은 폰트, trailing)
+    ///   - 3행: 직선 progress bar — inProgress일 때만, 대기는 invisible (layout 유지)
     /// 잠금화면 vibrancy 환경: widgetAccentable() 영역만 watch face tint, 나머지는 secondary 톤.
     @ViewBuilder
     private func content(for snap: ItemSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
-                Image(systemName: "stopwatch")
+                Image(systemName: "clock")
                     .imageScale(.small)
                 Text(verbatim: snap.title)
                     .font(.system(size: 12, weight: .medium))
@@ -139,23 +139,54 @@ struct MyDaysNTDLockWidgetEntryView: View {
                     .truncationMode(.tail)
             }
 
-            countdownText(for: snap)
-                .font(.system(size: 20, weight: .bold))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .widgetAccentable()
+            // 홈 위젯과 같은 패턴 — Spacer로 trailing 정렬, state(caption2 secondary) → countdown(semibold) 순.
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Spacer(minLength: 0)
+                stateLabel(for: snap)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                countdownText(for: snap)
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                    .widgetAccentable()
+            }
+            .lineLimit(1)
 
-            stateLabel(for: snap)
-                .font(.caption2)
-                .lineLimit(1)
+            progressBar(for: snap)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    /// 직선 progress bar — inProgress일 때만 fill, 대기는 invisible (layout 자리는 유지).
+    /// 진행도 계산: MyDaysNTDLockCircleWidgetEntryView.progressValue와 동일 규칙.
+    @ViewBuilder
+    private func progressBar(for snap: ItemSnapshot) -> some View {
+        let now = Date()
+        TimelineView(.periodic(from: now, by: 60)) { context in
+            GeometryReader { proxy in
+                let progress: CGFloat = snap.state == .inProgress
+                    ? CGFloat(MyDaysNTDLockCircleWidgetEntryView.progressValue(for: snap, now: context.date))
+                    : 0
+                ZStack(alignment: .leading) {
+                    // 배경 — secondary 흐림.
+                    Capsule()
+                        .fill(.secondary)
+                        .opacity(0.3)
+                    // 진행 fill — widgetAccentable tint.
+                    if progress > 0 {
+                        Capsule()
+                            .frame(width: proxy.size.width * progress)
+                            .widgetAccentable()
+                    }
+                }
+            }
+            .frame(height: 3)
+        }
+    }
+
     private var emptyContent: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Image(systemName: "stopwatch")
+            Image(systemName: "clock")
                 .imageScale(.small)
             Text("widget.ntd.empty")
                 .font(.caption2)
@@ -242,16 +273,15 @@ struct MyDaysNTDLockWidgetEntryView: View {
         return parts.joined(separator: " ")
     }
 
-    /// 상태 라벨 — circular widget과 동일한 짧은 키 재사용 ("남음/진행/대기").
-    /// 잠금화면 위젯 일관성 + 좁은 공간에 적합.
+    /// 상태 라벨 — 홈 위젯과 통일 ("시작까지/종료까지/진행 중"). widget.state.* 키 재사용.
     private func stateLabel(for snap: ItemSnapshot) -> Text {
         switch snap.state {
         case .scheduled:
-            return Text("widget.ntd_lock_circle.status.scheduled")
+            return Text("widget.state.scheduled")
         case .inProgress:
             return snap.endInstant != nil
-                ? Text("widget.ntd_lock_circle.status.remaining")
-                : Text("widget.ntd_lock_circle.status.elapsed")
+                ? Text("widget.state.remaining")
+                : Text("widget.state.elapsed")
         case .overdue:
             return Text("widget.state.overdue")
         case .untimed:

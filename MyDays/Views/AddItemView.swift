@@ -63,6 +63,17 @@ struct AddItemView: View {
     @State private var showRecurrenceSheet = false
     @State private var showPeriod: Bool
     @State private var recurrenceConfig: RecurrenceConfig?
+    /// 선택된 카테고리 id. nil이면 미분류.
+    @State private var selectedCategoryID: UUID?
+    /// 카테고리 picker sheet 노출 여부.
+    @State private var showCategoryPicker: Bool = false
+
+    /// 정렬된 카테고리 목록 — picker 옵션.
+    @FetchRequest(
+        sortDescriptors: [SortDescriptor(\Category.sortOrder), SortDescriptor(\Category.createdAt)],
+        animation: .default
+    )
+    private var categories: FetchedResults<Category>
 
     init(editing: Item? = nil, baseDate: Date? = nil) {
         self.editingItem = editing
@@ -119,6 +130,7 @@ struct AddItemView: View {
             } else {
                 _recurrenceConfig = State(initialValue: nil)
             }
+            _selectedCategoryID = State(initialValue: item.category?.id)
         } else {
             _title = State(initialValue: "")
             _notes = State(initialValue: "")
@@ -151,6 +163,7 @@ struct AddItemView: View {
             _todoStartAlertOffset = State(initialValue: nil)
             _todoDueAlertOffset = State(initialValue: nil)
             _recurrenceConfig = State(initialValue: nil)
+            _selectedCategoryID = State(initialValue: nil)
         }
     }
 
@@ -379,6 +392,8 @@ struct AddItemView: View {
         if item.dueHourInt != effectiveDueH { return true }
         // 반복 종료일.
         if item.recurrenceEndDate != recurrenceEndDate { return true }
+        // 카테고리.
+        if item.category?.id != selectedCategoryID { return true }
         // NTD 목표 시간.
         if kind == .notTodo {
             if item.ntdDurationHourInt != ntdDurationHour { return true }
@@ -448,12 +463,15 @@ struct AddItemView: View {
                             quickChip("add.chip.tomorrow", daysFromToday: 1)
                             if !isNTD {
                                 periodChip
-                                // 시간 설정 toggle은 다른 chip과 시각적 구분.
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.3))
-                                    .frame(width: 1, height: 20)
-                                    .padding(.horizontal, 2)
-                                hasTimeChip
+                                // 시간 설정 toggle은 hasStart일 때만 의미 있음 — 미정이면 시각 설정 불가하니
+                                // divider + chip 둘 다 숨김.
+                                if hasStart {
+                                    Rectangle()
+                                        .fill(Color.secondary.opacity(0.3))
+                                        .frame(width: 1, height: 20)
+                                        .padding(.horizontal, 2)
+                                    hasTimeChip
+                                }
                             }
                         }
                         .padding(.vertical, 2)
@@ -550,6 +568,13 @@ struct AddItemView: View {
                     }
                 }
 
+                // 카테고리 — NTD/Todo 공통. 등록된 카테고리가 없으면 section 자체 숨김 (진입 장벽 0).
+                if !categories.isEmpty {
+                    Section("add.section.category") {
+                        categoryPickerRow
+                    }
+                }
+
                 // Todo 전용: 우선순위.
                 if !isNTD {
                     Section("add.section.priority") {
@@ -586,26 +611,28 @@ struct AddItemView: View {
                         }
                         .buttonStyle(.plain)
 
-                        // 반복 종료일 row — 반복 section 보일 때 항상 노출.
-                        // 반복 패턴 미설정 시 입력해도 의미는 없지만, 발견성을 위해 표시.
-                        Button {
-                            toggleDateExpansion(.recurrenceEnd)
-                        } label: {
-                            HStack {
-                                Text("add.field.recurrence_end")
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Text(verbatim: recurrenceEndDisplayText)
-                                    .foregroundStyle(dateExpansion == .recurrenceEnd ? Color.accentColor : Color.secondary)
-                                Image(systemName: dateExpansion == .recurrenceEnd ? "chevron.down" : "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
+                        // 반복 종료일 row — 반복 패턴이 설정된 경우에만 노출.
+                        // 패턴 없이 종료일만 입력해도 의미 없으므로 숨김 → UI 단순화.
+                        if recurrenceConfig != nil {
+                            Button {
+                                toggleDateExpansion(.recurrenceEnd)
+                            } label: {
+                                HStack {
+                                    Text("add.field.recurrence_end")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Text(verbatim: recurrenceEndDisplayText)
+                                        .foregroundStyle(dateExpansion == .recurrenceEnd ? Color.accentColor : Color.secondary)
+                                    Image(systemName: dateExpansion == .recurrenceEnd ? "chevron.down" : "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        if dateExpansion == .recurrenceEnd {
-                            inlineRecurrenceEndEditor
+                            .buttonStyle(.plain)
+                            if dateExpansion == .recurrenceEnd {
+                                inlineRecurrenceEndEditor
+                            }
                         }
                     }
                 }
@@ -657,6 +684,8 @@ struct AddItemView: View {
                             dismiss()
                         }
                     }
+                    // 취소 버튼은 앱 테마 색 적용 X — 중립 회색으로 유지 (저장/주요 액션과 시각 구분).
+                    .tint(.secondary)
                     .confirmationDialog(
                         "add.cancel_confirm.title",
                         isPresented: $showCancelConfirm,
@@ -938,14 +967,15 @@ struct AddItemView: View {
         guard let config = recurrenceConfig else {
             return String(localized: "recurrence.empty")
         }
+        let interval = max(config.interval, 1)
         switch config.frequency {
         case .daily:
-            if config.interval <= 1 {
+            if interval <= 1 {
                 return String(localized: "recurrence.summary.everyday")
             }
             return String.localizedStringWithFormat(
                 NSLocalizedString("recurrence.summary.every_n_days", comment: ""),
-                config.interval
+                interval
             )
 
         case .weekly:
@@ -961,73 +991,165 @@ struct AddItemView: View {
                 return symbols[idx - 1]
             }
             let daysStr = names.joined(separator: " · ")
+            if interval <= 1 {
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("recurrence.summary.weekly_list", comment: ""),
+                    daysStr
+                )
+            }
             return String.localizedStringWithFormat(
-                NSLocalizedString("recurrence.summary.weekly_list", comment: ""),
-                daysStr
+                NSLocalizedString("recurrence.summary.weekly_list_interval", comment: ""),
+                daysStr, interval
             )
 
         case .monthly:
+            // 조건지정 우선 — weekdayMask는 config.weekdays 첫번째 비트로 변환.
+            if let ordinal = config.weekdayOrdinal {
+                let weekdayMask: Int16 = {
+                    var m: Int16 = 0
+                    for w in config.weekdays { m |= Int16(1) << (w - 1) }
+                    return m
+                }()
+                let conditionText = RecurrenceRule.formatConditionSummary(
+                    ordinal: ordinal, weekdayMask: weekdayMask)
+                if interval <= 1 {
+                    return String.localizedStringWithFormat(
+                        NSLocalizedString("recurrence.summary.monthly_all", comment: ""),
+                        conditionText)
+                }
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("recurrence.summary.monthly_all_interval", comment: ""),
+                    conditionText, interval)
+            }
             let days = config.days.sorted()
             let hasLast = config.includesLastDay
             let totalCount = days.count + (hasLast ? 1 : 0)
             if totalCount == 0 {
                 return String(localized: "recurrence.summary.monthly_unset")
             }
-
             let isList = totalCount <= 3
-            let dayString: String
-            if isList {
+            let dayString: String = {
+                guard isList else { return "" }
                 var parts = days.map { formatMonthDay($0) }
                 if hasLast {
                     parts.append(String(localized: "recurrence.last_day_short"))
                 }
-                dayString = parts.joined(separator: " · ")
-            } else {
-                dayString = ""
-            }
-
-            let months = config.months
-            let isAllMonths = months.isEmpty || months.count >= 12
-
-            if isAllMonths {
-                if isList {
-                    return String.localizedStringWithFormat(
+                return parts.joined(separator: " · ")
+            }()
+            if interval <= 1 {
+                return isList
+                    ? String.localizedStringWithFormat(
                         NSLocalizedString("recurrence.summary.monthly_all", comment: ""),
-                        dayString
-                    )
-                } else {
-                    return String.localizedStringWithFormat(
+                        dayString)
+                    : String.localizedStringWithFormat(
                         NSLocalizedString("recurrence.summary.monthly_all_count", comment: ""),
-                        totalCount
-                    )
-                }
-            } else {
-                let monthFormatter = DateFormatter()
-                monthFormatter.locale = Locale.current
-                let monthSymbols = monthFormatter.shortMonthSymbols ?? []
-                let monthNames = months.sorted().compactMap { idx -> String? in
-                    guard idx >= 1, idx <= monthSymbols.count else { return nil }
-                    return monthSymbols[idx - 1]
-                }
-                let monthStr = monthNames.joined(separator: " · ")
-                if isList {
-                    return String.localizedStringWithFormat(
-                        NSLocalizedString("recurrence.summary.monthly_specific", comment: ""),
-                        dayString,
-                        monthStr
-                    )
-                } else {
-                    return String.localizedStringWithFormat(
-                        NSLocalizedString("recurrence.summary.monthly_specific_count", comment: ""),
-                        totalCount,
-                        monthStr
-                    )
-                }
+                        totalCount)
             }
+            return isList
+                ? String.localizedStringWithFormat(
+                    NSLocalizedString("recurrence.summary.monthly_all_interval", comment: ""),
+                    dayString, interval)
+                : String.localizedStringWithFormat(
+                    NSLocalizedString("recurrence.summary.monthly_all_count_interval", comment: ""),
+                    totalCount, interval)
+
+        case .yearly:
+            let days = config.days.sorted()
+            let hasLast = config.includesLastDay
+            let totalDayCount = days.count + (hasLast ? 1 : 0)
+            let dayString: String = {
+                if totalDayCount == 0 || totalDayCount > 3 { return "" }
+                var parts = days.map { formatMonthDay($0) }
+                if hasLast {
+                    parts.append(String(localized: "recurrence.last_day_short"))
+                }
+                return parts.joined(separator: " · ")
+            }()
+            let months = config.months
+            let monthFormatter = DateFormatter()
+            monthFormatter.locale = Locale.current
+            let monthSymbols = monthFormatter.shortMonthSymbols ?? []
+            let monthNames = months.sorted().compactMap { idx -> String? in
+                guard idx >= 1, idx <= monthSymbols.count else { return nil }
+                return monthSymbols[idx - 1]
+            }
+            let monthStr = monthNames.joined(separator: " · ")
+            if dayString.isEmpty {
+                if interval <= 1 {
+                    return String.localizedStringWithFormat(
+                        NSLocalizedString("recurrence.summary.yearly_months_only", comment: ""),
+                        monthStr)
+                }
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("recurrence.summary.yearly_months_only_interval", comment: ""),
+                    monthStr, interval)
+            }
+            if interval <= 1 {
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("recurrence.summary.yearly_specific", comment: ""),
+                    dayString, monthStr)
+            }
+            return String.localizedStringWithFormat(
+                NSLocalizedString("recurrence.summary.yearly_specific_interval", comment: ""),
+                dayString, monthStr, interval)
 
         default:
             return String(localized: "recurrence.empty")
         }
+    }
+
+    /// 카테고리 picker row — sheet 기반 (Menu 대신). 옵션 styling 완전 제어 가능.
+    @ViewBuilder
+    private var categoryPickerRow: some View {
+        Button {
+            showCategoryPicker = true
+        } label: {
+            HStack {
+                Text("add.field.category")
+                    .foregroundStyle(.primary)
+                Spacer()
+                categoryPreview
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showCategoryPicker) {
+            CategoryPickerSheet(
+                selectedID: $selectedCategoryID,
+                categories: Array(categories)
+            )
+        }
+    }
+
+    /// 선택 카테고리 미니 미리보기 — filled circle icon + name. 미선택 시 "없음" 텍스트.
+    @ViewBuilder
+    private var categoryPreview: some View {
+        if let id = selectedCategoryID,
+           let cat = categories.first(where: { $0.id == id }) {
+            HStack(spacing: 6) {
+                Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Self.categoryColor(for: cat)))
+                Text(verbatim: cat.name ?? "")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("category.none")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Category.colorHex(CategoryColor rawValue) → Color. 미설정 시 secondary.
+    static func categoryColor(for cat: Category) -> Color {
+        guard let raw = cat.colorHex, let cc = CategoryColor(rawValue: raw) else {
+            return .secondary
+        }
+        return cc.color
     }
 
     private func priorityButton(_ p: Priority) -> some View {
@@ -1417,6 +1539,13 @@ struct AddItemView: View {
         item.dueDate = hasDue ? dueDate : nil
         item.isSomeday = !hasStart && !hasDue
         item.recurrenceEndDate = recurrenceEndDate
+        // 카테고리 — selectedCategoryID로 fetch한 Category 또는 nil(미분류).
+        if let id = selectedCategoryID,
+           let cat = categories.first(where: { $0.id == id }) {
+            item.category = cat
+        } else {
+            item.category = nil
+        }
         item.updatedAt = Date()
 
         if isNTD {

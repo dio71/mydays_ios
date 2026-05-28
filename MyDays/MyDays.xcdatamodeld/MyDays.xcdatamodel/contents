@@ -61,6 +61,7 @@
         <attribute name="startDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="weekdayMask" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="weekdayOrdinal" optional="YES" attributeType="Integer 16" usesScalarValueType="NO"/>
         <relationship name="item" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Item" inverseName="recurrenceRule" inverseEntity="Item"/>
     </entity>
     <entity name="RoutineCompletion" representedClassName="RoutineCompletion" syncable="YES" codeGenerationType="class">

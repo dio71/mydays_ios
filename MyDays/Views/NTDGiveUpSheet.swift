@@ -78,6 +78,7 @@ struct NTDGiveUpSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("common.close") { dismiss() }
+                        .tint(.secondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("ntd.giveup.confirm", role: .destructive) {

@@ -7,11 +7,36 @@ struct SettingsView: View {
     // 아이콘 export 결과 — 비어있지 않으면 ShareLink 노출.
     @State private var exportedIconURL: URL?
 
+    // 사용자 테마 설정 — MyDaysApp의 @AppStorage와 같은 키 → 즉시 sync.
+    @AppStorage(AppThemeKey.tintPreset) private var tintPresetRaw: String = TintPreset.blue.rawValue
+    @AppStorage(AppThemeKey.appearanceMode) private var appearanceModeRaw: String = AppearanceMode.system.rawValue
+
     var body: some View {
         Form {
+            Section("settings.section.appearance") {
+                // Tint preset(8색 chip) + Appearance mode(3 chip) — 한 VStack에 묶어 사이 row 분리선 제거.
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        ForEach(TintPreset.allCases) { preset in
+                            tintColorChip(preset)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        ForEach(AppearanceMode.displayOrder) { mode in
+                            appearanceModeChip(mode)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
             Section("settings.section.sync") {
                 Text(verbatim: "iCloud (CloudKit)")
                     .foregroundStyle(.secondary)
+            }
+            Section("settings.section.organize") {
+                NavigationLink("settings.categories") {
+                    CategoryListView()
+                }
             }
             Section("settings.section.activity") {
                 NavigationLink("settings.activity_log") {
@@ -78,6 +103,48 @@ struct SettingsView: View {
         } message: {
             Text(verbatim: "iCloud에 동기화된 데이터도 함께 삭제됩니다. 되돌릴 수 없습니다.")
         }
+    }
+
+    /// Tint color chip — 30pt 원, 선택 시 흰 체크 표시.
+    private func tintColorChip(_ preset: TintPreset) -> some View {
+        let selected = tintPresetRaw == preset.rawValue
+        return Button {
+            tintPresetRaw = preset.rawValue
+        } label: {
+            Circle()
+                .fill(preset.color)
+                .frame(width: 30, height: 30)
+                .overlay {
+                    if selected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .accessibilityLabel(Text(preset.labelKey))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Appearance mode chip — text label capsule (라이트/다크/시스템).
+    private func appearanceModeChip(_ mode: AppearanceMode) -> some View {
+        let selected = appearanceModeRaw == mode.rawValue
+        return Button {
+            appearanceModeRaw = mode.rawValue
+        } label: {
+            Text(mode.labelKey)
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 14)
+                .frame(height: 32)
+                .background(Capsule().fill(selected ? Color.accentColor : Color(.systemGray5)))
+                .overlay {
+                    if !selected {
+                        Capsule().stroke(Color(.systemGray3), lineWidth: 0.5)
+                    }
+                }
+                .foregroundStyle(selected ? .white : .primary)
+        }
+        .buttonStyle(.plain)
     }
 
     private var versionString: String {

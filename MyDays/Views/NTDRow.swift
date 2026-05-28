@@ -6,11 +6,11 @@ import SwiftUI
 // TodayView "진행 중인 절제 목표" 섹션의 NTD 한 줄.
 //
 // 레이아웃:
-//   [stopwatch icon] [title]                     [countdown / 상태]  [(x) 포기 버튼]
+//   [clock icon] [title]                     [countdown / 상태]  [(x) 포기 버튼]
 //                    [메모 (옵션)]
 //                    [🔥 streak (옵션)]
 //
-// - leading icon: display only (탭 X). 상태에 따라 stopwatch / stopwatch.fill / hand.raised.fill.
+// - leading icon: display only (탭 X). 상태에 따라 clock / clock.fill / hand.raised.fill.
 // - trailing (x): pending/inProgress occurrence에서만 노출. 탭 → NTDGiveUpSheet (사유 chip + 자유 입력).
 // - completed/failed occurrence는 (x) 숨김 — 추가 행동 없음.
 //
@@ -44,6 +44,11 @@ struct NTDRow: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if let categoryBarColor {
+                            Rectangle()
+                                .fill(categoryBarColor)
+                                .frame(width: 3, height: 14)
+                        }
                         Text(item.title ?? "")
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -99,6 +104,15 @@ struct NTDRow: View {
         guard item.recurrenceRule != nil else { return nil }
         let s = item.currentStreak()
         return s > 0 ? s : nil
+    }
+
+    /// 카테고리 색 — 제목 앞 세로 bar (ItemRow와 동일 규칙). 없으면 nil.
+    private var categoryBarColor: Color? {
+        guard let cat = item.category,
+              let raw = cat.colorHex,
+              let cc = CategoryColor(rawValue: raw)
+        else { return nil }
+        return cc.color
     }
 
     // MARK: - status icons (ItemRow와 동일 패턴 — 알림·반복·목표 시간 메타)
@@ -215,14 +229,14 @@ struct NTDRow: View {
     @ViewBuilder
     private func leadingIcon(completed: Bool, failed: Bool) -> some View {
         // 4-state 색·fill (ItemRow.ntdIconStyle과 동일 규칙):
-        //   진행 전(scheduled):  stopwatch outline + secondary
-        //   진행 중(inProgress): stopwatch outline + accent
-        //   완료(done/auto-ended): stopwatch.fill + accent
-        //   포기(failed):         stopwatch.fill + secondary
+        //   진행 전(scheduled):  clock outline + secondary
+        //   진행 중(inProgress): clock outline + accent
+        //   완료(done/auto-ended): clock.fill + accent
+        //   포기(failed):         clock.fill + secondary
         let now = Date()
         let style: (String, Color) = {
-            if failed    { return ("stopwatch.fill", Color.secondary) }
-            if completed { return ("stopwatch.fill", Color.accentColor) }
+            if failed    { return ("clock.fill", Color.secondary) }
+            if completed { return ("clock.fill", Color.accentColor) }
             return ItemRow.ntdIconStyle(for: item, now: now, occurrenceDate: occurrenceDate)
         }()
         Image(systemName: style.0)

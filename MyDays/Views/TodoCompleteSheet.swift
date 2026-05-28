@@ -67,6 +67,7 @@ struct TodoCompleteSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("common.close") { dismiss() }
+                        .tint(.secondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("common.done") {

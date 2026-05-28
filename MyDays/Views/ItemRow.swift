@@ -53,6 +53,11 @@ struct ItemRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let categoryBarColor {
+                        Rectangle()
+                            .fill(categoryBarColor)
+                            .frame(width: 3, height: 14)
+                    }
                     Text(item.title ?? "")
                         .foregroundStyle(isCompletedForDate ? .secondary : .primary)
                         .lineLimit(1)
@@ -168,10 +173,10 @@ struct ItemRow: View {
 
     /// NTD 항목의 상태 표시 아이콘 (ListView 등에서 사용).
     /// 4-state 색·fill 조합:
-    /// - pending + 시작 전 (scheduled): stopwatch outline + secondary (회색) → 진행 전
-    /// - pending + 진행 중 (inProgress): stopwatch outline + accent (파랑) → 활성
-    /// - done (자동/명시 완료):           stopwatch.fill + accent (파랑) → 완료
-    /// - failed (사용자 포기):            stopwatch.fill + secondary (회색 filled) → 종료/중단
+    /// - pending + 시작 전 (scheduled): clock outline + secondary (회색) → 진행 전
+    /// - pending + 진행 중 (inProgress): clock outline + accent (파랑) → 활성
+    /// - done (자동/명시 완료):           clock.fill + accent (파랑) → 완료
+    /// - failed (사용자 포기):            clock.fill + secondary (회색 filled) → 종료/중단
     @ViewBuilder
     private var ntdStatusIcon: some View {
         let (name, color) = Self.ntdIconStyle(for: item, now: Date())
@@ -183,17 +188,17 @@ struct ItemRow: View {
     /// NTD 아이콘 스타일 계산 — NTDRow와 동일 규칙 공유 위해 static helper.
     /// pending 상태에서는 ntdRelevantOccurrenceDate + ntdState로 시간 진행 판정.
     static func ntdIconStyle(for item: Item, now: Date, occurrenceDate: Date? = nil) -> (String, Color) {
-        if item.itemStatus == .done   { return ("stopwatch.fill", Color.accentColor) }
-        if item.itemStatus == .failed { return ("stopwatch.fill", Color.secondary) }
+        if item.itemStatus == .done   { return ("clock.fill", Color.accentColor) }
+        if item.itemStatus == .failed { return ("clock.fill", Color.secondary) }
         // pending — occurrence별 state. occurrenceDate가 명시되면 그것 사용, 아니면 relevant 자동.
         let occDate = occurrenceDate ?? item.ntdRelevantOccurrenceDate(at: now)
         guard let occDate, let state = item.ntdState(on: occDate, now: now) else {
-            return ("stopwatch", Color.secondary)
+            return ("clock", Color.secondary)
         }
         switch state {
-        case .scheduled:  return ("stopwatch", Color.secondary)
-        case .inProgress: return ("stopwatch", Color.accentColor)
-        case .ended:      return ("stopwatch.fill", Color.accentColor)
+        case .scheduled:  return ("clock", Color.secondary)
+        case .inProgress: return ("clock", Color.accentColor)
+        case .ended:      return ("clock.fill", Color.accentColor)
         }
     }
 
@@ -322,6 +327,15 @@ struct ItemRow: View {
         } catch {
             assertionFailure("Toggle save failed: \(error)")
         }
+    }
+
+    /// 카테고리 색 — 제목 앞 세로 bar 색상. 카테고리 없거나 colorHex 미매칭 시 nil(bar 안 보임).
+    private var categoryBarColor: Color? {
+        guard let cat = item.category,
+              let raw = cat.colorHex,
+              let cc = CategoryColor(rawValue: raw)
+        else { return nil }
+        return cc.color
     }
 
     // MARK: - status icons

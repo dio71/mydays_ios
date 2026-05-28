@@ -551,7 +551,7 @@ struct MyDaysWidgetEntryView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "stopwatch")
+            Image(systemName: "clock")
                 .font(.title2)
                 .foregroundStyle(.secondary)
             Text("widget.ntd.empty")
@@ -653,7 +653,7 @@ struct MyDaysWidgetEntryView: View {
 
     /// 종류별 아이콘 — NTD / 할일 2가지로만 구분. 반복/단일은 시각 통일.
     private func iconName(for snap: ItemSnapshot) -> String {
-        snap.kind == .notTodo ? "stopwatch" : "circle"
+        snap.kind == .notTodo ? "clock" : "circle"
     }
 
     /// row 카운트다운 색 — state 무관 .primary 통일.

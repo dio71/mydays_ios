@@ -511,6 +511,57 @@ MyDays/MyDays/
 - 완료 항목 라벨: list mode + 1회성 + done/failed인 Todo는 d-day 자리에 "%@ 완료" / "%@ 취소" (completedAt 시각). `todo.label.done_at_format`, `todo.label.cancelled_at_format` 추가.
 - Widget 항목 fetch 최대 10개. budget 기반 cell 자르기 (deterministic 높이 추정 — `widgetContentHeight=142`, `headerHeight=64`, `ntdItemHeight=36`, `todoItemHeight=22`).
 
+## 최근 완료 (2026-05-28 세션)
+
+### 반복 일정 고도화 (Recurrence)
+- `Frequency.yearly = 6` 추가. interval(매 N주/N개월/N년) 모든 frequency에 적용. 매년: `nextYearlyOccurrence` year-skip search.
+- 매월에 sub-tab `일자지정/조건지정` 추가:
+  - **일자지정**: 1~31 grid (기존)
+  - **조건지정**: 순번(첫번째~다섯번째/마지막) × 대상(요일 7 + "날") 2행 chip — `weekdayOrdinal` 필드 추가 (Int16?)
+- "매월+monthMask≠0" 기존 데이터는 RecurrenceConfig.init이 자동으로 `.yearly`로 노출. 점진적 마이그.
+- **DTSTART는 RRULE 매칭 무관 항상 occurrence** (iCal RFC 5545) — `occurs(on:startDate:endDate:)` 시작점에 `if day == startDay { return true }` 추가. 모든 frequency 영향.
+- summaryText interval 분기 — "매 2주 수", "2개월마다 1일" 등.
+
+### 카테고리 (Phase A+B 완료)
+- `Models/CategoryColor.swift` — iOS system 8색 vivid 팔레트 (red/orange/yellow/green/teal/blue/purple/brown). 앱 tint(TintPreset)와 별도.
+- `Models/CategoryIcon.swift` — 18개 SF Symbol preset (life 12 + work/project 6: meeting/document/chart/email/call/folder).
+- `Views/CategoryListView.swift` + `CategoryRowView` — `@ObservedObject` 패턴으로 attribute 변경 즉시 반영.
+- `Views/CategoryEditSheet.swift` — name + color(8열 LazyVGrid) + icon(6열 LazyVGrid 3행).
+- `Views/CategoryPickerSheet.swift` — sheet 기반 picker (Menu의 styling 제약 회피, filled circle + white icon).
+- SettingsView에 "분류" 섹션 → "카테고리 관리" NavigationLink.
+- AddItemView 카테고리 picker chip (등록 카테고리 0개면 hide).
+- ItemRow/NTDRow 제목 앞 3pt × 14pt **세로 bar** (category 색).
+- ListView/ArchiveView **카테고리 필터** (`line.3.horizontal.decrease.circle` Menu) — `nil`=모두 + 카테고리들. 필터 활성 시 section header에 카테고리 표시.
+- ListView/ArchiveView **그룹핑 모드** (`square.stack` toggle) — 활성 항목 카테고리별 섹션 분리 + 미분류 마지막. 완료는 그룹핑 무시.
+- 필터 ↔ 그룹 **상호 배타**: 그룹 ON→filter clear / 특정 카테고리 필터→group OFF.
+
+### 앱 테마 (TintPreset + 다크 모드 선택)
+- `Models/AppTheme.swift` — `TintPreset` (Blue 기본 + 7색: coral/peach/mustard/sage/slate/forest/wine) + `AppearanceMode` (system/light/dark).
+- `@AppStorage` 키 (`AppThemeKey.tintPreset`, `AppThemeKey.appearanceMode`) — Settings에서 변경, root `.tint() + .preferredColorScheme()`.
+- SettingsView "앱 색상" 섹션 — 8 색 circle chips + 라이트/다크/시스템 chip row.
+- 입력폼/취소시트 등 "취소·닫기" 버튼은 `.tint(.secondary)` — 테마 색 무관 중립 회색.
+
+### NTD 아이콘 + Today 탭 아이콘
+- NTD leading 체크 아이콘 `stopwatch` → `clock` 일괄 교체 (ItemRow/NTDRow/3개 widget).
+- Today 탭 아이콘 `checklist` → `\(N).calendar` 동적 (오늘 day-of-month). NSCalendarDayChanged + scenePhase active 갱신.
+
+### Lock Screen Widget — progress
+- Circular widget: 테두리 progress arc (`Circle().trim()`) — 진행 중일 때만 표시. 목표시간 있으면 elapsed/total, 없으면 30일 기준 cap.
+- Rectangular widget: 3번째 line에 직선 progress bar (Capsule + widgetAccentable). 2번째 line 상태+카운트다운을 홈 위젯 패턴(trailing Spacer + state + countdown)으로 재구성.
+- 상태 문구 통일 — Lock rectangular widget이 widget.state.* 키 사용 (시작까지/종료까지/진행 중). 홈 widget의 "경과"도 "진행 중"으로 변경.
+
+### iPad Stage 1 — NavigationSplitView
+- RootView에서 `horizontalSizeClass` 분기:
+  - **compact (iPhone)**: 기존 TabView 그대로
+  - **regular (iPad/Mac Catalyst)**: NavigationSplitView 사이드바(SidebarItem 4항목 — 오늘/목록/보관함/설정) + 디테일
+- `.tag(item)`로 selection 매칭. 디테일 view는 NavigationStack 내부에서 switch.
+- Catalyst 변환 prep — NavigationSplitView가 Mac에서 native sidebar로 자동 변환.
+
+### 카테고리 진행 중 사소 폴리시
+- CategoryListView row tap 영역 — 빈 공간 포함 전체 row tappable (`.contentShape(Rectangle()) + frame(maxWidth: .infinity)`).
+- CategoryPickerSheet 옵션도 동일 패턴.
+- bar 양끝 round padding 등 MonthGridView 미세 시각 조정.
+
 ## 미구현 (다음 후보, 우선순위 순)
 
 ### 1. 활동 목표 (Activity Goal) — 3번째 핵심 기능 (다음 진행 예정)

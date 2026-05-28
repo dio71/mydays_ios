@@ -511,6 +511,41 @@
         }
       }
     },
+    "add.field.category" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "카테고리" } }
+      }
+    },
+    "add.section.category" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "카테고리" } }
+      }
+    },
+    "category.none" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "None" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "없음" } }
+      }
+    },
+    "list.filter.all" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "All" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "모두" } }
+      }
+    },
+    "list.group.uncategorized" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Uncategorized" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "미분류" } }
+      }
+    },
     "add.section.priority" : {
       "localizations" : {
         "en" : {
@@ -2102,6 +2137,176 @@
         }
       }
     },
+    "recurrence.condition" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Condition"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "조건"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordinal"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "순번"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal.fifth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fifth"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다섯번째"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal.first" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "First"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "첫번째"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal.fourth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fourth"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네번째"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal.last" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마지막"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal.second" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Second"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "두번째"
+          }
+        }
+      }
+    },
+    "recurrence.condition.ordinal.third" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Third"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세번째"
+          }
+        }
+      }
+    },
+    "recurrence.condition.target" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Target"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대상"
+          }
+        }
+      }
+    },
+    "recurrence.condition.target.day" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Day"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "날"
+          }
+        }
+      }
+    },
     "recurrence.day_format" : {
       "localizations" : {
         "en" : {
@@ -2214,6 +2419,23 @@
         }
       }
     },
+    "recurrence.frequency.yearly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yearly"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매년"
+          }
+        }
+      }
+    },
     "recurrence.interval.label" : {
       "localizations" : {
         "en" : {
@@ -2231,6 +2453,7 @@
       }
     },
     "recurrence.interval.unit" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2246,7 +2469,76 @@
         }
       }
     },
+    "recurrence.interval.unit.day" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "day(s)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일마다"
+          }
+        }
+      }
+    },
+    "recurrence.interval.unit.month" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "month(s)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개월마다"
+          }
+        }
+      }
+    },
+    "recurrence.interval.unit.week" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "week(s)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주마다"
+          }
+        }
+      }
+    },
+    "recurrence.interval.unit.year" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "year(s)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "년마다"
+          }
+        }
+      }
+    },
     "recurrence.last_day" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2274,6 +2566,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "말일"
+          }
+        }
+      }
+    },
+    "recurrence.monthly.mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "표시 방식"
+          }
+        }
+      }
+    },
+    "recurrence.monthly.mode.condition" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By condition"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "조건지정"
+          }
+        }
+      }
+    },
+    "recurrence.monthly.mode.day" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By date"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일자지정"
           }
         }
       }
@@ -2374,7 +2717,42 @@
         }
       }
     },
+    "recurrence.summary.monthly_all_count_interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld days every %2$lld months"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld개월마다 %1$lld일"
+          }
+        }
+      }
+    },
+    "recurrence.summary.monthly_all_interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ every %2$lld months"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld개월마다 %1$@"
+          }
+        }
+      }
+    },
     "recurrence.summary.monthly_specific" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2391,6 +2769,7 @@
       }
     },
     "recurrence.summary.monthly_specific_count" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2438,6 +2817,23 @@
         }
       }
     },
+    "recurrence.summary.weekly_list_interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every %2$lld weeks on %1$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld주마다 %1$@"
+          }
+        }
+      }
+    },
     "recurrence.summary.weekly_unset" : {
       "localizations" : {
         "en" : {
@@ -2450,6 +2846,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "요일 미설정"
+          }
+        }
+      }
+    },
+    "recurrence.summary.yearly_months_only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매년 %@"
+          }
+        }
+      }
+    },
+    "recurrence.summary.yearly_months_only_interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every %2$lld years in %1$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld년마다 %1$@"
+          }
+        }
+      }
+    },
+    "recurrence.summary.yearly_specific" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every %2$@ %1$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매년 %2$@ %1$@"
+          }
+        }
+      }
+    },
+    "recurrence.summary.yearly_specific_interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every %3$lld years on %2$@ %1$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%3$lld년마다 %2$@ %1$@"
           }
         }
       }
@@ -2486,6 +2950,132 @@
         }
       }
     },
+    "category.color.blue" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blue" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "파랑" } }
+      }
+    },
+    "category.color.green" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Green" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "녹색" } }
+      }
+    },
+    "category.color.orange" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Orange" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "주황" } }
+      }
+    },
+    "category.color.brown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brown" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "갈색" } }
+      }
+    },
+    "category.color.purple" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Purple" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "보라" } }
+      }
+    },
+    "category.color.red" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Red" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "빨강" } }
+      }
+    },
+    "category.color.teal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Teal" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "청록" } }
+      }
+    },
+    "category.color.yellow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Yellow" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "노랑" } }
+      }
+    },
+    "category.delete_alert.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Items assigned to this category will become uncategorized." } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "이 카테고리에 속한 항목들은 미분류 상태가 됩니다." } }
+      }
+    },
+    "category.delete_alert.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete this category?" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "이 카테고리를 삭제할까요?" } }
+      }
+    },
+    "category.edit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit Category" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "카테고리 편집" } }
+      }
+    },
+    "category.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No categories yet" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "아직 카테고리가 없습니다" } }
+      }
+    },
+    "category.field.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "이름" } }
+      }
+    },
+    "category.new" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New Category" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "새 카테고리" } }
+      }
+    },
+    "category.section.color" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "색상" } }
+      }
+    },
+    "category.section.icon" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Icon" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "아이콘" } }
+      }
+    },
+    "settings.categories" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Categories" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "카테고리" } }
+      }
+    },
+    "settings.section.organize" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Organize" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "분류" } }
+      }
+    },
     "settings.activity_log" : {
       "localizations" : {
         "en" : {
@@ -2516,6 +3106,90 @@
             "value" : "버전"
           }
         }
+      }
+    },
+    "settings.appearance.dark" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dark" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "다크" } }
+      }
+    },
+    "settings.appearance.light" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Light" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "라이트" } }
+      }
+    },
+    "settings.appearance.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "시스템" } }
+      }
+    },
+    "settings.section.appearance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App Color" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "앱 색상" } }
+      }
+    },
+    "settings.tint.blue" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Blue" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "파랑" } }
+      }
+    },
+    "settings.tint.coral" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Coral" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "코랄" } }
+      }
+    },
+    "settings.tint.forest" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Forest" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "포레스트" } }
+      }
+    },
+    "settings.tint.mustard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mustard" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "머스터드" } }
+      }
+    },
+    "settings.tint.peach" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Peach" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "피치" } }
+      }
+    },
+    "settings.tint.sage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sage" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "세이지" } }
+      }
+    },
+    "settings.tint.slate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Slate" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "슬레이트" } }
+      }
+    },
+    "settings.tint.wine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Wine" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "와인" } }
       }
     },
     "settings.section.activity" : {
@@ -2676,6 +3350,13 @@
             "value" : "설정"
           }
         }
+      }
+    },
+    "app.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "MyDays" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "MyDays" } }
       }
     },
     "tab.today" : {
@@ -3830,13 +4511,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Elapsed"
+            "value" : "In progress"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "경과"
+            "value" : "진행 중"
           }
         }
       }
