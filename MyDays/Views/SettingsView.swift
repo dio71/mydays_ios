@@ -42,6 +42,11 @@ struct SettingsView: View {
                 }
             }
             Section("settings.section.activity") {
+                // RC 기반 활동 기록 — 카테고리 필터 + 검색.
+                NavigationLink("settings.activity_history") {
+                    ActivityHistoryView(item: nil)
+                }
+                // ItemEvent 기반 lifecycle 로그 — 사용자 액션 / 시스템 자동 처리 기록.
                 NavigationLink("settings.activity_log") {
                     ActivityLogView()
                 }
@@ -95,6 +100,8 @@ struct SettingsView: View {
                 }
             }
         }
+        // iPad/regular size class에서 content 폭 cap — 가독성.
+        .iPadContentWidth()
         .navigationTitle("settings.title")
         .alert(Text(verbatim: "모든 데이터를 삭제할까요?"), isPresented: $showWipeConfirm) {
             Button("common.cancel", role: .cancel) {}

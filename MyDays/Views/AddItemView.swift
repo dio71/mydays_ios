@@ -1,5 +1,7 @@
 import CoreData
 import SwiftUI
+import UIKit
+import UserNotifications
 
 struct AddItemView: View {
 
@@ -71,6 +73,12 @@ struct AddItemView: View {
     /// active(soft-deleted 아닌) ChecklistItem만 form에 노출. 사용자가 minus 누르면 array에서 제거 →
     /// save 시 매칭 existing은 soft-delete(deletedAt 마킹). 새 draft는 새 ChecklistItem 생성.
     @State private var checklistDrafts: [ChecklistDraft] = []
+    /// 알림 권한 상태 — 사용자가 시스템에서 거부한 경우 알림 section에 안내 표시.
+    @State private var notificationAuthStatus: UNAuthorizationStatus = .authorized
+    /// 저장 시 알림 있는데 권한 거부 상태면 확인 dialog.
+    @State private var showPermissionSaveAlert: Bool = false
+    @Environment(\.scenePhase) private var addItemScenePhase
+    @Environment(\.openURL) private var openURL
     /// 새로 추가한 draft 자동 focus.
     @FocusState private var focusedChecklistDraft: UUID?
 
@@ -223,6 +231,19 @@ struct AddItemView: View {
         hasTime ? AlertOffset.withTimeOptions : AlertOffset.noTimeOptions
     }
 
+    /// 현재 form에 알림이 하나라도 설정돼 있는지 — 저장 시 권한 경고 dialog 표시 여부 판정용.
+    private var hasAlertConfigured: Bool {
+        if isNTD {
+            if ntdStartAlertOffset != nil { return true }
+            if ntdDurationHour != nil, ntdEndAlertOffset != nil { return true }
+            return false
+        }
+        if !(hasStart || hasDue) { return false }
+        if todoStartAlertOffset != nil { return true }
+        if showPeriod, todoDueAlertOffset != nil { return true }
+        return false
+    }
+
     /// 알림 section.
     /// - NTD: 시작 알림 + (목표 시간 있을 때) 목표 달성 알림 — 기본 모두 ON.
     /// - Todo: startDate/dueDate 중 하나라도 있으면 노출 — hasDue면 "마감 알림"(.due anchor),
@@ -232,6 +253,9 @@ struct AddItemView: View {
     private var alertSection: some View {
         if isNTD {
             Section("add.section.alert") {
+                if notificationAuthStatus == .denied {
+                    notificationPermissionWarning
+                }
                 alertOffsetPicker(label: "alert.label.start", selection: $ntdStartAlertOffset)
                 if ntdDurationHour != nil {
                     alertOffsetPicker(label: "alert.label.end", selection: $ntdEndAlertOffset)
@@ -239,6 +263,9 @@ struct AddItemView: View {
             }
         } else if hasStart || hasDue {
             Section("add.section.alert") {
+                if notificationAuthStatus == .denied {
+                    notificationPermissionWarning
+                }
                 // 단일 모드: 시작 알림만 (단일은 시작=마감 같은 의미).
                 // 기간 모드: 시작 알림 + 마감 알림 둘 다.
                 alertOffsetPicker(label: "alert.label.start", selection: $todoStartAlertOffset)
@@ -247,6 +274,36 @@ struct AddItemView: View {
                 }
             }
         }
+    }
+
+    /// 알림 권한 거부 안내 — 설정 열기 버튼.
+    /// 사용자가 알림 offset을 골라도 실제 fire 안 되니 미리 알려줘 setting 가도록 유도.
+    @ViewBuilder
+    private var notificationPermissionWarning: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "bell.slash.fill")
+                .foregroundStyle(.orange)
+                .font(.callout)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("alert.permission.denied.title")
+                    .font(.subheadline.weight(.semibold))
+                Text("alert.permission.denied.body")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            } label: {
+                Text("alert.permission.open_settings")
+                    .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 2)
     }
 
     /// 단일 알림 picker — menu style. "안 함" + offset 옵션 (hasTime에 따라 세트 다름).
@@ -335,6 +392,18 @@ struct AddItemView: View {
                 Section("activity.history.title") {
                     ForEach(records.prefix(10), id: \.objectID) { record in
                         activityRow(record)
+                    }
+                    // 기록 있으면 전체 보기 navigation (10건 이하라도 노출 — 검색/필터 가능).
+                    // ZStack 트릭 — NavigationLink는 List에서 자동으로 chevron 붙어 좌측 라벨이 됨.
+                    // chevron 없이 중앙 정렬된 텍스트만 보이도록 hidden NavigationLink + 중앙 Text overlay.
+                    ZStack {
+                        NavigationLink {
+                            ActivityHistoryView(item: item)
+                        } label: { EmptyView() }
+                            .opacity(0)
+                        Text("activity_history.show_all")
+                            .foregroundStyle(Color.accentColor)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
             }
@@ -767,15 +836,40 @@ struct AddItemView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     // 변경사항이 있을 때만 빨강 강조. 기본 상태는 시스템 toolbar 기본 색상(.primary).
                     Button {
-                        save()
+                        // 알림 설정돼 있고 권한 거부 상태면 확인 dialog 띄움.
+                        // 그 외 일반 경로는 바로 저장.
+                        if hasAlertConfigured && notificationAuthStatus == .denied {
+                            showPermissionSaveAlert = true
+                        } else {
+                            save()
+                        }
                     } label: {
                         Text("common.save")
                             .foregroundStyle(hasChanges ? Color.red : Color.primary)
                     }
                     .disabled(!canSave)
+                    .alert(
+                        "alert.permission.save_warning.title",
+                        isPresented: $showPermissionSaveAlert
+                    ) {
+                        Button("alert.permission.open_settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                openURL(url)
+                            }
+                        }
+                        Button("alert.permission.save_anyway") {
+                            save()
+                        }
+                        Button("common.cancel", role: .cancel) {}
+                    } message: {
+                        Text("alert.permission.save_warning.body")
+                    }
                 }
             }
             .task {
+                // 알림 권한 상태 fetch (편집/신규 무관) — 거부 시 alert section에 안내 노출.
+                notificationAuthStatus = await NotificationService.shared.currentAuthorizationStatus()
+
                 guard !isEditing else { return }
                 // NTD 신규 진입 시 기본 카테고리 preselect (categoryID arg 없을 때만).
                 // selectedCategoryID 변경은 .onChange로 흘러가 알림 default 자동 적용.
@@ -791,6 +885,14 @@ struct AddItemView: View {
                 }
                 try? await Task.sleep(for: .milliseconds(120))
                 titleFocused = true
+            }
+            // foreground 복귀 시 권한 재확인 — 사용자가 설정에서 허용/거부 변경했을 수 있음.
+            .onChange(of: addItemScenePhase) { _, newPhase in
+                if newPhase == .active {
+                    Task {
+                        notificationAuthStatus = await NotificationService.shared.currentAuthorizationStatus()
+                    }
+                }
             }
             // 카테고리 변경 시 알림 default 적용 — 신규 항목 작성 중에만.
             // 편집 모드: 사용자가 이미 설정한 알림 보존 (카테고리 바꿔도 알림은 그대로).

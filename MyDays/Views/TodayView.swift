@@ -282,6 +282,11 @@ struct TodayView: View {
             .onDisappear {
                 cancelMode = false
             }
+            // ⌘N 단축키 — RootView가 currentTab과 함께 broadcast. .today일 때만 새 항목 열기.
+            .onReceive(NotificationCenter.default.publisher(for: .openNewItemForCurrentTab)) { note in
+                guard (note.object as? SidebarItem) == .today else { return }
+                sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID)
+            }
     }
 
     /// 자정/멀티-일 백그라운드 복귀 처리.
@@ -812,6 +817,8 @@ struct TodayList: View {
             }
         }
         .listStyle(.insetGrouped)
+        // iPad/regular size class에서 content 폭 cap — 가독성.
+        .iPadContentWidth()
         // 하단 (+) FAB(56pt + padding 20pt)에 마지막 row가 가리지 않도록 스크롤 여백 확보.
         .contentMargins(.bottom, 96, for: .scrollContent)
         // 첫 render 후 할일(1회성+루틴) 정렬 snapshot 캡처 — 이후 체크/취소 토글로 인한 reorder 회피.

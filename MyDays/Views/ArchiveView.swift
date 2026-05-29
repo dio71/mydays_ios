@@ -127,6 +127,8 @@ struct ArchiveView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // iPad/regular size class에서 content 폭 cap — 가독성.
+        .iPadContentWidth()
         .scrollDismissesKeyboard(.immediately)
         .navigationTitle("archive.title")
         .toolbar {
@@ -169,6 +171,11 @@ struct ArchiveView: View {
             case .edit(let item):
                 AddItemView(editing: item)
             }
+        }
+        // ⌘N — RootView가 currentTab과 함께 broadcast. .archive일 때만 새 항목 열기.
+        .onReceive(NotificationCenter.default.publisher(for: .openNewItemForCurrentTab)) { note in
+            guard (note.object as? SidebarItem) == .archive else { return }
+            sheet = .new(baseDate: nil, categoryID: filterCategoryID)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {

@@ -1,6 +1,13 @@
 import Foundation
 import UserNotifications
 
+extension Notification.Name {
+    /// 사용자가 시스템 알림을 탭했을 때 broadcast — RootView가 받아 탭을 오늘로 전환.
+    static let openTodayTabFromNotification = Notification.Name("io.snapplay.MyDays.openTodayTabFromNotification")
+    /// 키보드 ⌘N — 현재 탭의 새 항목 sheet 열기. object: SidebarItem (현재 탭).
+    static let openNewItemForCurrentTab = Notification.Name("io.snapplay.MyDays.openNewItemForCurrentTab")
+}
+
 // MARK: - 로컬 알림 서비스
 //
 // UNUserNotificationCenter wrapper. 단순 schedule/cancel만 노출.
@@ -38,6 +45,17 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound, .list])
     }
 
+    /// 사용자가 알림을 탭(또는 액션) → 오늘 탭으로 전환 broadcast.
+    /// 추후 항목 highlight 등 deep-link 확장 시 userInfo로 id 전달 (현재는 단순 routing).
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        NotificationCenter.default.post(name: .openTodayTabFromNotification, object: nil)
+        completionHandler()
+    }
+
     // MARK: - 권한
 
     /// 권한 요청 — 첫 호출 시 시스템 prompt. 사용자가 거부했어도 다시 호출하면 silent return.
@@ -48,6 +66,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         } catch {
             return false
         }
+    }
+
+    /// 현재 권한 상태 조회 — prompt X. UI에서 권한 부족 안내 표시 용도.
+    func currentAuthorizationStatus() async -> UNAuthorizationStatus {
+        await center.notificationSettings().authorizationStatus
     }
 
     /// 현재 권한이 알림 가능한 상태인지. 미결정이면 prompt 시도.

@@ -8,8 +8,25 @@ struct RootView: View {
     // 오늘 day-of-month — Today 탭 아이콘 `N.calendar` 동적 표시용.
     // 자정 넘김(NSCalendarDayChanged) + foreground 복귀 시 갱신.
     @State private var todayDay: Int = Calendar.current.component(.day, from: Date())
+
+    /// Today 탭 아이콘. `\(N).calendar` 동적 — Mac Catalyst에선 해당 SF Symbol 일부 N 렌더 누락 →
+    /// 정적 `calendar`로 fallback.
+    private var todayTabIconName: String {
+        #if targetEnvironment(macCatalyst)
+        return "calendar"
+        #else
+        return "\(todayDay).calendar"
+        #endif
+    }
     // iPad sidebar 선택 항목.
     @State private var sidebarSelection: SidebarItem? = .today
+    // iPhone 탭 선택 — 시스템 알림 탭 시 .today로 전환.
+    @State private var selectedTab: SidebarItem = .today
+
+    /// 현재 활성 탭/사이드바 — 키보드 ⌘N 시 어느 view에 새 항목 broadcast할지 결정.
+    private var currentTab: SidebarItem {
+        hSize == .regular ? (sidebarSelection ?? .today) : selectedTab
+    }
 
     var body: some View {
         Group {
@@ -21,8 +38,21 @@ struct RootView: View {
                 iPhoneLayout
             }
         }
+        // 외장 키보드 단축키 — invisible button overlay에 .keyboardShortcut 부착.
+        // ⌘1~4: 탭 전환, ⌘N: 현재 탭의 새 항목.
+        .overlay {
+            keyboardShortcutsOverlay
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
             todayDay = Calendar.current.component(.day, from: Date())
+        }
+        // 시스템 알림 탭 → 오늘 탭으로 전환 (iPhone TabView + iPad sidebar 둘 다 적용).
+        .onReceive(NotificationCenter.default.publisher(for: .openTodayTabFromNotification)) { _ in
+            selectedTab = .today
+            sidebarSelection = .today
         }
         .task {
             // routine 자동 status 동기화는 사용자 trigger(ListView.task / AddItemView.save) 시점에만 수행 —
@@ -48,6 +78,40 @@ struct RootView: View {
         }
     }
 
+    // MARK: - 키보드 단축키
+
+    /// invisible button group — iPad/Mac 외장 키보드용 단축키 핸들러.
+    /// Button 자체는 frame 0 + opacity 0이지만 view tree에 존재해야 shortcut 등록됨.
+    @ViewBuilder
+    private var keyboardShortcutsOverlay: some View {
+        VStack(spacing: 0) {
+            Button("") { switchTab(to: .today) }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("") { switchTab(to: .list) }
+                .keyboardShortcut("2", modifiers: .command)
+            Button("") { switchTab(to: .archive) }
+                .keyboardShortcut("3", modifiers: .command)
+            Button("") { switchTab(to: .settings) }
+                .keyboardShortcut("4", modifiers: .command)
+            // ⌘N — 현재 탭의 새 항목 sheet 열기. RootView가 broadcast → 각 view가 받아 자기 sheet 열음.
+            // Settings 탭에선 무동작.
+            Button("") {
+                guard currentTab != .settings else { return }
+                NotificationCenter.default.post(
+                    name: .openNewItemForCurrentTab,
+                    object: currentTab
+                )
+            }
+            .keyboardShortcut("n", modifiers: .command)
+        }
+    }
+
+    /// 탭 전환 — iPhone TabView와 iPad sidebar 둘 다 동기.
+    private func switchTab(to tab: SidebarItem) {
+        selectedTab = tab
+        sidebarSelection = tab
+    }
+
     // MARK: - iPhone (compact)
 
     @ViewBuilder
@@ -56,22 +120,26 @@ struct RootView: View {
         // 항상 propagate되지 않는 케이스(week strip / FAB / ItemRow의 Color.accentColor가
         // 시스템 blue로 fallback)가 관찰됨. 각 NavigationStack에 .appTint() 명시 적용해
         // body의 Color.accentColor가 사용자 테마 색을 정확히 반영하도록 보장.
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack { TodayView() }
                 .appTint()
-                .tabItem { Label("tab.today", systemImage: "\(todayDay).calendar") }
+                .tabItem { Label("tab.today", systemImage: todayTabIconName) }
+                .tag(SidebarItem.today)
 
             NavigationStack { ListView() }
                 .appTint()
                 .tabItem { Label("tab.list", systemImage: "list.bullet") }
+                .tag(SidebarItem.list)
 
             NavigationStack { ArchiveView() }
                 .appTint()
                 .tabItem { Label("tab.archive", systemImage: "archivebox") }
+                .tag(SidebarItem.archive)
 
             NavigationStack { SettingsView() }
                 .appTint()
                 .tabItem { Label("tab.settings", systemImage: "gearshape") }
+                .tag(SidebarItem.settings)
         }
     }
 
@@ -126,9 +194,15 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     }
 
     /// 오늘 탭은 day-of-month 동적 아이콘, 그 외 고정.
+    /// Mac Catalyst는 `N.calendar` 일부 N 렌더 누락 → 정적 `calendar` fallback.
     func icon(todayDay: Int) -> String {
         switch self {
-        case .today:    return "\(todayDay).calendar"
+        case .today:
+            #if targetEnvironment(macCatalyst)
+            return "calendar"
+            #else
+            return "\(todayDay).calendar"
+            #endif
         case .list:     return "list.bullet"
         case .archive:  return "archivebox"
         case .settings: return "gearshape"

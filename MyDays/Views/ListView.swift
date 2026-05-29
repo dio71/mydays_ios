@@ -141,6 +141,8 @@ struct ListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // iPad/regular size class에서 content 폭 cap — 가독성.
+        .iPadContentWidth()
         // 하단 (+) FAB(56pt + padding 20pt)에 마지막 row가 가리지 않도록 스크롤 여백 확보.
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("list.title")
@@ -188,6 +190,11 @@ struct ListView: View {
             case .edit(let item):
                 AddItemView(editing: item)
             }
+        }
+        // ⌘N — RootView가 currentTab과 함께 broadcast. .list일 때만 새 항목 열기.
+        .onReceive(NotificationCenter.default.publisher(for: .openNewItemForCurrentTab)) { note in
+            guard (note.object as? SidebarItem) == .list else { return }
+            sheet = .new(baseDate: .todayCalendarAnchor, categoryID: filterCategoryID)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {

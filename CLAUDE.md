@@ -30,7 +30,7 @@
 - NTD 전용: **ntdStartHour** (legacy, `startHour`로 통합), **ntdDurationHour** (Int16?, nil=미설정/한계까지)
 - 포기 사유는 `RoutineCompletion.comment` + `ItemEvent.note`에 저장. Item 차원의 comment 필드는 제거됨.
 - self-relation: parent/children (3단계 계층은 앱 로직에서 강제)
-- 관계: category, tags, recurrenceRule, reminders, completions, events
+- 관계: category, recurrenceRule, reminders, completions, events, checklistItems
 
 ### RecurrenceRule
 - frequency, interval, weekdayMask, **dayOfMonthMask (Int64, bit 0~30=일자, bit 31=말일)**, **monthMask (Int16, 0=모든 월)**, countPerWeek (legacy), dayOfMonth (legacy), startDate (legacy, 미사용), endDate (legacy, 미사용)
@@ -46,11 +46,13 @@
 - 1회성 NTD도 포기 시 동일하게 사용 — 1회성↔반복 전환 시 기록 보존
 - Streak 계산 기반
 
-### Category / Tag / Reminder / RecurrenceRule
-- Category: id, name, colorHex, iconName, sortOrder, createdAt, updatedAt
-- Tag: id, name, colorHex(현재 단일 색), createdAt, updatedAt
+### Category / Reminder / RecurrenceRule / ChecklistItem / ChecklistCheck
+- Category: id, name, colorHex, iconName, sortOrder, createdAt, updatedAt, **isDefaultForNTD**, default*AlertOffset 5종 (NTD 시작/종료, Todo timed-start/timed-due, Todo untimed-start/untimed-due)
 - Reminder: id, fireDate, offsetMin, anchor, repeats, createdAt, updatedAt
 - RecurrenceRule: id, frequency, interval, weekdayMask, dayOfMonthMask, monthMask, createdAt, updatedAt, (legacy attrs)
+- ChecklistItem: id, title, sortOrder, createdAt, updatedAt, **deletedAt** (soft delete), item(Cascade), checks(→ ChecklistCheck Cascade)
+- ChecklistCheck: id, occurrenceDate(UTC anchor), completedAt, checklistItem(Nullify)
+- **Tag entity는 제거됨 (2026-05-29)** — 사용자 결정. 향후 검색 기능에서 notes의 `#xxx` 패턴으로 처리 (별도 entity 없이 텍스트 기반).
 - 모든 entity에 `id: UUID?` + `createdAt/updatedAt: Date?` — Firebase 마이그레이션 prep (last-writer-wins 충돌 해결, cross-platform ID stable). 자세한 정책은 "마이그레이션 prep" 섹션 참조.
 
 ### ItemEvent (활동 로그)
@@ -456,11 +458,32 @@ MyDays/MyDays/
 - **Auth 화면**: Apple Sign In / Google Sign In. 첫 진입 화면 추가.
 - **충돌 해결**: updatedAt 기반 last-writer-wins 또는 Firestore transaction. sync 엔진 작성 시.
 
+### 동기화 토글 정책 (CloudKit ↔ Firebase, 2026-05-29 결정)
+**왕복 전환 지원**. 단순 토글 의도가 아니라 기기 lifecycle (iPhone↔Android↔iPhone) 시나리오 대응.
+
+- **Phase 1 (현재)**: CloudKit 자동 (NSPersistentCloudKitContainer). 토글로 OFF만 가능 (`cloudKitContainerOptions = nil`, local-only).
+- **Phase 3 (Android 추가)**:
+  - 첫 진입 시 선택: "iCloud / Firebase" (각 폰 별도, 동기 X)
+  - Settings에 "동기화 방식 변경" 토글 → 변경 시 alert + migration UX
+  - **각 전환 = migration 이벤트** (가볍지 않음 — 데이터 일괄 upload).
+- **전환 흐름** (예: CK → FB):
+  1. 사용자가 "Firebase로 전환" 누름 → 경고 dialog (현재 폰 data를 FB로 push, 다른 기기는 별도 설정 필요).
+  2. CK options 끊기 (`cloudKitContainerOptions = nil`).
+  3. Local DB → FB 일괄 upload (auth 후).
+  4. 이후 변경은 FB sync layer만.
+  - CK 클라우드 데이터는 Apple이 보존 — 사라지지 않음. 다시 CK로 돌아갈 때 살아있음.
+- **재전환 (FB → CK 등) 충돌 해결**:
+  - CK 클라우드 쪽 옛 데이터(전환 전 잔여) + 폰의 현재 데이터 → `updatedAt` 기반 last-writer-wins.
+  - 모든 entity의 `updatedAt` 일관 갱신 정책으로 이미 대비됨 ("Firebase 마이그레이션 prep" 섹션 참조).
+- **다른 기기**: 각자 별도로 토글. 한 기기에서 토글했다고 다른 기기 자동 전환 X (자동화 시 위험).
+- **데이터 안전망**: JSON export 기능 별도 제공 (사용자 수동 백업 가능).
+
 ### 마이그레이션 작업 추정 (3단계 시점)
 - Auth + Firestore CRUD wrapper: 3~4일
 - 동기화 엔진 (offline queue, conflict, observer): 1.5~2주
 - 데이터 마이그레이션 + 테스트: 1주
-- 합 ~3~4주
+- **양방향 토글 + 충돌 해결**: 추가 1주 (Phase 1만 가는 게 아니라면)
+- 합 ~3~4주 (편도) 또는 ~4~5주 (양방향)
 
 ## 최근 완료 (2026-05-27 세션)
 
@@ -710,6 +733,52 @@ MyDays/MyDays/
 - AddItemView 신규 NTD 진입 시 default 카테고리 preselect, 카테고리 선택/변경 시 알림 default 신규 항목 1회 적용 (편집 모드는 사용자 알림 보존).
 - 위 "Category 알림 default Todo 4종 재구성"와 연계.
 
+### 알림 → 오늘탭 routing + 권한 거부 안내
+- NotificationService에 `didReceive` delegate + `Notification.Name.openTodayTabFromNotification` broadcast.
+- RootView가 `@State selectedTab` + TabView selection binding으로 onReceive에 `.today` 전환 (iPad sidebar도 같이).
+- AddItemView 알림 권한 거부 케이스 처리:
+  - `NotificationService.currentAuthorizationStatus()` public method 추가 (prompt X).
+  - 알림 section에 inline warning banner (status==.denied일 때만): bell.slash.fill + "설정 열기" 버튼.
+  - 저장 시 권한 거부 + 알림 설정돼 있으면 alert dialog: 설정 열기 / 그대로 저장 / 취소.
+  - foreground 복귀 시 권한 재확인.
+- 권장: 항목 highlight 등 deep link는 미구현 — 단순 routing이 사용자 결정.
+
+### Tag entity drop
+- 사용자 결정 — 카테고리만으로 분류 충분. Tag entity와 Item.tags 관계 제거 (Swift 코드 미사용 상태였음).
+- 향후 검색 기능 시 notes 내 `#xxx` 패턴으로 처리 — 별도 모델 불필요.
+
+### 활동 기록 화면 (RC 기반, per-item + all-item)
+- `Views/ActivityHistoryView.swift` — `init(item: Item?)` 단일 view, optional로 모드 분기.
+- 정렬: `completedAt desc` (없으면 `date desc` fallback). 월 단위 Section grouping.
+- Row: status dot (완료=accent ●, 포기=secondary ●) + 날짜·요일·시각 + 상태 라벨 + (포기) 사유 inline.
+- per-item header: 항목 제목 + streak (반복) + 총 횟수.
+- all-item row: 항목 제목 강조 (`.subheadline.weight(.semibold)`) + 날짜/상태 라인.
+- Toolbar 필터: 상태(전체/완료/포기) `checkmark.circle` Menu + (all-item) 카테고리 `line.3.horizontal.decrease.circle` Menu.
+- All-item `.searchable` — 제목 + notes substring (notes의 `#태그` 자연 매칭).
+- Entry points: AddItemView 활동 기록 섹션 하단 "전체 보기" (record 1+ 시 노출, ZStack hidden NavigationLink + 중앙 Text overlay로 chevron 제거) + Settings → "활동 기록" (item=nil).
+- 영문 "포기" → "Gave up" (NTD give-up 의미; "Cancelled"는 Todo cancel 별도).
+- pop 시 tint 잃는 케이스 방어로 `.appTint()` 부착.
+
+### iPad Stage 2 — 키보드 단축키 + 본문 폭 cap
+- **키보드 단축키** (`RootView.swift`):
+  - ⌘1~4: 탭 전환 (iPhone TabView selectedTab + iPad sidebar 동시 동기).
+  - ⌘N: 현재 탭의 새 항목 sheet 열기 (`Notification.openNewItemForCurrentTab` broadcast, Settings 탭 제외).
+  - invisible Button overlay (frame 0, opacity 0, hit-testing X)에 `.keyboardShortcut(...)` 부착.
+  - `currentTab` computed: regular size class면 sidebarSelection, compact면 selectedTab.
+  - 시뮬레이터에선 Simulator app menu(⌘1~4=Window scale)가 가로채기 가능 → 실기기에서 정상 동작.
+- **본문 폭 cap** (`AppTheme.swift`):
+  - `iPadContentWidth(_ maxWidth: 700)` ViewModifier — `@Environment(\.horizontalSizeClass) == .regular`에서만 frame cap + 가운데 정렬.
+  - TodayView/ListView/ArchiveView의 List, SettingsView의 Form에 적용.
+
+### Mac Catalyst 활성화
+- `pbxproj`:
+  - `SUPPORTS_MACCATALYST = YES` (main app + widget extension 둘 다).
+  - `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO` — Designed for iPad 모드 비활성화. Catalyst만 사용.
+  - `SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"` — `macosx` 제외. Catalyst는 iOS SDK 변형이라 macosx 불필요.
+- Today 탭 아이콘 `\(N).calendar` 동적 SF Symbol이 Catalyst에서 일부 N 렌더 누락 → `#if targetEnvironment(macCatalyst)` 분기로 정적 `calendar` fallback (iPhone TabView `todayTabIconName` + iPad sidebar `SidebarItem.icon()` 둘 다).
+- 빌드 검증: Mac Catalyst variant 컴파일 성공. 실행은 Mac을 Apple Developer 계정에 등록 후 가능.
+- 현재 iPad UI 그대로 Mac에서 실행 — Mac-native 폴리시 (3-column detail, inline editing 등) 미적용. Stage 3에서 진행.
+
 ## 미구현 (다음 후보, 우선순위 순)
 
 ### 1. 활동 목표 (Activity Goal) — 3번째 핵심 기능 (다음 진행 예정)
@@ -781,34 +850,108 @@ protocol ActivityDataProvider {
 - HKObserverQuery + `enableBackgroundDelivery`로 백그라운드 wake-up 가능 (Steps·Sleep 지원). 단 빈도 제한.
 - 권한 prompt UX 신중히 — 한 번에 여러 type 요청보다 type별 lazy 요청 권장.
 
-### 2. 태그 관리 UI (카테고리는 완료)
-- 카테고리는 2026-05-28 세션에서 완료 (CRUD + 필터 + 그룹핑).
-- Tag는 모델만 있고 UI 없음 — 다중 선택 가능 모델로 별도 진행 필요.
+### 2. 검색 기능 + `#태그` (notes 내)
+- Tag entity는 2026-05-29 drop. 향후 일정 검색 화면 구현 시 notes의 `#xxx` 패턴을 인식해 태그 필터로 사용.
+- regex `#[가-힣A-Za-z0-9_]+` 정도로 파싱. Tag 데이터 모델 없음 — text 기반만.
+- (선택) Phase 3 — 태그 overview 화면: 모든 notes에서 unique `#xxx` 추출 + 카운트 + 탭하면 그 태그 항목 필터.
+- (선택) Phase 4 — TextField 자동완성: 사용자가 `#` 입력 시 기존 태그 suggestion.
 - 사용자 결정: 일반 사용자에게 2단계(카테고리 + 하위 분류)는 과함 → 3단계 계층 구조는 진행 안 함.
 
-### 3. iPad 최적화 (Stage 1 완료, Stage 2/3 진행 예정)
-- Stage 1 완료 (2026-05-28 세션): NavigationSplitView 분기, 사이드바 selection 동작.
-- Stage 2: content 폭 cap, 키보드 단축키, 멀티 컬럼 디테일 (오늘+편집 동시).
-- Stage 3: Mac Catalyst 변환 + Mac native 폴리시.
+### 3. iPad 최적화 (Stage 1+2 완료, Mac Catalyst 활성화 완료, Stage 3 진행 예정)
+- Stage 1 완료 (2026-05-28): NavigationSplitView 분기, 사이드바 selection 동작.
+- Stage 2 완료 (2026-05-29): 키보드 단축키 (⌘1~4, ⌘N) + 본문 폭 cap (`.iPadContentWidth()`).
+- Mac Catalyst 활성화 완료 (2026-05-29): pbxproj 설정 + Today 아이콘 fallback. 빌드/실행 OK.
+- **Stage 3 (남음)**: 3-column NavigationSplitView (sidebar + content list + detail), AddItemView를 sheet 대신 detail pane에 inline 호스트, Mac-native 폴리시. 큰 작업 — 1.5~2주. 출시 v2 후보.
 
-### 4. 알림 후속 개선
-- 알림 탭 → 항목 편집 화면 deep link.
-- 권한 거부 후 Settings 재안내 경로.
-- pending 한계(64) 초과 시 graceful 처리.
+### 4. 알림 후속 개선 (대부분 완료)
+- **완료 (2026-05-29)**: 알림 탭 → 오늘 탭 routing. 알림 권한 거부 안내 (AddItemView 저장 시 dialog + Settings 열기).
+- **남음**: 알림 탭 → 항목 편집 화면 deep link (현재는 오늘탭 routing만, 항목 highlight 없음). 우선순위 낮음.
+- **남음**: pending 한계(64) 초과 시 graceful 처리. 사용자 8개 미만 routine이면 무리 X — 실 사용자 데이터 보고 결정 (보류).
 
-### 5. 항목별 활동 기록 view
-- 현재 AddItemView 활동 기록 섹션은 최근 10건만.
-- 별도 화면에서 전체 시계열 (Todo/NTD 공통).
-- ActivityLogView ↔ RoutineCompletion 이원화 유지 (lifecycle vs per-occurrence).
+### 5. 활동 기록 화면 (완료, 2026-05-29)
+- RC 기반 시계열 화면 — per-item (AddItemView "전체 보기") + all-item (Settings → 활동 기록). 자세한 구현은 "최근 완료" 섹션 참조.
+
+### 5-b. 활동 보고서 (Premium 기능 — 보류)
+
+**MVP 보고서 구성**:
+- 첫 화면 (대시보드 — 기간 선택 가능, default 이번 달):
+  - 요약 카드: 완료 N회 / 포기 M회 / 완료율 % / 현재 streak
+  - 월간 추이 line chart (최근 6개월)
+  - 요일별 완료율 bar chart
+  - 카테고리별 완료율 비교
+- 항목별 디테일 (각 routine·NTD 보고서) — per-item 활동 기록 화면 + 통계 카드
+
+**가치 분류**:
+| | 가치 | 비용 | MVP |
+|---|---|---|---|
+| 완료율 (기간) | ⭐⭐⭐ | 낮음 | ✓ |
+| Streak | ⭐⭐⭐ | 낮음 | ✓ |
+| 누적 횟수 | ⭐⭐ | 낮음 | ✓ |
+| 월간 line chart | ⭐⭐⭐ | 중간 | ✓ |
+| 요일별 bar | ⭐⭐⭐ | 중간 | ✓ |
+| 카테고리별 | ⭐⭐ | 중간 | ✓ |
+| 시간대 heatmap | ⭐⭐ | 높음 | Phase 2 |
+| NTD 평균 지속 시간 | ⭐⭐ | 중간 | Phase 2 |
+| 포기 사유 빈도 | ⭐⭐ | 낮음 | Phase 2 |
+| Narrative 인사이트 (template) | ⭐ | 낮음 | Phase 2 |
+| 활동 목표 통계 | — | — | 활동 목표 도입 후 |
+
+**기술 메모**:
+- **Charts framework** (iOS 16+) — Apple 공식, 가독성 좋음.
+- 통계 계산은 view appear 시 — RC ~수천건이라도 ms 수준. 캐싱 불필요.
+- 기간: 일/주/월/년. default = 이번 달.
+- 데이터 부족 (routine 시작 ~7일 미만): "데이터 부족" 안내 (오해 방지).
+
+**핵심 insight 우선**:
+- "현재 streak + 월간 추이" 두 가지가 retention 핵심 — 매일 들어와 확인하는 motivation 제공.
+- 단순 숫자 나열보다 **"내 패턴 발견 + 동기부여"** 정수.
 
 ### 6. Month view Phase 3 — grid 인프라 재활용
 - 반복 NTD/Todo 전용 history view에 같은 grid 컴포넌트 사용 (성공/실패 색 dot 등 indicator만 교체).
 - MonthGridView를 prop 기반(`cellDecorator: (Date) -> some View`)으로 일반화 필요.
 
 ### 폴리시 / 후속
-- SpeechRecognizer Phase B 발전 — 자체 mic UI 풍부화 (waveform 등). 현재는 hands-free 용.
-- Settings "모든 데이터 삭제" 버튼 출시 전 `#if DEBUG` 가드 또는 제거.
+- SpeechRecognizer Phase B 발전 — 자체 mic UI 풍부화 (waveform 등). 현재는 hands-free 용. **사용자 결정: 현 기능으로 마무리**.
+- Settings "모든 데이터 삭제" 버튼 — 일반 사용자에게도 필요 (사용자 의견). UX 방식 별도 고민 중.
 - `completeExpiredRoutines` 호출 위치(현재 4곳) 성능 측정 후 최적화 후보 — 현재 보류.
+- Settings 활동 로그 화면 — 표시 문구 / UI 개선 필요 (사용자 의견). 별도 진행.
+- pending 알림 64 한계 처리 — 사용자 8개 미만이면 무리 X. 실 사용자 데이터 보고 처리 (보류).
+- 알림 권한 거부 재안내 — 입력 폼 저장 시 dialog로 처리 완료 (2026-05-29). 추가 onboarding 안내는 우선순위 낮음.
+
+## Freemium 계획 (출시 시점 결정 보류)
+
+### 제안 (사용자 안)
+- **사용량 cap (무료)**:
+  - 절제목표 + 활동목표 합계 최대 2개 (NTD 1 + Activity 1)
+  - 반복일정 최대 2개
+  - 카테고리 최대 3개
+  - 체크리스트 최대 3개/할일
+- **Premium 기능 (유료)**:
+  - 테마 색상 (TintPreset 8색)
+  - 데이터 동기화 (CloudKit / Firebase)
+  - 활동 보고서 + 활동 검색
+- 별도 앱 X, 단일 앱 in-app purchase.
+
+### 의견 / 권장 보정
+- NTD/반복 cap 너무 빡빡 — **각 3~4개로 완화** 권장. 한도 빨리 도달 → 사용자 이탈 risk.
+- 위젯은 **무료 포함** 권장 — 차별화 약하면 사용 안 함.
+- **1차 출시는 전체 무료, freemium은 v2로 미루는 게 안전** — 사용자 적응 데이터 + review 안정화 후 paid tier 추가.
+  - 대안: 출시 기념 N개월 전부 무료 → 추후 전환.
+
+### UX (Paywall 진입점 3가지)
+1. Settings에 "Pro 업그레이드" 상시 entry (덜 intrusive).
+2. **Cap 도달 inline 안내** — 그 자리에서 "Pro로 무제한 → [업그레이드]" 칩/링크.
+3. **기능 진입 시도** — 보고서/검색 탭 열면 preview + 가격 + CTA.
+- 첫 launch onboarding엔 paywall 표시 X (사용자 적응 우선).
+- modal popup 빈도 제한 (세션당 1회).
+
+### 기술 구현 메모
+- **StoreKit 2** (iOS 15+). 권장: 연구독 + 평생(lifetime) 일회성 둘 다 제공.
+- **`isPremium` flag**:
+  - source of truth: StoreKit transaction 확인
+  - 캐시: `@AppStorage(... store: .appShared)` — 위젯도 인지
+- **권한 가드 헬퍼**: `canAddRecurrence(in:)`, `canAddNTD(in:)`, `canAddCategory(in:)` 등. 각 entry point에서 미리 검사 → 실패 시 paywall.
+- 동기화 ON 토글 시 Premium 체크 → cloudKitContainerOptions 부착.
 
 ## 디자인 / 코드 가이드라인
 

@@ -140,4 +140,25 @@ extension View {
     func appTint() -> some View {
         modifier(AppTintModifier())
     }
+
+    /// iPad/regular size class에서 본문 폭 cap — 가독성을 위해 너무 넓어지지 않게.
+    /// compact(iPhone)은 영향 X.
+    func iPadContentWidth(_ maxWidth: CGFloat = 700) -> some View {
+        modifier(IPadContentWidthModifier(maxWidth: maxWidth))
+    }
+}
+
+private struct IPadContentWidthModifier: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var hSize
+    let maxWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        if hSize == .regular {
+            content
+                .frame(maxWidth: maxWidth)
+                .frame(maxWidth: .infinity)
+        } else {
+            content
+        }
+    }
 }
