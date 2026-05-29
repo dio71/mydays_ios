@@ -94,6 +94,7 @@ struct DurationPickerSheet: View {
                 onSelect(isUnset ? nil : totalHours)
             }
         }
+        .appTint()
     }
 
     private func dayLabel(_ d: Int) -> String {

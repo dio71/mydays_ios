@@ -67,6 +67,18 @@ struct AddItemView: View {
     @State private var selectedCategoryID: UUID?
     /// 카테고리 picker sheet 노출 여부.
     @State private var showCategoryPicker: Bool = false
+    /// 체크리스트 draft 배열 — 저장 시 reconcile.
+    /// active(soft-deleted 아닌) ChecklistItem만 form에 노출. 사용자가 minus 누르면 array에서 제거 →
+    /// save 시 매칭 existing은 soft-delete(deletedAt 마킹). 새 draft는 새 ChecklistItem 생성.
+    @State private var checklistDrafts: [ChecklistDraft] = []
+    /// 새로 추가한 draft 자동 focus.
+    @FocusState private var focusedChecklistDraft: UUID?
+
+    /// 체크리스트 편집용 draft. id는 existing ChecklistItem과 매칭 (또는 새 UUID).
+    struct ChecklistDraft: Identifiable {
+        let id: UUID
+        var title: String
+    }
 
     /// 정렬된 카테고리 목록 — picker 옵션.
     @FetchRequest(
@@ -131,6 +143,14 @@ struct AddItemView: View {
                 _recurrenceConfig = State(initialValue: nil)
             }
             _selectedCategoryID = State(initialValue: item.category?.id)
+            // 체크리스트 — active만 load, sortOrder asc.
+            let allChecklist = (item.checklistItems as? Set<ChecklistItem>) ?? []
+            let activeChecklist = allChecklist
+                .filter { $0.isActive }
+                .sorted { $0.sortOrder < $1.sortOrder }
+            _checklistDrafts = State(initialValue: activeChecklist.map {
+                ChecklistDraft(id: $0.id ?? UUID(), title: $0.title ?? "")
+            })
         } else {
             _title = State(initialValue: "")
             _notes = State(initialValue: "")
@@ -165,6 +185,8 @@ struct AddItemView: View {
             _recurrenceConfig = State(initialValue: nil)
             // 카테고리 — 호출자가 명시한 categoryID 우선 (필터 적용 상태에서 신규 추가 등).
             _selectedCategoryID = State(initialValue: categoryID)
+            // 체크리스트 — 신규는 빈 배열로 시작.
+            _checklistDrafts = State(initialValue: [])
         }
     }
 
@@ -196,20 +218,9 @@ struct AddItemView: View {
         return true
     }
 
-    /// 알림 offset 선택지 (분). 음수=사전, 0=정시. anchor instant 기준.
-    /// 시각 있는 항목: 시각 기준 ±N분 (정시/10분 전/30분 전/1시간 전).
-    private static let alertOffsetOptionsWithTime: [Int] = [0, -10, -30, -60]
-    /// 시각 미설정(종일) Todo: anchor=startDate 0시 기준.
-    /// - 당일 오전 9시  → +540분
-    /// - 당일 오후 2시  → +840분
-    /// - 당일 오후 7시  → +1140분
-    /// - 1일전 오후 9시 → -180분 (= -24h + 21h)
-    /// - 2일전 오후 9시 → -1620분 (= -48h + 21h)
-    private static let alertOffsetOptionsNoTime: [Int] = [540, 840, 1140, -180, -1620]
-
     private var alertOffsetOptions: [Int] {
         // NTD는 항상 hasTime=true. Todo의 hasTime에 따라 옵션 세트 결정.
-        hasTime ? Self.alertOffsetOptionsWithTime : Self.alertOffsetOptionsNoTime
+        hasTime ? AlertOffset.withTimeOptions : AlertOffset.noTimeOptions
     }
 
     /// 알림 section.
@@ -243,7 +254,7 @@ struct AddItemView: View {
         Picker(selection: selection) {
             Text("alert.offset.disabled").tag(Optional<Int>.none)
             ForEach(alertOffsetOptions, id: \.self) { offset in
-                Text(verbatim: alertOffsetLabel(offset)).tag(Optional(offset))
+                Text(verbatim: AlertOffset.label(for: offset)).tag(Optional(offset))
             }
         } label: {
             Text(label)
@@ -251,27 +262,67 @@ struct AddItemView: View {
         .pickerStyle(.menu)
     }
 
-    private func alertOffsetLabel(_ offset: Int) -> String {
-        // 시각 미설정 Todo 전용 offset 매핑 (절대 시각 표현).
-        switch offset {
-        case 540:   return String(localized: "alert.offset.same_day_9am")
-        case 840:   return String(localized: "alert.offset.same_day_2pm")
-        case 1140:  return String(localized: "alert.offset.same_day_7pm")
-        case -180:  return String(localized: "alert.offset.day_before_9pm")
-        case -1620: return String(localized: "alert.offset.two_days_before_9pm")
-        default: break
+    /// 체크리스트 section — title TextField 목록 + minus 버튼 + 추가 버튼.
+    /// soft delete 정책 — minus는 draft 배열에서만 제거, 저장 시 existing은 deletedAt 마킹.
+    /// submit(.next) 시 비어있지 않으면 새 draft 자동 추가 + 포커스 이동 → 키보드 내리지 않고 연속 입력.
+    /// 빈 draft에서 submit하면 키보드 dismiss + 그 빈 draft 제거 (사용자가 끝낼 신호).
+    @ViewBuilder
+    private var checklistSection: some View {
+        Section("add.section.checklist") {
+            ForEach($checklistDrafts) { $draft in
+                HStack(spacing: 8) {
+                    TextField("add.checklist.placeholder", text: $draft.title)
+                        .focused($focusedChecklistDraft, equals: draft.id)
+                        // iOS 26 keyboard가 .next/.continue를 chevron(>)으로 표시.
+                        .submitLabel(.continue)
+                        // 키보드 chevron이 앱 tint(brown 등)로 보여 가독성 낮음 — system blue 명시.
+                        // 커서도 blue가 되지만 입력 영역에서 강조 색은 시인성 우선.
+                        .tint(.blue)
+                        .onSubmit {
+                            handleChecklistSubmit(draftID: draft.id)
+                        }
+                    Button(role: .destructive) {
+                        checklistDrafts.removeAll { $0.id == draft.id }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Button {
+                appendChecklistDraftAndFocus()
+            } label: {
+                Label("add.checklist.add", systemImage: "plus.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    // 글자/아이콘 옆 빈 공간도 탭 가능하도록 row 전체 hit area 확장.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        // 시각 있는 항목 (NTD / Todo hasTime=true): ±N분 표기.
-        if offset == 0 {
-            return String(localized: "alert.offset.exact")
+    }
+
+    /// 새 빈 draft를 끝에 추가하고 자동 포커스.
+    private func appendChecklistDraftAndFocus() {
+        let newDraft = ChecklistDraft(id: UUID(), title: "")
+        checklistDrafts.append(newDraft)
+        focusedChecklistDraft = newDraft.id
+    }
+
+    /// TextField submit 처리 — 빈 입력이면 키보드 dismiss + 그 draft 제거.
+    /// 입력 있으면 새 draft 추가 + 포커스 이동 (연속 입력).
+    private func handleChecklistSubmit(draftID: UUID) {
+        guard let idx = checklistDrafts.firstIndex(where: { $0.id == draftID }) else { return }
+        let trimmed = checklistDrafts[idx].title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            // 빈 입력에서 submit → 사용자가 마치는 신호. 그 draft 제거하고 키보드 내림.
+            checklistDrafts.remove(at: idx)
+            focusedChecklistDraft = nil
+            return
         }
-        if offset == -60 {
-            return String(localized: "alert.offset.hour_before")
-        }
-        return String.localizedStringWithFormat(
-            NSLocalizedString("alert.offset.minutes_before_format", comment: ""),
-            abs(offset)
-        )
+        // 입력 있음 → 새 draft 추가하고 포커스.
+        appendChecklistDraftAndFocus()
     }
 
     /// 활동 기록 section — RoutineCompletion 레코드 표시 (최신순 최대 10건).
@@ -410,6 +461,20 @@ struct AddItemView: View {
             if rule.selectedDays != config.days { return true }
             if rule.includesLastDay != config.includesLastDay { return true }
             if rule.selectedMonths != config.months { return true }
+        }
+        // 체크리스트 비교 — active만, sortOrder asc 순서로 (id, trimmedTitle) tuple 비교.
+        let existingChecklist = ((item.checklistItems as? Set<ChecklistItem>) ?? [])
+            .filter { $0.isActive }
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map { ($0.id ?? UUID(), ($0.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) }
+        let draftChecklist = checklistDrafts.map {
+            ($0.id, $0.title.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        // 빈 제목 draft는 save에서 skip되므로 비교 시 제외.
+        let draftFiltered = draftChecklist.filter { !$0.1.isEmpty }
+        if existingChecklist.count != draftFiltered.count { return true }
+        for (a, b) in zip(existingChecklist, draftFiltered) {
+            if a.0 != b.0 || a.1 != b.1 { return true }
         }
         return false
     }
@@ -638,6 +703,9 @@ struct AddItemView: View {
                     }
                 }
 
+                // 체크리스트 section — 모든 항목(신규/편집/Todo/NTD)에 노출.
+                checklistSection
+
                 if isEditing {
                     // 활동 기록 — 성공·포기 occurrence 일자별 표시 (Todo/NTD 공통).
                     activityHistorySection
@@ -709,8 +777,28 @@ struct AddItemView: View {
             }
             .task {
                 guard !isEditing else { return }
+                // NTD 신규 진입 시 기본 카테고리 preselect (categoryID arg 없을 때만).
+                // selectedCategoryID 변경은 .onChange로 흘러가 알림 default 자동 적용.
+                if isNTD, selectedCategoryID == nil,
+                   let def = Category.defaultForNTD(in: context) {
+                    selectedCategoryID = def.id
+                }
+                // categoryID arg로 init 시점에 이미 set된 경우, init은 .onChange 트리거 X →
+                // 여기서 한 번 알림 default 수동 적용 (신규 항목 작성 시 1회).
+                if let id = selectedCategoryID,
+                   let cat = categories.first(where: { $0.id == id }) {
+                    applyCategoryAlertDefaults(cat)
+                }
                 try? await Task.sleep(for: .milliseconds(120))
                 titleFocused = true
+            }
+            // 카테고리 변경 시 알림 default 적용 — 신규 항목 작성 중에만.
+            // 편집 모드: 사용자가 이미 설정한 알림 보존 (카테고리 바꿔도 알림은 그대로).
+            .onChange(of: selectedCategoryID) { _, newID in
+                guard !isEditing else { return }
+                guard let id = newID,
+                      let cat = categories.first(where: { $0.id == id }) else { return }
+                applyCategoryAlertDefaults(cat)
             }
             .sheet(isPresented: $showRecurrenceSheet) {
                 // presetDate: 사용자가 설정한 시작일자 기준 요일/일자 pre-set. 없으면 오늘.
@@ -731,6 +819,9 @@ struct AddItemView: View {
         // 닫을 때는 반드시 (x) 버튼을 통해서 → 확인 dialog 거치게 함 (실수 방지).
         // SwiftUI는 "드래그 시도 시 dialog 띄우기"를 직접 지원 안 함 → drag 자체를 막는 방식.
         .interactiveDismissDisabled(hasChanges)
+        // .graphical DatePicker / 일부 UIKit-bridged 컴포넌트가 sheet 안에서
+        // 루트 .tint를 잃고 시스템 기본(blue)으로 fallback되는 케이스 방어.
+        .appTint()
     }
 
     /// kind 변경 시 state 일관성 유지.
@@ -753,6 +844,58 @@ struct AddItemView: View {
         }
         if dueHour == 24 {
             dueHour = startHour
+        }
+        // NTD 전환 시 기본 카테고리 자동 채움 (신규 항목 + 카테고리 비어있을 때).
+        // 이미 다른 카테고리 선택돼 있으면 사용자 의도 존중 — 덮어쓰지 않음.
+        if !isEditing, selectedCategoryID == nil,
+           let def = Category.defaultForNTD(in: context) {
+            selectedCategoryID = def.id
+            // selectedCategoryID 변경은 .onChange가 알림 default 적용 처리.
+            return
+        }
+        // 카테고리 그대로지만 kind가 바뀌었으므로 알림 default 재적용 (해당 kind용 필드로).
+        if !isEditing, let id = selectedCategoryID,
+           let cat = categories.first(where: { $0.id == id }) {
+            applyCategoryAlertDefaults(cat)
+        }
+    }
+
+    /// 카테고리의 알림 default를 현재 UI state에 적용.
+    /// - NTD: ntdStart/End ← defaultNtdStart/Due
+    /// - Todo + hasTime=true: todoStart ← defaultTodoTimedStart, todoDue(period) ← defaultTodoTimedDue
+    /// - Todo + hasTime=false: todoStart ← defaultTodoUntimedStart, todoDue(period) ← defaultTodoUntimedDue
+    /// 호출 시점: 신규 항목 작성 중 (.task initial / .onChange of category / kind 토글 / hasTime 토글).
+    /// 편집 모드(isEditing)에서는 호출 안 함 — 사용자가 설정한 알림 보존.
+    private func applyCategoryAlertDefaults(_ cat: Category) {
+        if isNTD {
+            ntdStartAlertOffset = cat.defaultNtdStartAlertInt
+            ntdEndAlertOffset = cat.defaultNtdDueAlertInt
+        } else if hasTime {
+            todoStartAlertOffset = cat.defaultTodoTimedStartAlertInt
+            if showPeriod {
+                todoDueAlertOffset = cat.defaultTodoTimedDueAlertInt
+            }
+        } else {
+            todoStartAlertOffset = cat.defaultTodoUntimedStartAlertInt
+            if showPeriod {
+                todoDueAlertOffset = cat.defaultTodoUntimedDueAlertInt
+            }
+        }
+    }
+
+    /// 시간 설정(hasTime) / 기간(showPeriod) 토글 시 알림 default 재적용.
+    /// 옵션 세트(withTime/noTime)가 달라져 기존 offset 값이 호환 안 되므로 reset 필요.
+    /// 카테고리 선택돼 있으면 그 카테고리의 새 context용 default로 채움 — 사용자가 명시 설정 안 했어도
+    /// 카테고리 의도가 유지됨. 카테고리 없으면 nil로 reset (기존 동작).
+    /// 편집 모드면 reset만 (카테고리 default 적용 안 함 — 사용자 알림 보존 원칙).
+    private func reapplyTodoAlertDefaults() {
+        if !isEditing,
+           let id = selectedCategoryID,
+           let cat = categories.first(where: { $0.id == id }) {
+            applyCategoryAlertDefaults(cat)
+        } else {
+            todoStartAlertOffset = nil
+            todoDueAlertOffset = nil
         }
     }
 
@@ -1190,6 +1333,15 @@ struct AddItemView: View {
             // 기간 모드는 다른 두 일자 의미 — start+1로 default 채움 (이미 hasDue=true여도 덮어쓰기).
             hasDue = true
             dueDate = Self.defaultDueDate(after: startDate)
+            // 기간 ON으로 마감 알림 picker가 노출 → 카테고리 default를 마감 anchor에만 적용
+            // (시작 알림은 이미 단일 모드에서 사용자가 본 값 그대로 보존).
+            if !isEditing,
+               let id = selectedCategoryID,
+               let cat = categories.first(where: { $0.id == id }) {
+                todoDueAlertOffset = hasTime
+                    ? cat.defaultTodoTimedDueAlertInt
+                    : cat.defaultTodoUntimedDueAlertInt
+            }
             // dateExpansion 유지 — chip 클릭은 캘린더 토글하지 않음.
         } label: {
             Text("add.chip.period")
@@ -1223,9 +1375,10 @@ struct AddItemView: View {
                     // 현재 OFF → ON으로 전환. dueHour를 startHour로 sync (사용자가 wheel로 재설정 가능).
                     dueHour = startHour
                 }
-                // hasTime 전환 시 알림 offset reset — 옵션 세트가 달라져 값 호환 X.
-                todoStartAlertOffset = nil
-                todoDueAlertOffset = nil
+                // hasTime 전환 시 알림 default 재적용 — 옵션 세트(withTime/noTime) 호환 안 됨.
+                // 카테고리 선택돼 있으면 그 default 사용, 없으면 nil reset (사용자가 명시 설정한 게 아니라면
+                // 카테고리 의도가 유지되어야 함).
+                reapplyTodoAlertDefaults()
             }
         } label: {
             Text("add.chip.has_time")
@@ -1632,6 +1785,9 @@ struct AddItemView: View {
         // 알림 Reminder 레코드 reconcile — UI state(offset Optional<Int>) → DB.
         reconcileReminders(item: item)
 
+        // 체크리스트 reconcile — drafts → ChecklistItem (soft delete + 신규 생성).
+        reconcileChecklist(item: item)
+
         ItemEvent.log(isNew ? .created : .updated, on: item, in: context)
 
         do {
@@ -1729,6 +1885,42 @@ struct AddItemView: View {
         }
     }
 
+    /// 체크리스트 drafts → Item.checklistItems 동기화.
+    /// - 기존 active item 중 drafts에 없는 것 → soft delete (deletedAt 마킹). check 기록은 보존.
+    /// - drafts 중 existing 매칭되는 것 → title/sortOrder 업데이트. 빈 제목은 건너뜀 (no-op).
+    /// - drafts 중 매칭 없는 것 → 새 ChecklistItem 생성 (빈 제목은 skip).
+    /// 사용자가 minus로 제거한 active가 다시 추가될 일은 없음 (UUID 새로 발급되니).
+    private func reconcileChecklist(item: Item) {
+        let now = Date()
+        let existing = (item.checklistItems as? Set<ChecklistItem>) ?? []
+        let draftIds = Set(checklistDrafts.map { $0.id })
+
+        // 1. active이면서 drafts에 없는 것 → soft delete.
+        for ci in existing where ci.isActive {
+            guard let ciID = ci.id, !draftIds.contains(ciID) else { continue }
+            ci.markDeleted()
+        }
+
+        // 2. drafts → upsert (빈 제목은 skip).
+        for (idx, draft) in checklistDrafts.enumerated() {
+            let trimmed = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let target: ChecklistItem
+            if let ci = existing.first(where: { $0.id == draft.id }) {
+                target = ci
+                // 만약 이전에 soft-deleted였다가 같은 UUID로 다시 들어온 경우 복원 (실질 케이스 없지만 방어).
+                if target.deletedAt != nil { target.deletedAt = nil }
+            } else {
+                target = ChecklistItem(context: context)
+                target.id = draft.id
+                target.createdAt = now
+                target.item = item
+            }
+            if target.title != trimmed { target.title = trimmed }
+            if target.sortOrder != Int32(idx) { target.sortOrder = Int32(idx) }
+            target.updatedAt = now
+        }
+    }
 }
 
 #Preview("New") {

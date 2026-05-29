@@ -86,6 +86,7 @@ struct DatePickerSheet: View {
                 onSelect(date.calendarDateAnchor, timeOfDay)
             }
         }
+        .appTint()
     }
 
     private func headerButton(systemImage: String, action: @escaping () -> Void) -> some View {

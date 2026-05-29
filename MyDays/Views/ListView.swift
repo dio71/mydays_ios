@@ -6,14 +6,16 @@ struct ListView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: ItemSheetMode?
-    @State private var showCompleted = false
+    // 완료 섹션 표시 — 앱 재실행 시 마지막 토글 상태 복원 (@AppStorage).
+    @AppStorage(UIStateKey.listShowCompleted) private var showCompleted: Bool = false
     // referenceDate는 daysUntilDue 등 calendar date 비교 기준 → UTC anchor.
     // 자정 넘어가면 onChange/.task에서 다시 .todayCalendarAnchor로 갱신.
     @State private var referenceDate: Date = .todayCalendarAnchor
-    /// 카테고리 필터 — nil = 전체, UUID = 그 카테고리만.
+    /// 카테고리 필터 — nil = 전체, UUID = 그 카테고리만. 매 launch마다 초기화 (저장 X — 사용자 결정).
     @State private var filterCategoryID: UUID?
     /// 카테고리 그룹핑 모드 — true면 active section을 카테고리별 섹션으로 분리. 완료는 그룹핑 무시.
-    @State private var groupByCategory: Bool = false
+    /// 앱 재실행 시 마지막 상태 복원.
+    @AppStorage(UIStateKey.listGroupByCategory) private var groupByCategory: Bool = false
 
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\Category.sortOrder), SortDescriptor(\Category.createdAt)],

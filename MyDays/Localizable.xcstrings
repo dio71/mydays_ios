@@ -3062,6 +3062,83 @@
         "ko" : { "stringUnit" : { "state" : "translated", "value" : "아이콘" } }
       }
     },
+    "category.section.ntd_default" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fast Category" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "절제 목표 분류" } }
+      }
+    },
+    "category.ntd_default.toggle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Default for Fasts" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "절제 목표 기본 분류" } }
+      }
+    },
+    "category.section.alert_default.ntd" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Fast Alert Defaults" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "절제 목표 알림 기본값" } }
+      }
+    },
+    "category.section.alert_default.todo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Todo Alert Defaults" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "할일 알림 기본값" } }
+      }
+    },
+    "category.alert.todo_timed_start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start (timed)" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "시작 알림 (시간 설정시)" } }
+      }
+    },
+    "category.alert.todo_untimed_start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start (all-day)" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "시작 알림 (시간 미설정시)" } }
+      }
+    },
+    "category.alert.todo_timed_due" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Due (timed)" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "마감 알림 (시간 설정시)" } }
+      }
+    },
+    "category.alert.todo_untimed_due" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Due (all-day)" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "마감 알림 (시간 미설정시)" } }
+      }
+    },
+    "add.section.checklist" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Checklist" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "체크리스트" } }
+      }
+    },
+    "add.checklist.placeholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Item" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "항목" } }
+      }
+    },
+    "add.checklist.add" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add Item" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "항목 추가" } }
+      }
+    },
     "settings.categories" : {
       "extractionState" : "manual",
       "localizations" : {

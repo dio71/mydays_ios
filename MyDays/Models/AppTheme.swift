@@ -77,3 +77,67 @@ enum AppThemeKey {
     static let tintPreset = "app.tintPreset"
     static let appearanceMode = "app.appearanceMode"
 }
+
+/// UI 상태 영속화 키. 탭별 toggle/mode 등 — UserDefaults.standard에 저장 (App Group 공유 불필요).
+/// 카테고리 필터(filterCategoryID)는 저장 X — 매 launch마다 "모두"로 초기화 (사용자 결정).
+enum UIStateKey {
+    static let todayViewMode = "ui.todayView.viewMode"           // day/month
+    static let todayShowCompleted = "ui.todayView.showCompleted" // 전체/미완료
+    static let listShowCompleted = "ui.listView.showCompleted"
+    static let listGroupByCategory = "ui.listView.groupByCategory"
+    static let archiveShowCompleted = "ui.archiveView.showCompleted"
+    static let archiveGroupByCategory = "ui.archiveView.groupByCategory"
+}
+
+// MARK: - App Group 공유 UserDefaults
+//
+// App 본체와 Widget Extension이 같은 entitlement(`group.io.snapplay.MyDays`)로 공유하는 suite.
+// 위젯 process는 본체와 별도 UserDefaults라 standard로 저장하면 위젯에서 읽지 못함 →
+// 모든 사용자 테마 설정(tintPreset / appearanceMode)을 이 suite에 저장하면 위젯도 동일 값 사용.
+//
+// 모든 `@AppStorage(...)` 사용처는 `store: .appShared`로 지정해야 함 (본체·위젯 일관).
+
+extension UserDefaults {
+    static let appShared: UserDefaults = {
+        UserDefaults(suiteName: "group.io.snapplay.MyDays") ?? .standard
+    }()
+}
+
+/// Widget에서 사용할 사용자 tint color 읽기 helper.
+/// SwiftUI `@AppStorage`를 ViewModifier 안에서 안전하게 쓰기 까다로워 정적 lookup 우선.
+extension TintPreset {
+    /// 공유 UserDefaults에서 현재 사용자 tint preset을 읽어 SwiftUI Color로 반환.
+    /// 값 없으면 default `.blue`.
+    static var currentColor: Color {
+        let raw = UserDefaults.appShared.string(forKey: AppThemeKey.tintPreset)
+                  ?? TintPreset.blue.rawValue
+        return (TintPreset(rawValue: raw) ?? .blue).color
+    }
+}
+
+// MARK: - App tint propagation helper
+//
+// 루트 `.tint(tintColor)`는 대부분 자식에 전달되지만, sheet 안 NavigationStack /
+// .graphical DatePicker 같은 UIKit-bridged view에서 시스템 기본(파랑)으로 fallback되는 경우가 있다.
+// 그 시점에 form 안만 파랑으로 보이는 현상이 보고됨. 해당 sheet/view 루트에 `.appTint()` 명시
+// 재적용으로 안전 보장.
+
+private struct AppTintModifier: ViewModifier {
+    @AppStorage(AppThemeKey.tintPreset, store: .appShared)
+    private var tintPresetRaw: String = TintPreset.blue.rawValue
+
+    private var tintColor: Color {
+        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+    }
+
+    func body(content: Content) -> some View {
+        content.tint(tintColor)
+    }
+}
+
+extension View {
+    /// 사용자가 Settings에서 고른 앱 tint를 강제 재적용. sheet root / UIKit bridge용.
+    func appTint() -> some View {
+        modifier(AppTintModifier())
+    }
+}

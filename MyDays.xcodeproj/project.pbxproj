@@ -56,7 +56,9 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Localizable.xcstrings,
+				Models/AppTheme.swift,
 				Models/CalendarDate.swift,
+				Models/CategoryColor.swift,
 				"Models/Item+Helpers.swift",
 				"Models/ItemEvent+Helpers.swift",
 				Models/ModelEnums.swift,

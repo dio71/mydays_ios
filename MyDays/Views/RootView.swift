@@ -52,17 +52,25 @@ struct RootView: View {
 
     @ViewBuilder
     private var iPhoneLayout: some View {
+        // iOS 26 — WindowGroup의 `.tint()`이 TabView 내부 NavigationStack 본문에
+        // 항상 propagate되지 않는 케이스(week strip / FAB / ItemRow의 Color.accentColor가
+        // 시스템 blue로 fallback)가 관찰됨. 각 NavigationStack에 .appTint() 명시 적용해
+        // body의 Color.accentColor가 사용자 테마 색을 정확히 반영하도록 보장.
         TabView {
             NavigationStack { TodayView() }
+                .appTint()
                 .tabItem { Label("tab.today", systemImage: "\(todayDay).calendar") }
 
             NavigationStack { ListView() }
+                .appTint()
                 .tabItem { Label("tab.list", systemImage: "list.bullet") }
 
             NavigationStack { ArchiveView() }
+                .appTint()
                 .tabItem { Label("tab.archive", systemImage: "archivebox") }
 
             NavigationStack { SettingsView() }
+                .appTint()
                 .tabItem { Label("tab.settings", systemImage: "gearshape") }
         }
     }
@@ -86,6 +94,7 @@ struct RootView: View {
             NavigationStack {
                 detailView
             }
+            .appTint()
         }
     }
 

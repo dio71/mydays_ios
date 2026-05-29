@@ -78,5 +78,6 @@ struct CategoryPickerSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .appTint()
     }
 }

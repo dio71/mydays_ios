@@ -605,6 +605,111 @@ MyDays/MyDays/
 - `today.empty.todo`: "진행 중인 할일 일정이 없습니다" / "No active todos"
 - `archive.empty`: "보관 중인 할일이 없습니다" / "No archived tasks"
 
+## 최근 완료 (2026-05-29 세션)
+
+### 체크리스트 기능 (신규)
+- 데이터 모델 (entity 2개 추가):
+  - `ChecklistItem`: id, title, sortOrder, createdAt, updatedAt, **deletedAt** (soft delete), item(Cascade), checks(→ ChecklistCheck Cascade).
+  - `ChecklistCheck`: id, occurrenceDate(UTC anchor), completedAt, checklistItem(Nullify).
+  - Item에 `checklistItems` 관계 추가.
+- 표시 정책 = **합집합**: active(deletedAt==nil) ∪ (soft-deleted 중 그 occurrence에 check 있는 것). 부모 항목 삭제 시에도 historical check 보존됨.
+- occurrenceDate 규약:
+  - **반복**: 각 occurrence start date (UTC anchor) — per-occurrence 기록.
+  - **1회성/Someday**: `Item.nonRoutineChecklistOccurrence` sentinel (`Date.distantPast`의 UTC startOfDay) — 단일 bucket. `item.startDate`가 바뀌어도 매칭 보존. 1회성↔반복 전환 시 자동 마이그 X (DB 보존만 됨, 원상태 돌리면 복원).
+- 헬퍼 (`Models/ChecklistItem+Helpers.swift`):
+  - `markDeleted()`, `isActive`, `isChecked(forOccurrence:)`, `checkRecord(forOccurrence:)`.
+  - `Item.checklistOccurrenceDate(occurrenceStartOverride:referenceDate:)`, `displayedChecklist`, `checklistProgress`, `hasDisplayableChecklist`, `toggleChecklistCheck`.
+- AddItemView 입력 UI (`checklistSection`):
+  - draft 배열 hold + save 시 `reconcileChecklist(item:)`로 동기화 (Reminder 패턴 동일).
+  - 빈 제목 draft는 save에서 skip. minus 버튼은 draft 배열에서만 제거 → save에서 existing은 `deletedAt` 마킹.
+  - TextField submit으로 연속 입력 (`.submitLabel(.continue)` + `onSubmit`): 입력 있으면 새 draft 자동 추가 + 포커스 이동, 빈 draft에서 submit하면 그 draft 제거 + 키보드 dismiss.
+  - `+ 항목 추가` 버튼 row 전체 hit area: `.frame(maxWidth: .infinity, alignment: .leading) + .contentShape(Rectangle())`.
+- ItemRow chip + inline expand:
+  - **Non-compact**: statusIcons 줄 맨 앞에 chip(`☑ N/M ›`).
+  - **Compact** (그룹 routine): title 바로 아래 별도 줄.
+  - Expand는 rowContent **밖 sibling**으로 부착 (`.padding(.leading, 40)`으로 leadingControl 폭+spacing만큼 indent). 안에 두면 inner VStack이 height 흡수해 title이 center로 떠 보임.
+  - 체크박스 토글: `Item.toggleChecklistCheck` + 부모 `item.updatedAt = now`도 함께 갱신 — `@ObservedObject(item)`가 child ChecklistCheck 변경을 자동 관찰 못해 row body 재평가 안 되는 문제 회피.
+
+### ItemRow 체크리스트 expand 애니메이션 (정착)
+- 모든 expand 애니메이션 **제거** — 사용자가 instant 변경 + title 상단 고정을 원함.
+- `rowContent`에 `.animation(nil, value: checklistExpanded)` 한정 부착 — title 자리이동 보간 차단.
+  - **주의**: outer VStack에 부착하면 FetchRequest의 row 제거(완료 체크 fade-out) 애니메이션까지 같이 죽음 → 체크리스트 있는 항목 완료 시 row가 안 사라짐.
+- chip에 `.transaction { animation = nil; disablesAnimations = true }` — 외부 ambient animation(List row resize 등)이 chip 텍스트/아이콘을 위/아래로 끌고 가는 현상 완전 차단.
+- chevron은 단순 `.rotationEffect(.degrees(checklistExpanded ? 90 : 0))` (애니메이션 없이 즉시 회전).
+- 시도하다 폐기한 것들 (참고용 — 같은 함정 피하기):
+  - `.transition(.opacity)` + `withAnimation`: title이 위로 보간되어 어색.
+  - `.scale(scale: 0, anchor: .top)`: uniform이라 너비도 줄어 어색.
+  - 커스텀 `.scaleEffect(x:1, y:scale)` (VerticalRevealModifier): scaleEffect는 layout 안 변해 row 높이가 한 번에 늘어남.
+  - `.frame(maxHeight: .infinity)`: `.infinity`는 SwiftUI 보간 불가 → 즉시 변함.
+  - `.frame(height: estimatedHeight)`: List row가 ambient animation으로 chip만 끌고 감.
+
+### ItemRow 완료 체크 버그 fix
+- `pendingCompletion` 영구 유지 버그: `performComplete`의 0.5s deferred mutation 끝 + `toggleDone` uncheck path에서 `pendingCompletion = false` 명시 → uncheck 즉시 시각 반영.
+- 체크리스트 있는 항목 완료 fade-out 안 됨: `.animation(nil, value:)` scope를 outer VStack → rowContent로 한정 (위 항목 참조).
+
+### Widget budget 재조정 (tier granularity)
+- Tier 변경: 3시간/1시간/20분 경계로 4단계 + 미설정.
+  - `> 3h`: 30분 step / `3h ~ 1h`: 10분 step / `1h ~ 20m`: 5분 step / `< 20m`: 1분 step / transition 없음: 1h step.
+  - 멀리 있는 시점은 30/10분 정밀도면 충분, 가까울수록 fine-grained. budget 영향 없음 (reload 4/day 유지).
+- `formatDuration` 3시간 cutoff: `hours >= 3`이면 분 단위 제거 ("5시간 30분" → "5시간"). 1h~3h(5min step 영역)는 분 노출. tier가 10/30분 step인 구간에서 분 정확도가 떨어져 혼란 주는 문제 해결.
+
+### 위젯 카테고리 아이콘 + 앱 tint
+- `ItemSnapshot`에 `categoryIconName: String?` + `categoryColorHex: String?` 추가. 3 snapshot 생성 지점 + Lock widget fetch에서 populate.
+- Home widget:
+  - 카테고리 있음: `categoryIconName` symbol (색은 모든 항목 통일 app tint — 카테고리 색상별로 표시하면 무지개라 시각 균형 깨짐).
+  - 미설정: `clock`/`circle` + 앱 tint.
+- Lock widgets: icon symbol만 카테고리 적용, 색은 시스템 tint(widgetAccentable)에 위임.
+- 위젯 process에서 사용자 tint 읽기 — App Group 공유 UserDefaults (`group.io.snapplay.MyDays`, entitlement 양쪽 이미 보유):
+  - `UserDefaults.appShared` static 추가, `TintPreset.currentColor` helper.
+  - 모든 `@AppStorage(AppThemeKey.*)` 사용처에 `store: .appShared` 명시 (MyDaysApp / SettingsView / AppTintModifier).
+  - pbxproj: widget target에 `AppTheme.swift`, `CategoryColor.swift` 멤버십 추가 (membershipExceptions에 명시).
+
+### Category 알림 default Todo 4종 재구성
+- `defaultTodoTimedAlertOffset` 1개 → `defaultTodoTimedStartAlertOffset` + `defaultTodoTimedDueAlertOffset` 분리. Untimed start/due와 함께 총 5종(NTD 2 + Todo 4).
+- AddItemView: 카테고리 선택/변경 + `hasTime` 토글 + 기간 chip ON 시 `reapplyTodoAlertDefaults()` → 카테고리 default 재적용. 옵션 세트(withTime/noTime)가 달라 nil reset만 하면 카테고리 의도 잃음 — 사용자가 명시 설정 안 했어도 카테고리 default 유지.
+
+### CategoryIcon 정리
+- 사용자 피드백 반영: pawprint → `pawprint.fill`, 제거: `pray`/`cat`, 추가: `hashtag`(`number`)/`pin`(`mappin.and.ellipse`), `dog` → `pawprint`, `programming`: `curlybraces` → `chevron.left.forwardslash.chevron.right`(`</>`).
+- 그룹별 재정렬: 업무·생산성/건강·뷰티/생활·식사·장소/여가·여행/관계·SNS/동물·자연/기타. 총 36개.
+
+### NTD progress capsule (trailing 영역)
+- NTDRow의 trailing 영역(기존 카운트다운 텍스트 자리)을 capsule progress bar로 교체. **진행 중일 때만** 노출, 시작 전/완료/포기는 plain text.
+- 140×22pt Capsule: 배경 `systemGray5` + accent.opacity(0.35) fill (leading→progress 비율) + 카운트다운 글자 trailing 정렬 overlay (`.padding(.trailing, 8)`, `minimumScaleFactor(0.85)`).
+- 최소 가시 폭 4pt — progress > 0이면 매우 낮아도 살짝 보임.
+- duration 없으면 30일 기준 cap (위젯 `progressArc`와 동일 정책).
+- 글자 색 — 라이트: `Color.accentColor` semibold (black은 fill 톤과 부딪혀 어색), 다크: `.primary`(white) semibold (`@Environment(\.colorScheme)`로 분기).
+- compactMode 무관 모든 row가 자기 trailing에 progress 표시 → 그룹 안 multi-day NTD에서 어제 occurrence 진행률 안 보이던 버그 자연 해결.
+
+### iOS 26 floating 탭바 opaque 회귀 fix
+- TodayView body 외곽 ZStack에 부착돼 있던 `.clipped()` 제거 → iOS 26 TabView가 scroll content edge 감지하면서 floating 탭바 반투명 동작 복원 (다른 탭과 일관). 슬라이드 transition overflow는 navigation bar / safeAreaInset / 화면 가장자리로 이미 자연 bound됨.
+- 부작용 — safeAreaInset(WeekStrip/MonthGrid)의 암묵 backdrop이 사라져 List 본문이 비침: inset content에 `.background(Color(.systemBackground))` 명시 부착.
+- 알려진 제약 / 노이즈 섹션에 회귀 방지용 기록 추가 (`.clipped()` 부착 금지).
+
+### TodayView NavigationStack tint propagation 보강
+- 증상: WindowGroup `.tint()`이 적용됐는데 TabView 내부 NavigationStack 본문(WeekStrip 선택일·FAB·ItemRow checkbox)에서 `Color.accentColor`가 시스템 blue로 fallback. toolbar/tabbar는 정상 themed였음 → iOS 26에서 일부 끊김.
+- iPhoneLayout의 각 NavigationStack에 `.appTint()` 명시 적용. iPadLayout detail의 NavigationStack에도.
+
+### Sheet `.appTint()` 적용 — 사용자 tint 보존
+- `.graphical` DatePicker / sheet 안 NavigationStack 등 UIKit-bridged 컴포넌트가 sheet에서 root tint를 잃고 시스템 blue로 fallback되는 케이스 방어.
+- `AppTheme.swift`에 `appTint()` ViewModifier (`@AppStorage(AppThemeKey.tintPreset)` 직접 읽고 `.tint()` 재적용) 추가.
+- 다음 sheet/view root에 적용: AddItemView, RecurrenceSheet, CategoryPickerSheet, CategoryEditSheet, TodoCompleteSheet, CancelTodoSheet, NTDGiveUpSheet, DatePickerSheet, StartHourPickerSheet, DurationPickerSheet, TodayView 점프 sheet.
+
+### UI 상태 영속화 (`UIStateKey`)
+- 탭별 toggle/mode를 @AppStorage로 저장 — 앱 재실행 시 마지막 상태 복원.
+- `TodayView`: `viewMode` (TodayViewMode를 `String` raw로 변경), `showCompleted`.
+- `ListView` / `ArchiveView`: `showCompleted`, `groupByCategory`.
+- 카테고리 필터(`filterCategoryID`)는 매 launch마다 초기화 — 사용자 결정 (저장 X).
+
+### 오늘탭 전체/미완료 토글 + NTD 진행바
+- `TodayView`에 `showCompleted` 토글 (checklist/unchecked icon, ListView/ArchiveView와 동일 패턴) default `true`.
+- `TodayList.isFinishedOccurrence` 헬퍼로 NTD/Todo/Routine 공통 필터.
+- NTD 진행바는 위 "NTD progress capsule" 항목 참조.
+
+### 카테고리 NTD 기본값 + 알림 default 5종 (확장)
+- Category에 `isDefaultForNTD` (exclusive, `markAsDefaultForNTD()` 헬퍼) + 5종 알림 default attribute.
+- AddItemView 신규 NTD 진입 시 default 카테고리 preselect, 카테고리 선택/변경 시 알림 default 신규 항목 1회 적용 (편집 모드는 사용자 알림 보존).
+- 위 "Category 알림 default Todo 4종 재구성"와 연계.
+
 ## 미구현 (다음 후보, 우선순위 순)
 
 ### 1. 활동 목표 (Activity Goal) — 3번째 핵심 기능 (다음 진행 예정)
@@ -731,6 +836,7 @@ protocol ActivityDataProvider {
 - **SwiftUI .alert 다중 부착 한계**: 같은 view에 두 개 stacking 시 두 번째 무시. Button별 부착 또는 .alert + .confirmationDialog 조합으로 해결.
 - **AddItemView simultaneousGesture(TapGesture)**: Form 하단 Button 탭과 충돌. 빈 영역 탭 dismiss 포기, scroll dismiss로 대체.
 - **ItemRow NTD 카운트다운 자동 갱신 없음**: TimelineView 미부착. 다음 fetch 갱신 시까지 stale 가능.
+- **iOS 26 TabView floating 탭바 opaque 회귀 — `.clipped()` 주의**: TodayView body 외곽 ZStack에 `.clipped()` 부착하면 iOS 26 TabView가 scroll content edge를 감지 못해 floating 탭바가 opaque로 fallback(다른 탭은 반투명). TodayView만 탭바 주변이 톤 입혀져 보이는 회귀. 슬라이드 transition의 overflow 방어 목적으로 `.clipped()`를 추가하지 말 것 — ZStack은 navigation bar / safeAreaInset / 화면 가장자리로 이미 자연 bound됨. `.clipped()` 제거 시 safeAreaInset 콘텐츠(WeekStrip/MonthGrid)의 암묵 backdrop도 사라져 List 본문이 비치므로 inset content에 `.background(Color(.systemBackground))` 명시 필요.
 - 콘솔 노이즈 (`remoteTextInputSession…`, `Gesture: System gesture gate timed out`, `Result accumulator timeout` 등)는 iOS 자체 이슈로 무시.
 - **`updateTaskRequest failed for com.apple.coredata.cloudkit.activity.export.…`** + `BGSystemTaskSchedulerErrorDomain Code=3` — Core Data+CloudKit이 동적 UUID로 BGTaskScheduler 등록 시도하다 dev/Xcode 환경에서 거부됨. CloudKit sync 자체는 push notification으로 정상 동작. 출시 빌드에선 거의 안 보임.
 

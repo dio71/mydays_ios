@@ -31,7 +31,8 @@ struct NTDLockCircleProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NTDLockCircleEntry>) -> Void) {
         let now = Date()
-        // Rectangular와 동일 tiered granularity: >1h 30min step / 20m~1h 5min step / <20m 1min step.
+        // Rectangular와 동일 tiered granularity:
+        //   >3h 30m step / 3h~1h 10m step / 1h~20m 5m step / <20m 1m step / 미설정 1h.
         let activeSnaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: now)
         var transitions: [Date] = []
         for snap in activeSnaps {
@@ -47,11 +48,12 @@ struct NTDLockCircleProvider: TimelineProvider {
             let step: TimeInterval
             if let nt = nextT {
                 let ttt = nt.timeIntervalSince(t)
-                if ttt > 60 * 60 { step = 30 * 60 }
+                if ttt > 3 * 60 * 60 { step = 30 * 60 }
+                else if ttt > 60 * 60 { step = 10 * 60 }
                 else if ttt > 20 * 60 { step = 5 * 60 }
                 else { step = 60 }
             } else {
-                step = 60 * 60  // transition 없음 → 1시간 step
+                step = 60 * 60
             }
             let next = t.addingTimeInterval(step)
             if let nt = nextT, nt > t && nt < next {
@@ -127,7 +129,9 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
     @ViewBuilder
     private func content(for snap: ItemSnapshot) -> some View {
         VStack(spacing: 0) {
-            Image(systemName: "clock")
+            // 카테고리 설정 시 카테고리 아이콘, 미설정 시 clock fallback.
+            // 잠금화면 monochrome — 색은 시스템 tint(widgetAccentable 영역 외 secondary).
+            Image(systemName: snap.categoryIconName ?? "clock")
                 .font(.system(size: 10))
             countdownTimeline(for: snap)
                 .font(.system(size: 13, weight: .bold))
@@ -199,7 +203,8 @@ struct MyDaysNTDLockCircleWidget: Widget {
             title: "16시간 단식",
             priority: .high, state: .inProgress,
             startInstant: .now.addingTimeInterval(-3600),
-            endInstant: .now.addingTimeInterval(5 * 3600 + 30 * 60)
+            endInstant: .now.addingTimeInterval(5 * 3600 + 30 * 60),
+            categoryIconName: nil, categoryColorHex: nil
         )
     )
     NTDLockCircleEntry(date: .now, snapshot: nil)

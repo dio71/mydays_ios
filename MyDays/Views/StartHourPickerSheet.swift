@@ -89,6 +89,7 @@ struct StartHourPickerSheet: View {
         .presentationDragIndicator(.hidden)
         // 어떤 경로로 닫혀도 자동 적용.
         .onDisappear { onSelect(resolvedHour) }
+        .appTint()
     }
 
     // MARK: - wheels

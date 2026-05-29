@@ -7,14 +7,16 @@ struct ArchiveView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: ItemSheetMode?
     @State private var entryText: String = ""
-    @State private var showCompleted = false
+    // 완료 섹션 표시 — 앱 재실행 시 마지막 토글 상태 복원.
+    @AppStorage(UIStateKey.archiveShowCompleted) private var showCompleted: Bool = false
     // ArchiveView는 isSomeday=true 항목만 보여주므로 사실상 referenceDate 영향 작지만,
     // 일관성을 위해 UTC anchor로 통일.
     @State private var referenceDate: Date = .todayCalendarAnchor
-    /// 카테고리 필터 — nil = 전체.
+    /// 카테고리 필터 — nil = 전체. 매 launch마다 초기화 (저장 X — 사용자 결정).
     @State private var filterCategoryID: UUID?
     /// 카테고리 그룹핑 모드 — active section만. 완료는 그룹핑 무시.
-    @State private var groupByCategory: Bool = false
+    /// 앱 재실행 시 마지막 상태 복원.
+    @AppStorage(UIStateKey.archiveGroupByCategory) private var groupByCategory: Bool = false
 
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\Item.priority, order: .reverse), SortDescriptor(\Item.createdAt)],

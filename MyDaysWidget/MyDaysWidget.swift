@@ -31,6 +31,10 @@ struct ItemSnapshot: Equatable {
     /// - NTD inProgress: 한계까지 진행 중 → countup from startInstant
     /// - untimed: 시간 미설정 → 카운트다운/카운트업 X, "오늘" 라벨
     let endInstant: Date?
+    /// 카테고리 아이콘 SF Symbol 이름 (Category.iconName 그대로). 미설정 시 nil → fallback 아이콘.
+    let categoryIconName: String?
+    /// 카테고리 색상 rawValue (CategoryColor.rawValue, 예: "red"). 미설정 시 nil → 앱 tint fallback.
+    let categoryColorHex: String?
 
     /// 표시 상태. NTDState보다 generic — Todo의 overdue/untimed까지 표현.
     enum DisplayState: Equatable {
@@ -102,9 +106,9 @@ struct NTDProvider: TimelineProvider {
         let now = Date()
         let items = Self.fetchActiveItems()
 
-        // Lock widget과 동일 tiered granularity: >1h 30min / 20m-1h 5min / <20m 1min / 미설정 1h.
-        // transitionInstants는 각 항목의 시작/종료 + 5분전 instants 반환 (이미 sorted).
-        // 5분전 instants는 tier 자동 처리이므로 무시해도 무관 — 그대로 사용해도 결과는 동일 수렴.
+        // Lock widget과 동일 tiered granularity:
+        //   > 3h: 30min step / 3h~1h: 10min step / 1h~20m: 5min step / <20m: 1min step / 미설정: 1h step
+        // 멀리 있는 시점은 정밀도 낮춰도 무관, 가까운 시점만 빈번히 갱신해 budget 안에서 정확도 확보.
         let transitions = Self.transitionInstants(items: items, after: now)
         let horizon = now.addingTimeInterval(6 * 60 * 60)
         var dates: Set<Date> = []
@@ -115,7 +119,8 @@ struct NTDProvider: TimelineProvider {
             let step: TimeInterval
             if let nt = nextT {
                 let ttt = nt.timeIntervalSince(t)
-                if ttt > 60 * 60 { step = 30 * 60 }
+                if ttt > 3 * 60 * 60 { step = 30 * 60 }
+                else if ttt > 60 * 60 { step = 10 * 60 }
                 else if ttt > 20 * 60 { step = 5 * 60 }
                 else { step = 60 }
             } else {
@@ -213,7 +218,9 @@ struct NTDProvider: TimelineProvider {
             priority: item.itemPriority,
             state: display,
             startInstant: start,
-            endInstant: end
+            endInstant: end,
+            categoryIconName: item.category?.iconName,
+            categoryColorHex: item.category?.colorHex
         )
     }
 
@@ -233,7 +240,9 @@ struct NTDProvider: TimelineProvider {
             priority: item.itemPriority,
             state: display,
             startInstant: start,
-            endInstant: end
+            endInstant: end,
+            categoryIconName: item.category?.iconName,
+            categoryColorHex: item.category?.colorHex
         )
     }
 
@@ -255,7 +264,9 @@ struct NTDProvider: TimelineProvider {
             priority: item.itemPriority,
             state: display,
             startInstant: start,
-            endInstant: end
+            endInstant: end,
+            categoryIconName: item.category?.iconName,
+            categoryColorHex: item.category?.colorHex
         )
     }
 
@@ -474,7 +485,7 @@ struct MyDaysWidgetEntryView: View {
             HStack(spacing: 4) {
                 Image(systemName: iconName(for: snap))
                     .font(.caption)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(iconColor(for: snap))
                 Text(verbatim: snap.title)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.primary)
@@ -619,9 +630,21 @@ struct MyDaysWidgetEntryView: View {
         }
     }
 
-    /// 종류별 아이콘 — NTD / 할일 2가지로만 구분. 반복/단일은 시각 통일.
+    /// 아이콘 symbol 이름.
+    /// 카테고리 설정 시: 카테고리 아이콘 (CategoryIcon symbol 그대로).
+    /// 미설정 시: kind 별 fallback — NTD=clock / Todo=circle.
     private func iconName(for snap: ItemSnapshot) -> String {
-        snap.kind == .notTodo ? "clock" : "circle"
+        if let name = snap.categoryIconName, !name.isEmpty { return name }
+        return snap.kind == .notTodo ? "clock" : "circle"
+    }
+
+    /// 아이콘 색상 — 모든 항목 통일 앱 tint.
+    /// 카테고리별 색상을 쓰면 여러 항목이 무지개처럼 보여 시각 균형 깨짐 → 색은 앱 tint로 통일,
+    /// 카테고리 구분은 symbol 자체로만 표현 (iconName).
+    /// 위젯 process는 main app의 `.tint()` 환경을 못 받아 `Color.accentColor`가 시스템 default(blue)로
+    /// fallback되므로 App Group 공유 UserDefaults에서 직접 lookup.
+    private func iconColor(for snap: ItemSnapshot) -> Color {
+        TintPreset.currentColor
     }
 
     /// row 카운트다운 색 — state 무관 .primary 통일.
@@ -653,35 +676,40 @@ private let previewSnapshots: [ItemSnapshot] = [
         title: "16시간 단식",
         priority: .high, state: .inProgress,
         startInstant: .now.addingTimeInterval(-3600),
-        endInstant: .now.addingTimeInterval(13 * 3600)
+        endInstant: .now.addingTimeInterval(13 * 3600),
+        categoryIconName: nil, categoryColorHex: nil
     ),
     ItemSnapshot(
         kind: .notTodo, isRoutine: true,
         title: "디저트 끊기",
         priority: .medium, state: .scheduled,
         startInstant: .now.addingTimeInterval(2 * 3600),
-        endInstant: .now.addingTimeInterval(26 * 3600)
+        endInstant: .now.addingTimeInterval(26 * 3600),
+        categoryIconName: nil, categoryColorHex: nil
     ),
     ItemSnapshot(
         kind: .todo, isRoutine: false,
         title: "보일러 점검",
         priority: .high, state: .scheduled,
         startInstant: .now.addingTimeInterval(3 * 3600),
-        endInstant: .now.addingTimeInterval(4 * 3600)
+        endInstant: .now.addingTimeInterval(4 * 3600),
+        categoryIconName: nil, categoryColorHex: nil
     ),
     ItemSnapshot(
         kind: .todo, isRoutine: true,
         title: "물 마시기",
         priority: .none, state: .untimed,
         startInstant: .now,
-        endInstant: nil
+        endInstant: nil,
+        categoryIconName: nil, categoryColorHex: nil
     ),
     ItemSnapshot(
         kind: .todo, isRoutine: false,
         title: "리포트 마감",
         priority: .medium, state: .overdue,
         startInstant: .now.addingTimeInterval(-7200),
-        endInstant: .now.addingTimeInterval(-1800)
+        endInstant: .now.addingTimeInterval(-1800),
+        categoryIconName: nil, categoryColorHex: nil
     )
 ]
 

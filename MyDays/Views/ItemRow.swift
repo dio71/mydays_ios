@@ -20,6 +20,14 @@ struct ItemRow: View {
     @Environment(\.cancelMode) private var cancelMode
     @State private var showCompleteSheet = false
     @State private var showCancelSheet = false
+    /// 체크 transient 상태 — 사용자가 체크 탭한 직후 0.5s 동안 true.
+    /// 실제 Item.itemStatus/RC mutation은 deferred → 그동안 icon만 먼저 filled로 표시.
+    /// 0.5s 후 mutation + save → FetchRequest가 row를 fade-out으로 제거.
+    /// 안 그러면 mutation 즉시 → FetchRequest가 immediately remove → 체크 시각이 안 보임.
+    @State private var pendingCompletion: Bool = false
+    /// 체크리스트 inline expand 토글. row마다 독립 — 한 row 펼친다고 다른 row 자동 닫지 않음.
+    /// 일자/탭 navigation 시 ItemRow 재생성으로 자동 reset.
+    @State private var checklistExpanded: Bool = false
 
     /// 루틴 체크박스 동작 여부. 목록탭은 referenceDate 컨텍스트가 명확하지 않아 비활성.
     private var routineCheckable: Bool { mode != .list }
@@ -31,7 +39,17 @@ struct ItemRow: View {
             item.nextCountdownInstant(viewDate: referenceDate, now: now)
         }
         TimelineView(schedule) { _ in
-            rowContent
+            VStack(alignment: .leading, spacing: 4) {
+                rowContent
+                    // 체크리스트 expand로 인한 title 자리이동 보간을 rowContent 한정으로 차단.
+                    // outer VStack에 부착하면 FetchRequest의 row 제거(완료 체크 fade-out) 애니메이션까지
+                    // 같이 막힘 — 체크리스트 있는 항목 완료 시 fade-out 안 됨.
+                    .animation(nil, value: checklistExpanded)
+                if checklistExpanded, hasChecklistDisplay {
+                    checklistExpansion
+                        .padding(.leading, 40)
+                }
+            }
         }
         .sheet(isPresented: $showCompleteSheet) {
             TodoCompleteSheet { comment in
@@ -91,6 +109,14 @@ struct ItemRow: View {
                 if !compactMode, hasAnyStatusIconOrMeta {
                     statusIcons
                 }
+
+                // 컴팩트(그룹 routine) 모드 — 체크리스트 chip은 title 바로 아래 별도 row.
+                // notes/statusIcons는 compactMode에서 숨김 정책 유지 (chip만 노출).
+                if compactMode, hasChecklistDisplay {
+                    checklistChip
+                }
+                // 주의: checklistExpansion은 rowContent 밖(body 레벨)에 부착됨.
+                // 여기에 두면 row 내부 VStack이 expansion 높이를 흡수해 title이 중앙으로 떠 보임.
             }
 
             // 취소 모드 + 미완료/미취소 row에만 (x) 노출.
@@ -211,6 +237,8 @@ struct ItemRow: View {
     private var isRoutine: Bool { item.recurrenceRule != nil }
 
     private var isCompletedForDate: Bool {
+        // transient 체크 — 실제 mutation 전 0.5s 동안 icon만 filled로 표시 (체크 시각 피드백).
+        if pendingCompletion { return true }
         if isRoutine {
             // occurrence별 완료 — multi-day occurrence가 같은 날에 여러 개 있을 때 각각 독립 체크.
             // override 있으면 occurrence start 기준, 없으면 referenceDate (단일 occurrence 케이스).
@@ -255,6 +283,9 @@ struct ItemRow: View {
                 item.completedAt = nil
             }
             item.updatedAt = now
+            // performComplete가 남긴 transient 상태 해제 — 안 그러면 isCompletedForDate가
+            // pendingCompletion=true를 우선해 uncheck가 시각적으로 안 보임.
+            pendingCompletion = false
             ItemEvent.log(.uncompleted, on: item, in: context)
             saveContext()
             return
@@ -271,28 +302,50 @@ struct ItemRow: View {
     /// 취소 시트 확정 시 호출 — Item.cancel로 위임 (RC failed + .failed status + ItemEvent.log).
     private func performCancel(comment: String?) {
         let day = canonicalCompletionDay
-        item.cancel(occurrenceDate: day, comment: comment, in: context)
+        // 완료 체크와 동일한 animation 정책 — row 제거·재배치를 부드럽게.
+        withAnimation(.easeInOut(duration: 0.35)) {
+            item.cancel(occurrenceDate: day, comment: comment, in: context)
+        }
     }
 
     /// 시트 확정 또는 즉시 완료의 공통 경로.
     /// comment: nil = 사유 없음 / non-nil = 사유 텍스트(RC.comment + ItemEvent.note에 동일 저장).
+    ///
+    /// **타이밍**: pendingCompletion=true → 0.5s 시각 피드백 → mutation+save → row fade-out.
+    /// FetchRequest는 context object change 시점에 predicate 재평가하므로 mutation을 직접 호출하면
+    /// row가 즉시 사라져 체크 아이콘 flip이 안 보임. 그래서 mutation을 deferred로 미룸.
     private func performComplete(comment: String?) {
-        let now = Date()
-        let day = canonicalCompletionDay
-        let comp = RoutineCompletion(context: context)
-        comp.id = UUID()
-        comp.date = day
-        comp.done = true
-        comp.completedAt = now  // 체크 instant — 활동 기록 시각 표시용
-        comp.comment = comment
-        comp.item = item
-        if !isRoutine {
-            item.itemStatus = .done
-            item.completedAt = now
+        // 1. 즉시 시각 피드백 — pendingCompletion=true → isCompletedForDate=true → icon=checkmark.circle.fill.
+        withAnimation(.easeInOut(duration: 0.15)) {
+            pendingCompletion = true
         }
-        item.updatedAt = now
-        ItemEvent.log(.completed, on: item, in: context, note: comment)
-        saveContext()
+        // 2. 0.5s 후 실제 mutation + save. withAnimation으로 row 제거 fade-out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let now = Date()
+            let day = canonicalCompletionDay
+            let comp = RoutineCompletion(context: context)
+            comp.id = UUID()
+            comp.date = day
+            comp.done = true
+            comp.completedAt = now
+            comp.comment = comment
+            comp.item = item
+            if !isRoutine {
+                item.itemStatus = .done
+                item.completedAt = now
+            }
+            item.updatedAt = now
+            ItemEvent.log(.completed, on: item, in: context, note: comment)
+            do {
+                try withAnimation(.easeInOut(duration: 0.5)) {
+                    try context.save()
+                }
+            } catch {
+                assertionFailure("Toggle save failed: \(error)")
+            }
+            // mutation 완료 — pendingCompletion 해제. 이후 isCompletedForDate는 item.itemStatus로 판정.
+            pendingCompletion = false
+        }
     }
 
     /// RC.date 기준일 —
@@ -325,8 +378,12 @@ struct ItemRow: View {
     }
 
     private func saveContext() {
+        // 체크/해제로 인한 row 제거·재배치를 부드럽게 — easeInOut 350ms로 fade·slide 결합.
+        // FetchRequest(animation: .default)만 의존하면 너무 빨라 인지 안 됨.
         do {
-            try context.save()
+            try withAnimation(.easeInOut(duration: 0.35)) {
+                try context.save()
+            }
         } catch {
             assertionFailure("Toggle save failed: \(error)")
         }
@@ -349,6 +406,7 @@ struct ItemRow: View {
     }
 
     private var hasAnyStatusIconOrMeta: Bool {
+        if hasChecklistDisplay { return true }
         if item.itemPriority != .none { return true }
         if streakValue != nil { return true }
         if hasReminders { return true }
@@ -357,11 +415,14 @@ struct ItemRow: View {
         return false
     }
 
-    /// 순서: 깃발 / streak / 알림 / 반복 / NTD 목표 시간.
+    /// 순서: 체크리스트 칩 / 깃발 / streak / 알림 / 반복 / NTD 목표 시간.
     /// today·list 모드 공통 — 항목의 메타 정보를 일관되게 노출.
     @ViewBuilder
     private var statusIcons: some View {
         HStack(spacing: 8) {
+            if hasChecklistDisplay {
+                checklistChip
+            }
             if item.itemPriority != .none {
                 Image(systemName: "flag.fill")
                     .font(.caption)
@@ -409,6 +470,111 @@ struct ItemRow: View {
         guard isRoutine else { return nil }
         let s = item.currentStreak(referenceDate: referenceDate)
         return s > 0 ? s : nil
+    }
+
+    // MARK: - 체크리스트 (chip + inline expand)
+
+    /// 이 row의 체크리스트 occurrenceDate. 반복은 occurrence별, 1회성/Someday는 sentinel.
+    private var checklistOccurrenceDate: Date {
+        item.checklistOccurrenceDate(occurrenceStartOverride: occurrenceStartOverride, referenceDate: referenceDate)
+    }
+
+    private var displayedChecklist: [ChecklistItem] {
+        item.displayedChecklist(forOccurrence: checklistOccurrenceDate)
+    }
+
+    private var checklistProgress: (checked: Int, total: Int) {
+        item.checklistProgress(forOccurrence: checklistOccurrenceDate)
+    }
+
+    /// chip 표시 여부. 합집합 후 표시할 항목이 1개라도 있으면 true.
+    private var hasChecklistDisplay: Bool {
+        item.hasDisplayableChecklist(forOccurrence: checklistOccurrenceDate)
+    }
+
+    /// 체크리스트 chip — `☑ N/M ›` 컴팩트 캡슐. 탭 시 expand 토글.
+    /// chevron은 회전 애니메이션으로 펼침/접힘 상태 표시 (시각적 일관성 — 캡슐 안에서 자연스럽게).
+    @ViewBuilder
+    private var checklistChip: some View {
+        let progress = checklistProgress
+        Button {
+            checklistExpanded.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.square.fill")
+                    .font(.caption)
+                Text(verbatim: "\(progress.checked)/\(progress.total)")
+                    .font(.caption)
+                    .monospacedDigit()
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .rotationEffect(.degrees(checklistExpanded ? 90 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color(.systemGray6)))
+        }
+        .buttonStyle(.plain)
+        // chip이 외부 ambient animation(List row resize 등) 영향을 받지 않도록 면제.
+        // title은 외곽 layout으로 고정되지만 chip은 layout 변화에 끌려가서 위/아래로 움직이는 현상 차단.
+        .transaction { txn in
+            txn.animation = nil
+            txn.disablesAnimations = true
+        }
+    }
+
+    /// expand 시 chip 아래 체크박스 목록.
+    /// soft-deleted 항목도 historical check가 있으면 표시 (합집합).
+    /// 호출 측에서 frame(height) + clipped로 layout-driven 애니메이션 처리.
+    @ViewBuilder
+    private var checklistExpansion: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(displayedChecklist, id: \.objectID) { ci in
+                checklistRow(ci)
+            }
+        }
+        .padding(.leading, 2)
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func checklistRow(_ ci: ChecklistItem) -> some View {
+        let checked = ci.isChecked(forOccurrence: checklistOccurrenceDate)
+        Button {
+            toggleChecklistCheck(ci)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                    .font(.body)
+                    .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+                Text(verbatim: ci.title ?? "")
+                    .font(.callout)
+                    .foregroundStyle(checked ? .secondary : .primary)
+                    .strikethrough(checked, color: .secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggleChecklistCheck(_ ci: ChecklistItem) {
+        // 체크 상태 변화는 row만 갱신 → 부드러운 transition.
+        withAnimation(.easeInOut(duration: 0.2)) {
+            Item.toggleChecklistCheck(
+                for: ci,
+                occurrenceDate: checklistOccurrenceDate,
+                in: context
+            )
+        }
+        do {
+            try context.save()
+        } catch {
+            assertionFailure("Checklist toggle save failed: \(error)")
+        }
     }
 
     private func flagColor(for priority: Priority) -> Color {

@@ -77,6 +77,7 @@ struct TodoCompleteSheet: View {
                 }
             }
         }
+        .appTint()
     }
 
     /// customText 우선, 비어 있으면 선택된 preset의 localized text, 둘 다 없으면 nil.

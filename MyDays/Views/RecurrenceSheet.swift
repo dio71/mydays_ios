@@ -119,6 +119,7 @@ struct RecurrenceSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("common.cancel") { dismiss() }
+                        .tint(.secondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("common.save") {
@@ -128,6 +129,7 @@ struct RecurrenceSheet: View {
                 }
             }
         }
+        .appTint()
     }
 
     // MARK: - daily

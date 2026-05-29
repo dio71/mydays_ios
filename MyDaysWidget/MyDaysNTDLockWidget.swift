@@ -37,9 +37,12 @@ struct NTDLockProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<NTDLockEntry>) -> Void) {
         let now = Date()
         // Tiered granularity — 다음 transition까지 거리에 따라 step 동적 변경:
-        //   - > 1시간 남음: 30분 step
-        //   - 20분 ~ 1시간: 5분 step
+        //   - > 3h: 30분 step
+        //   - 3h ~ 1h: 10분 step
+        //   - 1h ~ 20분: 5분 step
         //   - < 20분: 1분 step
+        //   - transition 없음 (duration 미설정 / 빈 상태): 1h step
+        // 멀리 있는 시점은 30min/10min 정밀도면 충분, 가까울수록 fine-grained.
         // transition 시점(시작/종료)은 정확히 entry로 포함 (state flip).
         // horizon: 6시간 — 그 이상은 reload에 위임.
         let activeSnaps = Self.fetchRelevantNTDSnapshots(now: now)
@@ -53,19 +56,18 @@ struct NTDLockProvider: TimelineProvider {
         var t = now
         while t <= horizon {
             dates.insert(t)
-            // t로부터 다음 transition까지 거리. 없으면 1h step (duration 미설정 NTD나 빈 상태).
             let nextT = transitions.filter { $0 > t }.min()
             let step: TimeInterval
             if let nt = nextT {
                 let ttt = nt.timeIntervalSince(t)
-                if ttt > 60 * 60 { step = 30 * 60 }
+                if ttt > 3 * 60 * 60 { step = 30 * 60 }
+                else if ttt > 60 * 60 { step = 10 * 60 }
                 else if ttt > 20 * 60 { step = 5 * 60 }
                 else { step = 60 }
             } else {
-                step = 60 * 60  // transition 없음 → 1시간 step
+                step = 60 * 60
             }
             let next = t.addingTimeInterval(step)
-            // 다음 step 사이에 transition 있으면 그 시점도 entry로 포함 (state flip 보장).
             if let nt = nextT, nt > t && nt < next {
                 dates.insert(nt)
             }
@@ -119,7 +121,9 @@ struct NTDLockProvider: TimelineProvider {
                 priority: item.itemPriority,
                 state: display,
                 startInstant: start,
-                endInstant: end
+                endInstant: end,
+                categoryIconName: item.category?.iconName,
+                categoryColorHex: item.category?.colorHex
             )
         }
 
@@ -156,7 +160,9 @@ struct MyDaysNTDLockWidgetEntryView: View {
     private func content(for snap: ItemSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
-                Image(systemName: "clock")
+                // 카테고리 설정 시 카테고리 아이콘, 미설정 시 clock fallback.
+                // 잠금화면은 monochrome — 색은 시스템 tint에 위임 (widgetAccentable 영역 외 secondary).
+                Image(systemName: snap.categoryIconName ?? "clock")
                     .imageScale(.small)
                 Text(verbatim: snap.title)
                     .font(.system(size: 12, weight: .medium))
@@ -234,8 +240,8 @@ struct MyDaysNTDLockWidgetEntryView: View {
     /// 단위 명시 duration 포맷. ntd.countdown.* localized 키 재사용.
     /// - < 1분: "1분" (초 노출 회피, 1분 floor)
     /// - < 1시간: "M분"
-    /// - < 24시간 + 분 있음: "H시간 M분"
-    /// - < 24시간 + 분 0: "H시간"
+    /// - 1시간 ~ 3시간: "H시간 M분" / "H시간" (분 정확도 의미 있음, tier 5min step)
+    /// - ≥ 3시간 ~ 24시간: "H시간" (분 단위 제거 — tier 10/30min step이라 분 정확도 떨어짐)
     /// - ≥ 24시간 + 시간 있음: "D일 H시간"
     /// - ≥ 24시간 + 시간 0: "D일"
     static func formatDuration(for snap: ItemSnapshot, now: Date) -> String {
@@ -266,7 +272,9 @@ struct MyDaysNTDLockWidgetEntryView: View {
                 NSLocalizedString("ntd.countdown.d_format", comment: ""), days)
         }
         if hours > 0 {
-            if minutes > 0 {
+            // 3시간 이상이면 분 단위 제거 — tier granularity(>3h: 30min, 3h~1h: 10min)에서 분 정확도가 떨어져
+            // 분 표시는 오히려 사용자에게 혼란만 줌. 3시간 미만(5min step 영역)에서만 분 노출.
+            if minutes > 0 && hours < 3 {
                 return String.localizedStringWithFormat(
                     NSLocalizedString("ntd.countdown.h_m_format", comment: ""), hours, minutes)
             }
@@ -322,7 +330,8 @@ struct MyDaysNTDLockWidget: Widget {
             title: "16시간 단식",
             priority: .high, state: .inProgress,
             startInstant: .now.addingTimeInterval(-3600),
-            endInstant: .now.addingTimeInterval(5 * 3600 + 23 * 60)
+            endInstant: .now.addingTimeInterval(5 * 3600 + 23 * 60),
+            categoryIconName: nil, categoryColorHex: nil
         )
     )
     NTDLockEntry(
@@ -332,7 +341,8 @@ struct MyDaysNTDLockWidget: Widget {
             title: "디저트 끊기",
             priority: .medium, state: .scheduled,
             startInstant: .now.addingTimeInterval(2 * 3600),
-            endInstant: .now.addingTimeInterval(26 * 3600)
+            endInstant: .now.addingTimeInterval(26 * 3600),
+            categoryIconName: nil, categoryColorHex: nil
         )
     )
     NTDLockEntry(date: .now, snapshot: nil)

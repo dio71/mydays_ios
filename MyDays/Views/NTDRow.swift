@@ -26,6 +26,7 @@ struct NTDRow: View {
 
     @Environment(\.managedObjectContext) private var context
     @Environment(\.cancelMode) private var cancelMode
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showGiveUpSheet = false
 
     var body: some View {
@@ -55,10 +56,7 @@ struct NTDRow: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 4)
-                        Text(verbatim: trailingText(now: now, completed: completed, failed: failed))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .layoutPriority(1)
+                        trailingDisplay(now: now, completed: completed, failed: failed)
                     }
 
                     if !compactMode, let notes = item.notes, !notes.isEmpty {
@@ -201,6 +199,77 @@ struct NTDRow: View {
         return String.localizedStringWithFormat(
             NSLocalizedString("ntd.duration_format", comment: ""), rem
         )
+    }
+
+    // MARK: - trailing 영역 (progress capsule 또는 plain text)
+
+    /// title 옆 trailing 영역에 표시할 내용:
+    /// - 진행 중(.inProgress): progress capsule (fill bar + 카운트다운 글자 overlay)
+    /// - 시작 전/완료/포기: plain text (기존 trailingText 그대로)
+    @ViewBuilder
+    private func trailingDisplay(now: Date, completed: Bool, failed: Bool) -> some View {
+        if !completed, !failed,
+           let state = item.ntdState(on: occurrenceDate, now: now),
+           state == .inProgress {
+            progressCapsule(now: now)
+        } else {
+            Text(verbatim: trailingText(now: now, completed: completed, failed: failed))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .layoutPriority(1)
+        }
+    }
+
+    /// 진행 중 NTD의 progress capsule.
+    /// - 배경: systemGray5 capsule (고정폭)
+    /// - 채움: accent.opacity(0.35) capsule, leading부터 progress 비율
+    /// - 글자: 카운트다운(`남음`/`경과`) 중앙 overlay
+    /// progress 계산:
+    /// - duration 설정: elapsed / total
+    /// - duration 미설정: elapsed / 30일 cap (위젯 progressArc과 동일)
+    /// 최소 가시 폭 4pt — progress > 0이면 매우 낮아도 약간 보이게.
+    @ViewBuilder
+    private func progressCapsule(now: Date) -> some View {
+        let progress = trailingProgressValue(now: now)
+        let text = countdownText(now: now)
+        ZStack(alignment: .trailing) {
+            Capsule()
+                .fill(Color(.systemGray5))
+            GeometryReader { geo in
+                let fullWidth = geo.size.width
+                let target = fullWidth * CGFloat(progress)
+                let fillWidth: CGFloat = progress > 0 ? max(4, target) : 0
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.35))
+                    .frame(width: fillWidth)
+            }
+            .clipShape(Capsule())
+            Text(verbatim: text)
+                // 라이트: accent semibold (black은 fill 따뜻한 톤과 부딪혀 어색)
+                // 다크: white(.primary) — fill 위에서 가장 또렷 (accent는 어두워 묻힘)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(colorScheme == .dark ? Color.primary : Color.accentColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.trailing, 8)
+        }
+        .frame(width: 140, height: 22)
+        .layoutPriority(1)
+    }
+
+    /// trailing capsule용 progress 값 (0~1). 진행 중에만 호출 가정.
+    /// - duration 있음: elapsed / total
+    /// - duration 없음: elapsed / 30일 cap (위젯 progressArc과 동일 정책)
+    private func trailingProgressValue(now: Date) -> Double {
+        guard let start = item.ntdStartInstant(on: occurrenceDate) else { return 0 }
+        let elapsed = now.timeIntervalSince(start)
+        if let end = item.ntdEndInstant(on: occurrenceDate) {
+            let total = end.timeIntervalSince(start)
+            guard total > 0 else { return 0 }
+            return max(0, min(elapsed / total, 1.0))
+        }
+        let thirtyDays: TimeInterval = 30 * 24 * 3600
+        return max(0, min(elapsed / thirtyDays, 1.0))
     }
 
     // MARK: - 상태 판정
@@ -353,8 +422,11 @@ struct NTDRow: View {
             item.cancelAllNotifications()
         }
         ItemEvent.log(.failed, on: item, in: context, note: comment)
+        // 완료/취소와 동일한 animation 정책 — row 제거·재배치를 부드럽게.
         do {
-            try context.save()
+            try withAnimation(.easeInOut(duration: 0.35)) {
+                try context.save()
+            }
         } catch {
             assertionFailure("NTD give-up save failed: \(error)")
         }

@@ -5,12 +5,16 @@ import SwiftUI
 //
 // 카테고리 생성/편집 sheet.
 // - name TextField
-// - color picker (TintPreset 8개 chip)
-// - icon picker (CategoryIcon 12개 grid)
+// - color picker (CategoryColor 8개 chip)
+// - icon picker (CategoryIcon grid)
+// - NTD 기본 카테고리 토글 (다른 카테고리와 exclusive — 1개만 ON 가능)
+// - 알림 default — NTD 시작/종료 + Todo timed/untimed-start/untimed-due 총 5종 menu picker
 // - 저장: 신규면 Category 생성, 기존이면 업데이트
 // - 삭제 (편집 모드만, destructive)
 //
-// 색상은 TintPreset.rawValue 그대로 colorHex 필드에 저장. 렌더 시 변환.
+// 색상은 CategoryColor.rawValue 그대로 colorHex 필드에 저장. 렌더 시 변환.
+// 알림 default offset(분)은 NSNumber? (nil=OFF). 신규 생성 시 NTD start/due=0(정각),
+// Todo 3종=nil(미설정).
 
 struct CategoryEditSheet: View {
 
@@ -22,6 +26,16 @@ struct CategoryEditSheet: View {
     @State private var name: String
     @State private var tintRaw: String
     @State private var iconRaw: String
+    @State private var isDefaultForNTD: Bool
+
+    // 알림 default — offset(분). nil = OFF.
+    @State private var ntdStartAlert: Int?
+    @State private var ntdDueAlert: Int?
+    @State private var todoTimedStartAlert: Int?
+    @State private var todoTimedDueAlert: Int?
+    @State private var todoUntimedStartAlert: Int?
+    @State private var todoUntimedDueAlert: Int?
+
     @State private var showDeleteConfirm = false
 
     init(category: Category?) {
@@ -29,6 +43,16 @@ struct CategoryEditSheet: View {
         _name = State(initialValue: category?.name ?? "")
         _tintRaw = State(initialValue: category?.colorHex ?? CategoryColor.defaultColor.rawValue)
         _iconRaw = State(initialValue: category?.iconName ?? CategoryIcon.defaultIcon.symbolName)
+        _isDefaultForNTD = State(initialValue: category?.isDefaultForNTD ?? false)
+        // 신규 생성 시 default: NTD 시작/종료 = 정각(0), Todo 3종 = nil(미설정).
+        _ntdStartAlert = State(initialValue: category?.defaultNtdStartAlertInt
+                               ?? (category == nil ? Category.newCategoryNtdStartAlertDefault : nil))
+        _ntdDueAlert = State(initialValue: category?.defaultNtdDueAlertInt
+                             ?? (category == nil ? Category.newCategoryNtdDueAlertDefault : nil))
+        _todoTimedStartAlert = State(initialValue: category?.defaultTodoTimedStartAlertInt)
+        _todoTimedDueAlert = State(initialValue: category?.defaultTodoTimedDueAlertInt)
+        _todoUntimedStartAlert = State(initialValue: category?.defaultTodoUntimedStartAlertInt)
+        _todoUntimedDueAlert = State(initialValue: category?.defaultTodoUntimedDueAlertInt)
     }
 
     var body: some View {
@@ -62,6 +86,46 @@ struct CategoryEditSheet: View {
                     .padding(.vertical, 4)
                 }
 
+                Section("category.section.ntd_default") {
+                    Toggle("category.ntd_default.toggle", isOn: $isDefaultForNTD)
+                }
+
+                Section("category.section.alert_default.ntd") {
+                    alertOffsetPicker(
+                        label: "alert.label.start",
+                        selection: $ntdStartAlert,
+                        options: AlertOffset.withTimeOptions
+                    )
+                    alertOffsetPicker(
+                        label: "alert.label.end",
+                        selection: $ntdDueAlert,
+                        options: AlertOffset.withTimeOptions
+                    )
+                }
+
+                Section("category.section.alert_default.todo") {
+                    alertOffsetPicker(
+                        label: "category.alert.todo_timed_start",
+                        selection: $todoTimedStartAlert,
+                        options: AlertOffset.withTimeOptions
+                    )
+                    alertOffsetPicker(
+                        label: "category.alert.todo_untimed_start",
+                        selection: $todoUntimedStartAlert,
+                        options: AlertOffset.noTimeOptions
+                    )
+                    alertOffsetPicker(
+                        label: "category.alert.todo_timed_due",
+                        selection: $todoTimedDueAlert,
+                        options: AlertOffset.withTimeOptions
+                    )
+                    alertOffsetPicker(
+                        label: "category.alert.todo_untimed_due",
+                        selection: $todoUntimedDueAlert,
+                        options: AlertOffset.noTimeOptions
+                    )
+                }
+
                 if category != nil {
                     Section {
                         Button(role: .destructive) {
@@ -92,6 +156,7 @@ struct CategoryEditSheet: View {
                 }
             }
         }
+        .appTint()
     }
 
     @ViewBuilder
@@ -136,6 +201,23 @@ struct CategoryEditSheet: View {
         .buttonStyle(.plain)
     }
 
+    /// 알림 offset menu picker — "안 함" + offset 옵션. selection은 Int? (nil=OFF).
+    private func alertOffsetPicker(
+        label: LocalizedStringKey,
+        selection: Binding<Int?>,
+        options: [Int]
+    ) -> some View {
+        Picker(selection: selection) {
+            Text("alert.offset.disabled").tag(Optional<Int>.none)
+            ForEach(options, id: \.self) { offset in
+                Text(verbatim: AlertOffset.label(for: offset)).tag(Optional(offset))
+            }
+        } label: {
+            Text(label)
+        }
+        .pickerStyle(.menu)
+    }
+
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -155,6 +237,19 @@ struct CategoryEditSheet: View {
         target.colorHex = tintRaw
         target.iconName = iconRaw
         target.updatedAt = now
+        // NTD 기본 카테고리 — exclusive. ON으로 바꿀 때 다른 카테고리의 flag 해제.
+        if isDefaultForNTD {
+            target.markAsDefaultForNTD(in: context)
+        } else {
+            target.isDefaultForNTD = false
+        }
+        // 알림 default.
+        target.defaultNtdStartAlertInt = ntdStartAlert
+        target.defaultNtdDueAlertInt = ntdDueAlert
+        target.defaultTodoTimedStartAlertInt = todoTimedStartAlert
+        target.defaultTodoTimedDueAlertInt = todoTimedDueAlert
+        target.defaultTodoUntimedStartAlertInt = todoUntimedStartAlert
+        target.defaultTodoUntimedDueAlertInt = todoUntimedDueAlert
         do {
             try context.save()
         } catch {

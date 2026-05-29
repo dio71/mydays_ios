@@ -31,12 +31,16 @@ struct TodayView: View {
     // 취소 모드 — 메뉴에서 진입, 모든 미완료 row에 (x) 버튼 노출.
     @State private var cancelMode: Bool = false
     // 상단 영역 모드 — Day (WeekStrip) / Month (MonthGrid). TodayList 본문은 두 모드 공통.
-    @State private var viewMode: TodayViewMode = .day
+    // 앱 종료 후 재실행 시 마지막 선택 모드 복원 (@AppStorage).
+    @AppStorage(UIStateKey.todayViewMode) private var viewMode: TodayViewMode = .day
     // 특정일 이동 시트.
     @State private var showDatePicker: Bool = false
     @State private var datePickerSelection: Date = Date()
     // 카테고리 필터 — nil이면 "모두". ListView와 동일 패턴.
     @State private var filterCategoryID: UUID?
+    // 완료/포기 항목 표시 — true=전체, false=미완료만. 오늘은 default true (오늘 완료한 것도 보임).
+    // 앱 재실행 시 마지막 토글 상태 복원.
+    @AppStorage(UIStateKey.todayShowCompleted) private var showCompleted: Bool = true
     @Environment(\.scenePhase) private var scenePhase
 
     /// 필터 메뉴용 카테고리 목록 — sortOrder 오름차순.
@@ -53,14 +57,13 @@ struct TodayView: View {
         let insertionEdge: Edge = lastNavigationForward ? .trailing : .leading
         let removalEdge: Edge = lastNavigationForward ? .leading : .trailing
         ZStack {
-            TodayList(date: displayedDate, categoryFilter: filterCategoryID, sheet: $sheet)
+            TodayList(date: displayedDate, categoryFilter: filterCategoryID, showCompleted: showCompleted, sheet: $sheet)
                 .id(displayedDate)
                 .transition(.asymmetric(
                     insertion: .move(edge: insertionEdge),
                     removal: .move(edge: removalEdge)
                 ))
         }
-        .clipped()
         .animation(.easeInOut(duration: 0.22), value: displayedDate)
         // 좌우 스와이프로 일자 이동 — List 세로 스크롤과 공존하도록 simultaneousGesture 사용.
         // 수평 우세 (|h| > |v|*2) + 충분한 거리(>60pt)일 때만 day shift 트리거.
@@ -79,6 +82,9 @@ struct TodayView: View {
         // 상단 영역 — Day 모드는 7-cell week strip, Month 모드는 7×6 month grid.
         // 두 모드 모두 일자 cell 탭 + 가로 swipe 지원. 본문의 일 단위 swipe와 영역 분리.
         // 취소 모드에서는 일자 이동 차단 (본문 swipe와 동일 정책).
+        // 주의: `.clipped()`는 ZStack 위에 두지 말 것 — iOS 26 TabView가 scroll content edge를
+        // 감지 못해 floating 탭바가 opaque로 fallback됨 (다른 탭은 반투명). transition overflow는
+        // safeAreaInset 경계로 자연스럽게 잘림.
         .safeAreaInset(edge: .top, spacing: 8) {
             Group {
                 switch viewMode {
@@ -113,6 +119,9 @@ struct TodayView: View {
                     )
                 }
             }
+            // 외곽 ZStack `.clipped()`를 제거해 floating 탭바 반투명을 복원하면서 safeAreaInset의
+            // 암묵 backdrop도 사라짐 → List 본문이 inset 영역에 비침. 명시 systemBackground로 차단.
+            .background(Color(.systemBackground))
         }
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -142,6 +151,12 @@ struct TodayView: View {
                         Image(systemName: viewMode == .day ? "calendar" : "list.bullet")
                     }
                     categoryFilterMenu
+                    Button {
+                        showCompleted.toggle()
+                    } label: {
+                        // ListView/ArchiveView와 동일 — filled=전체 보임, unchecked=미완료만.
+                        Image(systemName: showCompleted ? "checklist" : "checklist.unchecked")
+                    }
                     Menu {
                         Button {
                             datePickerSelection = displayedDate.localCalendarSameDay
@@ -253,6 +268,7 @@ struct TodayView: View {
                     }
                 }
                 .presentationDetents([.medium, .large])
+                .appTint()
             }
             // 자정 넘김 시 — Foreground 중이면 NSCalendarDayChanged fire,
             // 백그라운드에서 자정 통과 후 복귀하면 scenePhase==.active로 잡음.
@@ -391,13 +407,15 @@ struct TodayView: View {
 }
 
 /// TodayView 상단 영역 모드 — Day(week strip) / Month(month grid).
-enum TodayViewMode { case day, month }
+enum TodayViewMode: String { case day, month }
 
 struct TodayList: View {
 
     let date: Date
     /// 카테고리 필터 — nil이면 "모두". 매 fetch 결과를 view-side filter (ListView와 동일 패턴).
     let categoryFilter: UUID?
+    /// 완료(done)/포기(failed) 항목 표시 여부. false면 NTD/Todo/Routine 공통으로 finished 항목 숨김.
+    let showCompleted: Bool
     @Binding var sheet: ItemSheetMode?
     /// 취소 모드 — 부모 TodayView가 environment로 inject. row tap 시 편집 sheet 차단.
     @Environment(\.cancelMode) private var cancelMode
@@ -419,9 +437,10 @@ struct TodayList: View {
     )
     private var categories: FetchedResults<Category>
 
-    init(date: Date, categoryFilter: UUID?, sheet: Binding<ItemSheetMode?>) {
+    init(date: Date, categoryFilter: UUID?, showCompleted: Bool, sheet: Binding<ItemSheetMode?>) {
         self.date = date
         self.categoryFilter = categoryFilter
+        self.showCompleted = showCompleted
         self._sheet = sheet
         // date는 UTC anchor. FetchRequest predicate의 [start, end) 범위도 UTC 자정 기준으로 계산해
         // 저장된 startDate/dueDate(UTC anchor)와 정확히 비교되도록 한다.
@@ -498,6 +517,23 @@ struct TodayList: View {
         return item.category?.id == id
     }
 
+    /// occurrence가 "끝난" 상태인지 — 완료(done) or 포기(failed).
+    /// - 1회성: Item.itemStatus == .done OR .failed
+    /// - 반복: 해당 occurrenceDate의 RoutineCompletion 중 done OR failed 1개 이상
+    /// showCompleted=false일 때 NTD/Todo/Routine 공통으로 finished 항목 숨김.
+    private func isFinishedOccurrence(item: Item, occurrenceDate: Date) -> Bool {
+        if item.recurrenceRule == nil {
+            return item.itemStatus == .done || item.itemStatus == .failed
+        }
+        let day = Calendar.gmt.startOfDay(for: occurrenceDate)
+        let completions = (item.completions as? Set<RoutineCompletion>) ?? []
+        return completions.contains { c in
+            guard let d = c.date else { return false }
+            guard Calendar.gmt.isDate(d, inSameDayAs: day) else { return false }
+            return c.done || c.failed
+        }
+    }
+
     private var ntdsForDate: [OccurrenceRow] {
         let now = Date()
         var result: [OccurrenceRow] = []
@@ -506,9 +542,9 @@ struct TodayList: View {
             let candidates = item.ntdOccurrenceStartCandidates(coveringDate: date)
             for occDate in candidates {
                 let range = item.ntdOccurrenceCalendarRange(occurrenceDate: occDate, now: now)
-                if range.start <= date && date <= range.end {
-                    result.append(OccurrenceRow(item: item, occurrenceDate: occDate))
-                }
+                guard range.start <= date && date <= range.end else { continue }
+                if !showCompleted, isFinishedOccurrence(item: item, occurrenceDate: occDate) { continue }
+                result.append(OccurrenceRow(item: item, occurrenceDate: occDate))
             }
         }
         return result
@@ -520,6 +556,7 @@ struct TodayList: View {
         var result: [OccurrenceRow] = []
         for item in routineItems where matchesCategoryFilter(item) {
             for start in item.occurrenceStartsCovering(date: date) {
+                if !showCompleted, isFinishedOccurrence(item: item, occurrenceDate: start) { continue }
                 result.append(OccurrenceRow(item: item, occurrenceDate: start))
             }
         }
@@ -559,6 +596,7 @@ struct TodayList: View {
         for item in allActiveTodos where matchesCategoryFilter(item) {
             guard item.recurrenceRule == nil else { continue }
             guard item.todoSection(on: date, now: now) != nil else { continue }
+            if !showCompleted, isFinishedOccurrence(item: item, occurrenceDate: item.startDate ?? date) { continue }
             let occ = item.startDate ?? date
             result.append(OccurrenceRow(item: item, occurrenceDate: occ))
         }

@@ -88,6 +88,7 @@ struct NTDGiveUpSheet: View {
                 }
             }
         }
+        .appTint()
     }
 
     /// 최종 저장될 comment.
