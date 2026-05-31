@@ -21,16 +21,24 @@
 ### Item
 - 일반: title, **notes**(작성 시 메모), kind, priority, status, isSomeday, sortOrder, createdAt, updatedAt, completedAt
 - 캘린더 날짜 (UTC anchor — Timezone 정책 참조): **startDate**, **dueDate**, **recurrenceEndDate**
-- 시각 (wall-clock 정수): **startHour** (Int16?, 0~23 — Todo·NTD 공통), **dueHour** (Int16?, 0~24 — Todo만)
+- 시각 (wall-clock 정수): **startHour** (Int16?, 0~23 — Todo·NTD·습관 공통), **dueHour** (Int16?, 0~24 — Todo만)
   - **단순화 모델**: accessor `startHourInt`/`dueHourInt`는 non-optional Int. nil 데이터는 0(start)/24(due)로 default 해석. 신규 save는 항상 명시 값.
   - **24는 sentinel** — "시간 미설정 = 다음 날 0시" 의미. `Item.hasExplicitTime` = `dueHourInt < 24`.
   - 모든 dated 항목이 `(effectiveStartInstant, effectiveDueInstant)` 쌍으로 통합. `Item.localInstant(...)`는 hour=24를 다음 날 0시로 변환.
   - **NTD는 dueHour 미사용**이지만 AddItemView가 `dueHour=startHour`로 sync 저장 (재진입 시 hasTime=true 보장 위해). NTD 실제 종료는 duration 기반.
+  - **습관은 startHour=0/dueHour=24 고정** (종일 의미). 시각 UI 비노출.
 - 시간대 legacy (현재 UI 미사용): **startTimeOfDay**, **dueTimeOfDay** (오전/오후/저녁/none)
-- NTD 전용: **ntdStartHour** (legacy, `startHour`로 통합), **ntdDurationHour** (Int16?, nil=미설정/한계까지)
+- NTD 전용: **ntdDurationHour** (Int16?, nil=미설정/한계까지, 최대 24시간)
+- **목표 공통(절제/활동/집중/습관) — 사용자 지정 아이콘·색** (카테고리 미사용):
+  - **iconName** (String?) — semantic identifier (예: "run", "fast", "water"). Android 호환 — SF Symbol 이름 직접 저장 아님. iOS는 `GoalIcon.symbolName`으로 매핑.
+  - **iconColorHex** (String?) — `CategoryColor` rawValue ("red", "blue" 등) 재활용.
+- **활동(activity) 전용** — Phase B/C 활성화 예정:
+  - **activityTargetValue** (Double?) — 목표 수치 (예: 100, 10000)
+  - **activityUnit** (String?) — "회", "L", "km", "보"
+  - **activitySourceType** (Int16?) — 0=manual, 1=steps(HealthKit), 2=distance(HealthKit)
 - 포기 사유는 `RoutineCompletion.comment` + `ItemEvent.note`에 저장. Item 차원의 comment 필드는 제거됨.
 - self-relation: parent/children (3단계 계층은 앱 로직에서 강제)
-- 관계: category, recurrenceRule, reminders, completions, events, checklistItems
+- 관계: category(Todo 전용), recurrenceRule, reminders, completions, events, checklistItems
 
 ### RecurrenceRule
 - frequency, interval, weekdayMask, **dayOfMonthMask (Int64, bit 0~30=일자, bit 31=말일)**, **monthMask (Int16, 0=모든 월)**, countPerWeek (legacy), dayOfMonth (legacy), startDate (legacy, 미사용), endDate (legacy, 미사용)
@@ -38,16 +46,17 @@
 - helper: `selectedWeekdays/Days/Months`, `includesLastDay`, `occurs(on:startDate:endDate:)`, `nextOccurrence(after:startDate:endDate:)`, `make(in:)`
 
 ### RoutineCompletion (per-occurrence 기록)
-- id, **date** (UTC anchor), **done**, **failed**, **comment**, item
+- id, **date** (UTC anchor), **done**, **failed**, **comment**, **valueRecorded** (Double? — 활동 누적값), completedAt, item
 - 의미:
-  - `done=true, failed=false` → 성공 (자동 완성 / Todo 체크)
+  - `done=true, failed=false` → 성공 (자동 완성 / Todo·습관 체크 / 활동 target 달성)
   - `done=false, failed=true` → 포기 (사용자 종료, NTD)
   - record 없음 → 미참여
 - 1회성 NTD도 포기 시 동일하게 사용 — 1회성↔반복 전환 시 기록 보존
 - Streak 계산 기반
 
 ### Category / Reminder / RecurrenceRule / ChecklistItem / ChecklistCheck
-- Category: id, name, colorHex, iconName, sortOrder, createdAt, updatedAt, **isDefaultForNTD**, default*AlertOffset 5종 (NTD 시작/종료, Todo timed-start/timed-due, Todo untimed-start/untimed-due)
+- **Category (Todo 전용 — 목표는 미사용)**: id, name, colorHex, iconName, sortOrder, createdAt, updatedAt, defaultTodo{Timed,Untimed}{Start,Due}AlertOffset 4종
+  - 2026-05-30: `isDefaultForNTD`, `defaultNtdStart/DueAlertOffset` 필드 제거 (목표는 카테고리 미사용 정책)
 - Reminder: id, fireDate, offsetMin, anchor, repeats, createdAt, updatedAt
 - RecurrenceRule: id, frequency, interval, weekdayMask, dayOfMonthMask, monthMask, createdAt, updatedAt, (legacy attrs)
 - ChecklistItem: id, title, sortOrder, createdAt, updatedAt, **deletedAt** (soft delete), item(Cascade), checks(→ ChecklistCheck Cascade)
@@ -59,12 +68,17 @@
 - timestamp, action, itemTitle(snapshot), **note**(부가 정보 — 포기 사유 등), item(Nullify) — Item 삭제돼도 보존
 
 ### Enum 매핑 (`Models/ModelEnums.swift`)
-- **ItemKind**: 0=todo, 1=notTodo. `displayName` localized ("할일"/"절제 목표" / "Todo"/"Fast")
+- **ItemKind**: 0=todo, 1=notTodo(절제), **2=activity(활동)**, **3=focus(집중)**, **4=habit(습관)**
+  - `displayName` localized. `isGoal` = `self != .todo` (절제+활동+집중+습관 통합 그룹).
+  - `goalTypeSymbolName` — sub-picker용 SF Symbol (절제=nosign, 활동=figure.run, 집중=timer, 습관=checkmark.circle.fill)
+  - `isAvailableForInput` — Phase A: 절제·습관만 true. 활동/집중은 false (UI placeholder).
 - **Priority**: 0=none, 1=medium, 2=high, 3=low. `displayName` localized
 - **Status**: 0=pending, 1=done, **2=deleted (legacy/soft-delete 예약)**, **3=failed (NTD 포기 또는 1회성 NTD 사용자 종료)**
 - **Frequency**: 0=daily, 1=weekly, 2=monthly (3=weekdays, 4=weekend, 5=weeklyCount는 legacy, 미사용)
 - **TimeOfDay**: 0=none, 1=morning, 2=afternoon, 3=evening
 - **ItemAction**: 0~7 (created/updated/completed/uncompleted/cancelled[legacy]/restored/deleted/**failed**). 모두 localized
+- **ActivitySourceType**: 0=manual, 1=steps(HealthKit), 2=distance(HealthKit) — Phase B/C에서 활성화
+- **GoalIcon** (`Models/GoalIcon.swift`): 12 case enum + `symbolName` accessor. **rawValue("run", "fast", ...)가 DB에 저장** (cross-platform 호환). iOS는 symbolName으로 SF Symbol 매핑.
 
 ## Timezone 정책 (중요)
 
@@ -78,7 +92,7 @@
 | `Item.completedAt` / `createdAt` / `updatedAt` | instant | `Calendar.current` (실제 시각) |
 | `ItemEvent.timestamp` | instant | `Calendar.current` |
 | `Reminder.fireDate` | instant | `Calendar.current` |
-| `Item.ntdStartHour` | wall-clock 시 (정수) | local에서 해석 |
+| `Item.startHour` | wall-clock 시 (정수, Todo/NTD/Activity 공통) | local에서 해석 |
 
 ### CalendarDate helpers (`Models/CalendarDate.swift`)
 - `Calendar.gmt`: UTC 고정 그레고리안 캘린더
@@ -91,7 +105,7 @@
 - instant 표시 (활동 로그 등): `Calendar.current` 그대로
 
 ### NTD 시각 정책 (wall-clock semantics)
-- NTD startDate는 calendar date(UTC anchor) + ntdStartHour(wall-clock 정수)
+- NTD startDate는 calendar date(UTC anchor) + startHour(wall-clock 정수)
 - 실제 시작 instant = "startDate의 (y,m,d) + 현지 hour:00"
 - 여행 시 현지 hour로 자연 작동 (예: 매주 월 20시 단식은 어디서나 현지 20시 시작)
 - `Item.ntdStartInstant(on:)` / `ntdEndInstant(on:)` 활용
@@ -778,6 +792,104 @@ MyDays/MyDays/
 - Today 탭 아이콘 `\(N).calendar` 동적 SF Symbol이 Catalyst에서 일부 N 렌더 누락 → `#if targetEnvironment(macCatalyst)` 분기로 정적 `calendar` fallback (iPhone TabView `todayTabIconName` + iPad sidebar `SidebarItem.icon()` 둘 다).
 - 빌드 검증: Mac Catalyst variant 컴파일 성공. 실행은 Mac을 Apple Developer 계정에 등록 후 가능.
 - 현재 iPad UI 그대로 Mac에서 실행 — Mac-native 폴리시 (3-column detail, inline editing 등) 미적용. Stage 3에서 진행.
+
+## 최근 완료 (2026-05-30 ~ 2026-05-31 세션 — Phase A 목표 4-type taxonomy)
+
+목표 모델을 단순 NTD 1종에서 **4-type taxonomy (절제 / 활동 / 집중 / 습관)** 로 재정의. Phase A에선 절제 + 습관만 활성화, 활동 + 집중은 placeholder.
+
+### 정책 결정 (사용자 합의)
+- **목표는 카테고리 미사용** — Item.iconColorHex/iconName을 사용자 지정으로 직접 보유. 카테고리 picker, default 알림 모두 Todo 전용으로 의미 좁힘.
+- **활동 vs 건강 통합** — 별도 type 분리 안 함. "활동" 1개 type 안에서 source(manual/HealthKit) 선택. 걷기·물마시기 모두 활동.
+- **습관 = 별도 type** (routine Todo로 흡수 X) — 정체성 명확화. 동작은 routine Todo와 같지만 멘탈 모델은 "장기 추적 목표".
+- **단계적 도입**: Phase A (절제+습관) → Phase B (활동 manual) → Phase C (활동 HealthKit) → Phase D (집중 timer).
+- **습관 cancel 액션 없음** — 매일 occurrence 독립이라 "안 한 거"는 단순 미체크. 사유 입력 부담 회피.
+- **습관 시각 정책**: startHour=0/dueHour=24 고정 (종일 의미). 사용자에게 시각 UI 비노출, 저장 시 hardcoded.
+- **체크 가능 일자**: 습관 trailing 체크 버튼은 **오늘 + 과거**만 (까먹고 안 한 거 사후 기록 가능). 미래 일자 hide.
+
+### 데이터 모델 변경
+- **Item 신규 필드**:
+  - `iconColorHex: String?` (목표 공통, CategoryColor rawValue)
+  - `iconName: String?` (목표 공통, semantic identifier — Android 호환)
+  - `activityTargetValue: Double?` / `activityUnit: String?` / `activitySourceType: Int16?` (활동 전용, Phase B/C에서 사용)
+- **Item 제거 필드**: `ntdStartHour` (legacy, startHour로 통합 완료 — 1차 정리)
+- **RoutineCompletion 신규 필드**: `valueRecorded: Double?` (활동 누적값, Phase B에서 사용)
+- **Category 제거 필드**: `isDefaultForNTD`, `defaultNtdStartAlertOffset`, `defaultNtdDueAlertOffset` (목표는 카테고리 미사용 정책)
+- **ItemKind enum 확장**: `.activity=2`, `.focus=3`, `.habit=4` 추가
+  - `isGoal` 헬퍼: `self != .todo` — 4 type 통합 그룹 판정
+  - `goalTypeSymbolName` — sub-picker SF Symbol
+  - `isAvailableForInput` — Phase A 활성 type 표시 (절제·습관 true, 활동·집중 false)
+
+### 신규 모델
+- **`Models/GoalIcon.swift`** — 12개 enum case + symbolName mapping. rawValue("run", "fast", "water" 등)가 DB 저장. 절제 6 + 활동 6 (fast/alcohol/smoke/caffeine/sweet/phone/run/walk/exercise/water/meditation/read).
+
+### AddItemView 입력 폼 구조
+- **2-level kind picker**:
+  - Top section: 할일/목표 segmented
+  - 별도 "목표 유형" section: **4 chip 가로 + 선택 type 이름·설명**
+- **chip 디자인**: 48pt filled circle + 흰 icon (이름 미표시). 선택=accent, 미선택=systemGray3. 활동/집중은 회색 + 탭 disabled.
+- **선택 type 이름·설명 영역**: 큰 폰트 이름(`.headline`) + 다음 줄 multiline 설명(`.subheadline`).
+- **목표 색·아이콘 통합 section** (isGoal): icon grid 위 + color chip row 아래.
+- **신규 항목 시 랜덤 color preset** — `_goalColor = State(initialValue: CategoryColor.allCases.randomElement())` (icon grid background 즉시 시각화).
+- **canSave** — 목표일 때 icon + color 둘 다 필수.
+- **handleKindChange habit 분기**: startHour=0, dueHour=24, ntdDurationHour=nil 고정.
+- **save() kind switch** — habit은 priority=.none, 시각 0/24 fixed 저장.
+- **schedule 섹션 chip 숨김**: NTD뿐만 아니라 habit도 미정/기간/시간설정 chip 숨김.
+
+### TodayView 목표 섹션 통합
+- `ntdItems` FetchRequest predicate: `(kind == 1 OR kind == 4) AND status != 2` — NTD + habit 통합 fetch.
+- `allActiveTodos` / `routineItems`: `kind == 0`만 (habit 제외).
+- `ntdsForDate` 분기: NTD는 `ntdOccurrenceRow` (multi-occurrence 단일 선택), habit은 `habitOccurrenceRow` (단순 rule.occurs / startDate 매칭).
+- `goalRow` helper: kind별 row component 분기 — NTD→NTDRow, habit→ItemRow.
+- **정렬** (`goalSortPriority`): bucket 0(미완료) → bucket 1(완료/포기). bucket 0 내 NTD inProgress(종료 가까운 순) → NTD scheduled(시작 빠른 순) → habit pending.
+- 섹션 헤더 `suppressFilterIcon: true` — 목표 섹션은 카테고리 필터 무시이므로 필터 아이콘 미노출.
+- **NTD 비-오늘 일자 정책**: 해당 일자에 **시작**하는 occurrence만 노출 (이전 일자 overflow는 hide).
+
+### ItemRow / NTDRow
+- **goalLeadingIcon** (목표 사용자 지정 아이콘): 20×20 circle + 11pt SF Symbol. 4-state 시각:
+  - scheduled: 회색 outline + 회색 icon
+  - inProgress: goalColor outline + goalColor icon
+  - done: goalColor full bg + 흰 icon
+  - failed: systemGray3 full bg + 흰 icon
+  - `.offset(y: -3)` baseline 시각 보정 (SF Symbol과 ZStack baseline 차이).
+- **leadingControl 분기**:
+  - 목표 + iconName 있음 → goalLeadingIcon (display only)
+  - legacy NTD (iconName 없음) → 기존 clock fallback
+  - 나머지 → todoCheckbox / routineStatusIcon
+- **습관 trailing 체크 버튼** (`habitTrailingCheck`):
+  - `square` / `checkmark.square.fill` 토글
+  - 오늘 + 과거 일자만 노출. 미래 일자 hide.
+  - 완료 여부 무관 노출 (체크 해제용).
+  - cancel mode 시 hide (habit은 cancel 액션 없음).
+- **categoryBarColor**: 목표면 `iconColorHex`, Todo면 `category.colorHex` 사용.
+- **habit clock 아이콘**: `ntdDurationText`의 `isNTD` guard로 habit에선 자동 nil → statusIcons 미노출.
+
+### 목표 섹션 통합 영향
+- **TodayView**: 절제 + 습관이 같은 "목표" 섹션. 활동/집중은 Phase B/D에서 추가.
+- **ListView 그룹 모드**: "목표" 그룹 최상단 (`list.group.goals`). 카테고리 그룹들 + 미분류는 목표 제외 Todo만.
+- **ListView 필터 모드**: 필터 활성 시 목표 별도 섹션 + 선택 카테고리 섹션 (목표 제외).
+- **카테고리 필터 정책**: 목표는 카테고리 미사용 → 필터 항상 통과. `matchesCategoryFilter` (TodayView), `sortedActiveItems`/`filteredCompletedItems` (ListView), `filteredItems`/`filteredCompletedItems` (ArchiveView)에 `item.itemKind.isGoal` short-circuit.
+
+### MonthGridView 성능 최적화
+- `weekLayouts` / `dotIndicators(day:)`는 비싼 계산이지만 cell마다 재호출돼 42 × O(items × occurrences) 부담.
+- body 진입 시 `let layouts = weekLayouts` + `dotsCache: [Date: DotsByDay]` 1회 계산해 cell에 inject.
+- `cell(for:layouts:dots:)`로 시그니처 변경 — dict lookup만 수행.
+- 매일 반복 NTD with 24h+ duration처럼 occurrence가 많은 경우 navigation 체감 속도 크게 개선.
+
+### NTD auto-complete 버그 fix (사용자 발견)
+- 사용자가 NTD startDate를 과거(예: 5/19)로 변경 시 `processRecurringNTD` / `processOneOffNTD`가 7일 lookback 윈도우에서 모든 occurrence를 "이미 종료"로 판정해 false done RC를 일괄 생성하던 버그.
+- **fix**: occurrence의 종료 instant가 `item.createdAt`(생성 instant)보다 이전이면 skip. instant 단위 비교로 같은 날 늦은 시각 생성 + 이른 시각 occurrence end edge case도 처리.
+
+### CategoryEditSheet / Category+Helpers 정리
+- "절제 목표 분류" toggle + "절제 목표 알림 기본값" section 제거.
+- Category+Helpers의 `defaultNtdStart/DueAlertInt`, `defaultForNTD(in:)`, `markAsDefaultForNTD(in:)` 메서드 제거.
+- AddItemView `applyCategoryAlertDefaults`의 NTD 분기 제거 (목표는 카테고리 미사용).
+
+### Phase B 이후 후보 (이번 phase 미구현)
+- 활동 type 활성화 (manual count input + (+1) 버튼)
+- 활동 HealthKit 연동 (steps/distance)
+- 집중 type (timer + pause + 누적 시간 기록)
+- 1회성 NTD/Todo 위젯 추가 (현재 ItemSnapshot의 routine만 지원)
+- 활동 기록 화면(ActivityHistoryView)의 type별 그룹핑·통계 강화
 
 ## 미구현 (다음 후보, 우선순위 순)
 

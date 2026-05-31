@@ -38,6 +38,8 @@ struct TodayView: View {
     @State private var datePickerSelection: Date = Date()
     // 카테고리 필터 — nil이면 "모두". ListView와 동일 패턴.
     @State private var filterCategoryID: UUID?
+    /// 목표 유형 필터 — nil이면 무관. 단일 필터 정책 (카테고리와 상호 배타).
+    @State private var filterGoalKind: ItemKind?
     // 완료/포기 항목 표시 — true=전체, false=미완료만. 오늘은 default true (오늘 완료한 것도 보임).
     // 앱 재실행 시 마지막 토글 상태 복원.
     @AppStorage(UIStateKey.todayShowCompleted) private var showCompleted: Bool = true
@@ -57,7 +59,11 @@ struct TodayView: View {
         let insertionEdge: Edge = lastNavigationForward ? .trailing : .leading
         let removalEdge: Edge = lastNavigationForward ? .leading : .trailing
         ZStack {
-            TodayList(date: displayedDate, categoryFilter: filterCategoryID, showCompleted: showCompleted, sheet: $sheet)
+            TodayList(date: displayedDate,
+                      categoryFilter: filterCategoryID,
+                      goalKindFilter: filterGoalKind,
+                      showCompleted: showCompleted,
+                      sheet: $sheet)
                 .id(displayedDate)
                 .transition(.asymmetric(
                     insertion: .move(edge: insertionEdge),
@@ -115,7 +121,8 @@ struct TodayView: View {
                             guard !cancelMode else { return }
                             shiftMonth(delta)
                         },
-                        categoryFilter: filterCategoryID
+                        categoryFilter: filterCategoryID,
+                        goalKindFilter: filterGoalKind
                     )
                 }
             }
@@ -176,6 +183,9 @@ struct TodayView: View {
             }
         }
         // 하단 leading: [<] [오늘] [>] 네비게이션 그룹.
+        //   - 기존 개별 버튼 UI(원형 chevron + 캡슐 오늘) 유지
+        //   - 그 위로 단일 반투명 capsule(.thinMaterial)을 outer wrapper로 추가 — 버튼 사이 빈 영역으로
+        //     List row 탭이 통과되는 leak 차단 (outer surface가 탭 흡수)
         //   - "오늘" 버튼 색상으로 상태 표시 (오늘 = accent fill, 다른 날 = gray fill)
         //   - 좌우 chevron은 일자 ±1 이동
         //   - 취소 모드 중에는 숨김 — 사용자가 취소 액션에만 집중하도록 (iOS 편집 모드 표준 패턴)
@@ -209,6 +219,16 @@ struct TodayView: View {
                             .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                // 라이트 모드에선 Form 배경(systemGroupedBackground)과 톤이 비슷해
+                // 단순 material만으론 경계가 흐림 → regularMaterial로 saturation 올리고
+                // 미세 stroke로 윤곽 강조 (다크 모드에서도 자연스러움).
+                .background(
+                    Capsule()
+                        .fill(.regularMaterial)
+                        .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                )
                 .padding(20)
             }
         }
@@ -216,8 +236,8 @@ struct TodayView: View {
             // 새 항목 추가 FAB — 취소 모드 중에는 숨김.
             if !cancelMode {
                 Button {
-                    // 카테고리 필터 적용 중이면 그 카테고리를 신규 항목에도 preset.
-                    sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID)
+                    // 필터 활성 시 신규 항목에 preset — 카테고리(Todo) 또는 목표 유형.
+                    sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID, goalKind: filterGoalKind)
                 } label: {
                     Image(systemName: "plus")
                         .font(.title2.weight(.semibold))
@@ -231,8 +251,8 @@ struct TodayView: View {
         }
             .sheet(item: $sheet) { mode in
                 switch mode {
-                case .new(let baseDate, let categoryID):
-                    AddItemView(baseDate: baseDate, categoryID: categoryID)
+                case .new(let baseDate, let categoryID, let goalKind):
+                    AddItemView(baseDate: baseDate, categoryID: categoryID, goalKind: goalKind)
                 case .edit(let item):
                     AddItemView(editing: item)
                 }
@@ -285,7 +305,7 @@ struct TodayView: View {
             // ⌘N 단축키 — RootView가 currentTab과 함께 broadcast. .today일 때만 새 항목 열기.
             .onReceive(NotificationCenter.default.publisher(for: .openNewItemForCurrentTab)) { note in
                 guard (note.object as? SidebarItem) == .today else { return }
-                sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID)
+                sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID, goalKind: filterGoalKind)
             }
     }
 
@@ -331,41 +351,72 @@ struct TodayView: View {
         }
     }
 
-    /// 카테고리 필터 Menu — "모두" + 각 카테고리. 활성 시 아이콘 filled.
-    /// ListView.categoryFilterMenu와 동일 패턴.
+    /// 통합 필터 Menu — "모두" + 카테고리 section + 목표 유형 section.
+    /// 단일 필터 정책: 카테고리 선택 시 goalKind 자동 nil, 목표 유형 선택 시 categoryID 자동 nil.
+    /// 활성 시 아이콘 filled.
     @ViewBuilder
     private var categoryFilterMenu: some View {
         Menu {
             Button {
                 filterCategoryID = nil
+                filterGoalKind = nil
             } label: {
-                if filterCategoryID == nil {
+                if filterCategoryID == nil && filterGoalKind == nil {
                     Label("list.filter.all", systemImage: "checkmark")
                 } else {
                     Text("list.filter.all")
                 }
             }
-            ForEach(categories, id: \.id) { cat in
-                Button {
-                    filterCategoryID = cat.id
-                } label: {
-                    if filterCategoryID == cat.id {
-                        Label(cat.name ?? "", systemImage: "checkmark")
-                    } else {
-                        Label {
-                            Text(verbatim: cat.name ?? "")
-                        } icon: {
-                            Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
+            // 카테고리 section (Todo 분류) — divider만, title 없음.
+            if !categories.isEmpty {
+                Section {
+                    ForEach(categories, id: \.id) { cat in
+                        Button {
+                            filterCategoryID = cat.id
+                            filterGoalKind = nil
+                        } label: {
+                            if filterCategoryID == cat.id {
+                                Label(cat.name ?? "", systemImage: "checkmark")
+                            } else {
+                                Label {
+                                    Text(verbatim: cat.name ?? "")
+                                } icon: {
+                                    Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // 목표 유형 section — divider만.
+            Section {
+                ForEach(Self.goalKindFilterOrder, id: \.self) { kind in
+                    Button {
+                        filterGoalKind = kind
+                        filterCategoryID = nil
+                    } label: {
+                        if filterGoalKind == kind {
+                            Label(kind.displayName, systemImage: "checkmark")
+                        } else {
+                            Label {
+                                Text(verbatim: kind.displayName)
+                            } icon: {
+                                Image(systemName: kind.goalTypeSymbolName)
+                            }
                         }
                     }
                 }
             }
         } label: {
-            Image(systemName: filterCategoryID == nil
-                  ? "line.3.horizontal.decrease.circle"
-                  : "line.3.horizontal.decrease.circle.fill")
+            let active = filterCategoryID != nil || filterGoalKind != nil
+            Image(systemName: active
+                  ? "line.3.horizontal.decrease.circle.fill"
+                  : "line.3.horizontal.decrease.circle")
         }
     }
+
+    /// 목표 유형 필터 옵션 순서 — sub-picker와 동일.
+    private static let goalKindFilterOrder: [ItemKind] = [.notTodo, .activity, .focus, .habit]
 
     private var daysFromToday: Int {
         // 둘 다 UTC anchor → UTC 캘린더로 일수 차 계산.
@@ -419,6 +470,8 @@ struct TodayList: View {
     let date: Date
     /// 카테고리 필터 — nil이면 "모두". 매 fetch 결과를 view-side filter (ListView와 동일 패턴).
     let categoryFilter: UUID?
+    /// 목표 유형 필터 — nil이면 무관. 단일 필터 정책상 categoryFilter와 동시 활성 불가.
+    let goalKindFilter: ItemKind?
     /// 완료(done)/포기(failed) 항목 표시 여부. false면 NTD/Todo/Routine 공통으로 finished 항목 숨김.
     let showCompleted: Bool
     @Binding var sheet: ItemSheetMode?
@@ -442,9 +495,10 @@ struct TodayList: View {
     )
     private var categories: FetchedResults<Category>
 
-    init(date: Date, categoryFilter: UUID?, showCompleted: Bool, sheet: Binding<ItemSheetMode?>) {
+    init(date: Date, categoryFilter: UUID?, goalKindFilter: ItemKind?, showCompleted: Bool, sheet: Binding<ItemSheetMode?>) {
         self.date = date
         self.categoryFilter = categoryFilter
+        self.goalKindFilter = goalKindFilter
         self.showCompleted = showCompleted
         self._sheet = sheet
         // date는 UTC anchor. FetchRequest predicate의 [start, end) 범위도 UTC 자정 기준으로 계산해
@@ -463,6 +517,7 @@ struct TodayList: View {
         let isTodayPage = Calendar.gmt.isDate(date, inSameDayAs: todayAnchor)
         let predicateFormat: String
         let predicateArgs: [NSDate]
+        // 할일 섹션 = kind == 0 (Todo). 습관(kind=4)은 목표 섹션으로 이동.
         if isTodayPage {
             predicateFormat = "status != 2 AND recurrenceRule == nil AND kind == 0 AND isSomeday == NO "
                             + "AND (startDate == nil OR startDate < %@) "
@@ -486,11 +541,13 @@ struct TodayList: View {
             ),
             animation: .default
         )
-        // NTD section 후보: 삭제(2)되지 않은 NTD 전체. occurrence 필터·완료/포기 분기는 view-side에서.
-        // status 1(done)·3(failed)인 1회성 NTD도 "오늘 종료된 것"은 오늘 화면에 남겨야 하므로 포함.
+        // 목표 섹션 후보: 삭제(2)되지 않은 목표 항목(절제·활동·습관 — Phase A+B. 집중은 Phase D).
+        // status 1(done)·3(failed)인 1회성도 "오늘 종료된 것"은 그날 화면에 남김.
+        // 1회성/반복 + 모든 목표 type 통합 fetch — 분기는 view-side에서.
         _ntdItems = FetchRequest(
             sortDescriptors: [SortDescriptor(\Item.createdAt)],
-            predicate: NSPredicate(format: "kind == 1 AND status != 2"),
+            // 목표 4-type 통합 fetch: NTD(1) + activity(2) + focus(3) + habit(4). status != deleted.
+            predicate: NSPredicate(format: "(kind == 1 OR kind == 2 OR kind == 3 OR kind == 4) AND status != 2"),
             animation: .default
         )
     }
@@ -516,10 +573,17 @@ struct TodayList: View {
     ///     · end = duration 없음 + 진행 중: now의 local 일자
     ///   - 완료/포기 occurrence도 노출 범위 안에 있는 한 표시 (NTDRow가 상태 라벨 처리)
     ///   - 같은 Item의 multi-day 겹침 시 **모든 매치 occurrence 노출** (그룹핑은 추후).
-    /// categoryFilter 적용 — nil이면 모두 통과, 그 외 item.category?.id 매칭.
+    /// 통합 필터 — 단일 필터 정책. 카테고리 또는 목표 유형 중 하나만 활성 (둘 다 nil이면 전체 통과).
+    /// - 카테고리 선택: Todo + category 매칭만. 목표 모두 hide.
+    /// - 목표 유형 선택: 그 type만. Todo + 다른 목표 type 모두 hide.
     private func matchesCategoryFilter(_ item: Item) -> Bool {
-        guard let id = categoryFilter else { return true }
-        return item.category?.id == id
+        if let id = categoryFilter {
+            return item.itemKind == .todo && item.category?.id == id
+        }
+        if let goalKind = goalKindFilter {
+            return item.itemKind == goalKind
+        }
+        return true
     }
 
     /// occurrence가 "끝난" 상태인지 — 완료(done) or 포기(failed).
@@ -539,20 +603,150 @@ struct TodayList: View {
         }
     }
 
+    /// 목표 섹션 표시 행 (Phase A: 절제 NTD + 습관).
+    ///
+    /// **NTD** — 같은 NTD가 여러 occurrence와 겹쳐도 단일 행만 노출.
+    /// - 오늘: inProgress > scheduled(가장 빠른) > ended(가장 최근)
+    /// - 비-오늘: 해당 일자에 **시작**하는 occurrence만
+    ///
+    /// **습관** — routine Todo와 동일 occurrence 로직.
+    /// - 반복: rule.occurs(on: date) 매칭 시 1행
+    /// - 1회성: startDate == date 매칭 시 1행
+    ///
+    /// **정렬**: 미완료 우선 (NTD inProgress → NTD scheduled → habit pending) → 완료/포기 끝.
     private var ntdsForDate: [OccurrenceRow] {
         let now = Date()
+        let isToday = date == .todayCalendarAnchor
         var result: [OccurrenceRow] = []
 
         for item in ntdItems where matchesCategoryFilter(item) {
-            let candidates = item.ntdOccurrenceStartCandidates(coveringDate: date)
-            for occDate in candidates {
-                let range = item.ntdOccurrenceCalendarRange(occurrenceDate: occDate, now: now)
-                guard range.start <= date && date <= range.end else { continue }
-                if !showCompleted, isFinishedOccurrence(item: item, occurrenceDate: occDate) { continue }
-                result.append(OccurrenceRow(item: item, occurrenceDate: occDate))
+            switch item.itemKind {
+            case .notTodo:
+                if let row = ntdOccurrenceRow(for: item, isToday: isToday, now: now) {
+                    result.append(row)
+                }
+            case .habit, .activity, .focus:
+                // 활동·집중도 habit과 동일 occurrence 로직 (rule.occurs / startDate 매칭). 종일 의미.
+                if let row = habitOccurrenceRow(for: item) {
+                    result.append(row)
+                }
+            default:
+                continue
             }
         }
-        return result
+        return result.sorted { lhs, rhs in
+            let lp = goalSortPriority(row: lhs, now: now)
+            let rp = goalSortPriority(row: rhs, now: now)
+            if lp.bucket != rp.bucket { return lp.bucket < rp.bucket }
+            if lp.timeAnchor != rp.timeAnchor { return lp.timeAnchor < rp.timeAnchor }
+            return (lhs.item.createdAt ?? .distantPast) < (rhs.item.createdAt ?? .distantPast)
+        }
+    }
+
+    /// 목표 섹션 정렬 키.
+    /// bucket: 0=미완료(NTD inProgress, NTD scheduled, habit pending) — 1=완료/포기.
+    /// timeAnchor: bucket 안 정렬 — NTD는 시각 instant, habit은 .distantFuture(같은 group 끝).
+    private func goalSortPriority(row: OccurrenceRow, now: Date) -> (bucket: Int, timeAnchor: TimeInterval) {
+        let item = row.item
+        let finished = isFinishedOccurrence(item: item, occurrenceDate: row.occurrenceDate)
+        if finished {
+            // 완료/포기 항목은 끝에. 같은 그룹 내 completedAt 최신 먼저 (negative anchor).
+            let inst = item.routineRecord(on: row.occurrenceDate)?.completedAt
+                ?? item.completedAt
+                ?? .distantPast
+            return (1, -inst.timeIntervalSince1970)
+        }
+        // 미완료 — NTD는 시각 anchor(inProgress=현재 종료, scheduled=시작), habit은 anchor 없음.
+        switch item.itemKind {
+        case .notTodo:
+            if let state = item.ntdState(on: row.occurrenceDate, now: now) {
+                switch state {
+                case .inProgress:
+                    let end = item.ntdEndInstant(on: row.occurrenceDate) ?? .distantFuture
+                    return (0, end.timeIntervalSince1970)  // 종료 가까운 순
+                case .scheduled:
+                    let start = item.ntdStartInstant(on: row.occurrenceDate) ?? .distantFuture
+                    // scheduled는 inProgress보다 뒤 (큰 timeAnchor).
+                    return (0, start.timeIntervalSince1970 + 1_000_000_000)
+                case .ended:
+                    // ended(자동 완료 대기 — fetch에 남아있는 케이스)
+                    return (0, .greatestFiniteMagnitude)
+                }
+            }
+            return (0, .greatestFiniteMagnitude)
+        case .habit, .activity, .focus:
+            // habit·activity·focus pending — NTD scheduled보다 뒤로 (더 큰 anchor).
+            // 셋 다 종일 의미라 시각 anchor 없음 → createdAt fallback에 위임.
+            return (0, .greatestFiniteMagnitude - 1)
+        default:
+            return (0, .greatestFiniteMagnitude)
+        }
+    }
+
+    /// NTD 단일 occurrence 행 생성 — 후보 필터 + 우선순위 선택.
+    private func ntdOccurrenceRow(for item: Item, isToday: Bool, now: Date) -> OccurrenceRow? {
+        let candidates = item.ntdOccurrenceStartCandidates(coveringDate: date)
+        var occurrences: [Date] = []
+        for occDate in candidates {
+            let range = item.ntdOccurrenceCalendarRange(occurrenceDate: occDate, now: now)
+            guard range.start <= date && date <= range.end else { continue }
+            if !showCompleted, isFinishedOccurrence(item: item, occurrenceDate: occDate) { continue }
+            occurrences.append(occDate)
+        }
+        guard !occurrences.isEmpty else { return nil }
+        let selected: Date? = isToday
+            ? selectSingleNTDOccurrence(item: item, occurrences: occurrences, now: now)
+            : occurrences.first { $0 == date }
+        guard let selected else { return nil }
+        return OccurrenceRow(item: item, occurrenceDate: selected)
+    }
+
+    /// 습관 occurrence 행 생성 — 1회성/반복 단순 매칭.
+    private func habitOccurrenceRow(for item: Item) -> OccurrenceRow? {
+        if let rule = item.recurrenceRule {
+            guard rule.occurs(on: date, startDate: item.startDate, endDate: item.recurrenceEndDate) else { return nil }
+        } else {
+            // 1회성 습관: startDate가 view date와 일치할 때만.
+            guard let s = item.startDate, s == date else { return nil }
+        }
+        if !showCompleted, isFinishedOccurrence(item: item, occurrenceDate: date) { return nil }
+        return OccurrenceRow(item: item, occurrenceDate: date)
+    }
+
+    /// 오늘 모드 — 같은 NTD의 다중 occurrence 중 하나만 선택.
+    /// inProgress > scheduled(가장 빠른) > ended(가장 최근).
+    /// 각 occurrence의 state를 한 번만 계산해 cache (loop 안 중복 호출 회피).
+    ///
+    /// **중요**: ntdState는 시간 기반 — 시간상 .inProgress여도 실제 포기/완료된 occurrence는
+    /// 다음 occurrence가 표시되도록 inProgress/scheduled 후보에서 제외.
+    /// 예: 어제 20시 시작 16h 단식 → 22시 포기 → 시간상 어제 occurrence는 여전히 .inProgress (종료 12시까지)
+    /// → 필터 안 하면 포기된 어제가 우선 선택돼서 오늘 scheduled occurrence가 안 보임.
+    private func selectSingleNTDOccurrence(item: Item, occurrences: [Date], now: Date) -> Date {
+        let states: [(date: Date, state: Item.NTDState?, finished: Bool)] = occurrences.map { occDate in
+            (occDate, item.ntdState(on: occDate, now: now), isFinishedOccurrence(item: item, occurrenceDate: occDate))
+        }
+        // 미완료 진행 중 우선.
+        if let inProgress = states.first(where: { $0.state == .inProgress && !$0.finished })?.date {
+            return inProgress
+        }
+        // 미완료 scheduled 중 가장 빠른 시작.
+        let scheduled = states.filter { $0.state == .scheduled && !$0.finished }.map(\.date)
+        if let earliest = scheduled.min(by: { a, b in
+            let aStart = item.ntdStartInstant(on: a) ?? .distantFuture
+            let bStart = item.ntdStartInstant(on: b) ?? .distantFuture
+            return aStart < bStart
+        }) {
+            return earliest
+        }
+        // 그 외 (전부 finished 등) — 가장 최근 occurrence fallback.
+        if let mostRecent = occurrences.max(by: { a, b in
+            let aStart = item.ntdStartInstant(on: a) ?? .distantPast
+            let bStart = item.ntdStartInstant(on: b) ?? .distantPast
+            return aStart < bStart
+        }) {
+            return mostRecent
+        }
+        return occurrences[0]
     }
 
     /// 반복 항목 occurrence 목록. multi-day 겹침 시 같은 Item의 여러 occurrence 모두 반환.
@@ -738,66 +932,89 @@ struct TodayList: View {
         return categories.first(where: { $0.id == id })
     }
 
-    /// section header — 평소엔 title text. 카테고리 필터 활성 시 title 바로 옆에
-    /// 카테고리 색 filled circle + white symbol (CategoryListView와 동일 스타일).
+    /// 섹션 정체성 — Todo 섹션은 카테고리 필터 아이콘, Goal 섹션은 목표 유형 필터 아이콘.
+    enum SectionScope { case todo, goal }
+
+    /// section header.
+    /// 필터 미활성: 기본 title text ("목표" / "할일").
+    /// 필터 활성: ListView 패턴 — `(아이콘) 카테고리명` 또는 `(아이콘) 목표유형명` 만 표시.
     @ViewBuilder
-    private func sectionHeader(_ titleKey: LocalizedStringKey) -> some View {
-        HStack(spacing: 6) {
-            Text(titleKey)
+    private func sectionHeader(_ titleKey: LocalizedStringKey, scope: SectionScope) -> some View {
+        switch scope {
+        case .todo:
             if let cat = activeCategory {
-                let color: Color = {
-                    guard let raw = cat.colorHex, let cc = CategoryColor(rawValue: raw) else {
-                        return Color.accentColor
-                    }
-                    return cc.color
-                }()
-                Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 20, height: 20)
-                    .background(Circle().fill(color))
+                HStack(spacing: 8) {
+                    let color: Color = {
+                        guard let raw = cat.colorHex, let cc = CategoryColor(rawValue: raw) else {
+                            return Color.accentColor
+                        }
+                        return cc.color
+                    }()
+                    Image(systemName: cat.iconName ?? CategoryIcon.defaultIcon.symbolName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(color))
+                    Text(verbatim: cat.name ?? "")
+                }
+            } else {
+                Text(titleKey)
+            }
+        case .goal:
+            if let kind = goalKindFilter {
+                HStack(spacing: 8) {
+                    Image(systemName: kind.goalTypeSymbolName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.accentColor))
+                    Text(verbatim: kind.displayName)
+                }
+            } else {
+                Text(titleKey)
             }
         }
     }
 
     var body: some View {
         // 2-섹션 모델: NTD / 할일(1회성+루틴 통합).
-        // 할일 섹션: pending 그룹 먼저 → done 그룹 끝, 같은 bucket 내 priority desc → 시간 가까운 순.
+        // 단일 필터 정책 — 카테고리 선택 시 목표 섹션 hide, 목표 유형 선택 시 할일 섹션 hide.
         let activitiesSorted = displayActivities()
+        let showGoalSection = categoryFilter == nil  // 카테고리 필터엔 목표 hide
+        let showTodoSection = goalKindFilter == nil  // 목표 유형 필터엔 할일 hide
         List {
-            Section {
-                if ntdsForDate.isEmpty {
-                    emptyRow("today.empty.not_todo")
-                } else {
-                    // 그룹 = List row 1개. 내부 VStack 간격으로 occurrence 간 간격 직접 제어 (List 강제 높이 회피).
-                    ForEach(itemGroups(ntdsForDate)) { group in
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
-                                let isLast = (idx == group.occurrences.count - 1)
-                                Button {
-                                    // 취소 모드에서는 편집 sheet 차단 — (x) 버튼 액션만 활성.
-                                    guard !cancelMode else { return }
-                                    sheet = .edit(group.item)
-                                } label: {
-                                    NTDRow(
-                                        item: group.item,
-                                        occurrenceDate: occ.occurrenceDate,
-                                        compactMode: !isLast
-                                    )
+            if showGoalSection {
+                Section {
+                    if ntdsForDate.isEmpty {
+                        emptyRow("today.empty.not_todo")
+                    } else {
+                        // 그룹 = List row 1개. 내부 VStack 간격으로 occurrence 간 간격 직접 제어 (List 강제 높이 회피).
+                        // NTD(절제)는 NTDRow, 습관은 ItemRow로 렌더 — type별 정체성 유지.
+                        ForEach(itemGroups(ntdsForDate)) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
+                                    let isLast = (idx == group.occurrences.count - 1)
+                                    Button {
+                                        guard !cancelMode else { return }
+                                        sheet = .edit(group.item)
+                                    } label: {
+                                        goalRow(item: group.item, occurrenceDate: occ.occurrenceDate, isLast: isLast)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
+                } header: {
+                    sectionHeader("today.section.not_todo", scope: .goal)
                 }
-            } header: {
-                sectionHeader("today.section.not_todo")
             }
 
-            Section {
-                if activitiesSorted.isEmpty {
-                    emptyRow("today.empty.todo")
-                } else {
+            if showTodoSection {
+                Section {
+                    if activitiesSorted.isEmpty {
+                        emptyRow("today.empty.todo")
+                    } else {
                     ForEach(itemGroups(activitiesSorted)) { group in
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(group.occurrences.enumerated()), id: \.element.id) { idx, occ in
@@ -812,8 +1029,9 @@ struct TodayList: View {
                         }
                     }
                 }
-            } header: {
-                sectionHeader("today.section.todo")
+                } header: {
+                    sectionHeader("today.section.todo", scope: .todo)
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -852,6 +1070,29 @@ struct TodayList: View {
         Text(key)
             .foregroundStyle(.secondary)
             .font(.subheadline)
+    }
+
+    /// 목표 섹션 row — type별 row component 분기.
+    /// - 절제(.notTodo): NTDRow (카운트다운·progress capsule·(x) 포기)
+    /// - 습관(.habit)·활동(.activity)·집중(.focus): ItemRow (goalLeadingIcon + 각자 trailing UI)
+    @ViewBuilder
+    private func goalRow(item: Item, occurrenceDate: Date, isLast: Bool) -> some View {
+        switch item.itemKind {
+        case .notTodo:
+            NTDRow(item: item, occurrenceDate: occurrenceDate, displayedDate: date, compactMode: !isLast)
+        case .habit, .activity, .focus:
+            // routine은 occurrenceDate 기준 RC. 1회성은 startDate 기준 (canonical).
+            // trailing UI는 ItemRow 안에서 type별 분기 (habit=체크, activity=progress+N, focus=progress+▶).
+            ItemRow(
+                item: item,
+                referenceDate: date,
+                occurrenceStartOverride: item.recurrenceRule != nil ? occurrenceDate : nil,
+                compactMode: !isLast
+            )
+        default:
+            // 집중(.focus) Phase D — 현재 fetch에서 제외돼 도달 X.
+            EmptyView()
+        }
     }
 }
 

@@ -26,11 +26,8 @@ struct CategoryEditSheet: View {
     @State private var name: String
     @State private var tintRaw: String
     @State private var iconRaw: String
-    @State private var isDefaultForNTD: Bool
 
-    // 알림 default — offset(분). nil = OFF.
-    @State private var ntdStartAlert: Int?
-    @State private var ntdDueAlert: Int?
+    // 알림 default — offset(분). nil = OFF. Todo 4종(timed/untimed × start/due)만.
     @State private var todoTimedStartAlert: Int?
     @State private var todoTimedDueAlert: Int?
     @State private var todoUntimedStartAlert: Int?
@@ -43,12 +40,6 @@ struct CategoryEditSheet: View {
         _name = State(initialValue: category?.name ?? "")
         _tintRaw = State(initialValue: category?.colorHex ?? CategoryColor.defaultColor.rawValue)
         _iconRaw = State(initialValue: category?.iconName ?? CategoryIcon.defaultIcon.symbolName)
-        _isDefaultForNTD = State(initialValue: category?.isDefaultForNTD ?? false)
-        // 신규 생성 시 default: NTD 시작/종료 = 정각(0), Todo 3종 = nil(미설정).
-        _ntdStartAlert = State(initialValue: category?.defaultNtdStartAlertInt
-                               ?? (category == nil ? Category.newCategoryNtdStartAlertDefault : nil))
-        _ntdDueAlert = State(initialValue: category?.defaultNtdDueAlertInt
-                             ?? (category == nil ? Category.newCategoryNtdDueAlertDefault : nil))
         _todoTimedStartAlert = State(initialValue: category?.defaultTodoTimedStartAlertInt)
         _todoTimedDueAlert = State(initialValue: category?.defaultTodoTimedDueAlertInt)
         _todoUntimedStartAlert = State(initialValue: category?.defaultTodoUntimedStartAlertInt)
@@ -84,23 +75,6 @@ struct CategoryEditSheet: View {
                         }
                     }
                     .padding(.vertical, 4)
-                }
-
-                Section("category.section.ntd_default") {
-                    Toggle("category.ntd_default.toggle", isOn: $isDefaultForNTD)
-                }
-
-                Section("category.section.alert_default.ntd") {
-                    alertOffsetPicker(
-                        label: "alert.label.start",
-                        selection: $ntdStartAlert,
-                        options: AlertOffset.withTimeOptions
-                    )
-                    alertOffsetPicker(
-                        label: "alert.label.end",
-                        selection: $ntdDueAlert,
-                        options: AlertOffset.withTimeOptions
-                    )
                 }
 
                 Section("category.section.alert_default.todo") {
@@ -237,15 +211,7 @@ struct CategoryEditSheet: View {
         target.colorHex = tintRaw
         target.iconName = iconRaw
         target.updatedAt = now
-        // NTD 기본 카테고리 — exclusive. ON으로 바꿀 때 다른 카테고리의 flag 해제.
-        if isDefaultForNTD {
-            target.markAsDefaultForNTD(in: context)
-        } else {
-            target.isDefaultForNTD = false
-        }
-        // 알림 default.
-        target.defaultNtdStartAlertInt = ntdStartAlert
-        target.defaultNtdDueAlertInt = ntdDueAlert
+        // 알림 default — Todo 4종만 (목표는 카테고리 사용 안 함).
         target.defaultTodoTimedStartAlertInt = todoTimedStartAlert
         target.defaultTodoTimedDueAlertInt = todoTimedDueAlert
         target.defaultTodoUntimedStartAlertInt = todoUntimedStartAlert

@@ -186,6 +186,16 @@ struct NTDProvider: TimelineProvider {
                 return routineSnapshot(item: item, now: now, today: today)
             }
             return todoSnapshot(item: item, now: now, today: today)
+        case .activity:
+            // TODO: 활동 위젯 snapshot — Phase B/C. 현재는 미노출.
+            return nil
+        case .focus:
+            // TODO: 집중 위젯 snapshot — Phase D. 현재는 미노출.
+            return nil
+        case .habit:
+            // 습관은 routine Todo와 동일 패턴이라 routineSnapshot 재활용 가능.
+            // Phase A 위젯 미노출 — 다음 phase에 통합.
+            return nil
         }
     }
 
@@ -320,6 +330,9 @@ struct NTDProvider: TimelineProvider {
                 return [start, end].compactMap { $0 }
             }
             return [item.effectiveStartInstant, item.effectiveDueInstant].compactMap { $0 }
+        case .activity, .focus, .habit:
+            // Phase A 위젯 미노출 — 향후 단계에서 추가.
+            return []
         }
     }
 

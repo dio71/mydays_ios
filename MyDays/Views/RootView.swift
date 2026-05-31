@@ -66,6 +66,9 @@ struct RootView: View {
             // 첫 launch 시 알림 권한 명시 요청.
             // 이미 결정된 경우(허용/거부) 무동작. 처음이면 시스템 prompt.
             await NotificationService.shared.requestAuthorization()
+            // HealthKit auto source(걸음수/거리) 활동 항목의 오늘 valueRecorded sync.
+            // 권한 거부된 source는 fetch nil → skip.
+            await Item.syncHealthKitActivities(in: context)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -74,6 +77,8 @@ struct RootView: View {
                 Item.refreshAllRoutineNotifications(in: context)
                 // 백그라운드 자정 통과한 경우 탭 아이콘 갱신.
                 todayDay = Calendar.current.component(.day, from: Date())
+                // foreground 복귀 시 HealthKit sync.
+                Task { await Item.syncHealthKitActivities(in: context) }
             }
         }
     }

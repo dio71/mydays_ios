@@ -49,8 +49,6 @@ extension Item {
     // startHour / dueHour / ntdDurationHour는 Core Data에 NSNumber? 형태로 저장됨
     // (nil과 0을 구분하기 위해 scalar 대신 NSNumber 사용).
     // Swift에선 Int? 접근이 자연스러우니 래퍼를 둔다.
-    //
-    // ntdStartHour는 deprecate — startHour로 통합. 기존 스키마는 유지 (사용 안 함).
 
     // 단순화 모델: hour는 항상 값 보유. 시간 미설정 = startHour=0, dueHour=24 sentinel.
     // CD 스키마(Int16?)는 그대로 두되, accessor를 non-optional로 노출해 nil 체크 제거.
@@ -69,12 +67,49 @@ extension Item {
         set { dueHour = NSNumber(value: newValue) }
     }
 
-    /// 시간 명시 여부 — `dueHourInt < 24`면 사용자가 종료 시각을 설정.
-    var hasExplicitTime: Bool { dueHourInt < 24 }
+    /// 시간 명시 여부 — startHour 또는 dueHour 중 하나라도 명시 설정됐으면 true.
+    /// 정책: startHour=0 + dueHour=24 = 시간 미설정 default (종일).
+    /// - startHour > 0: 사용자가 시작 시각 명시 설정 (예: 활동 "9시부터 카운트")
+    /// - dueHour < 24: 사용자가 종료 시각 명시 설정 (예: Todo "17시까지")
+    /// 둘 다 있으면 기간 범위.
+    var hasExplicitTime: Bool { startHourInt > 0 || dueHourInt < 24 }
 
     var ntdDurationHourInt: Int? {
         get { ntdDurationHour?.intValue }
         set { ntdDurationHour = newValue.map(NSNumber.init(value:)) }
+    }
+
+    // MARK: - 활동 목표 필드 accessor
+    //
+    // activityTargetValue / activitySourceType는 NSNumber? 형태 (nil 구분 필요).
+    // activityUnit은 String? 그대로.
+
+    /// 활동 목표 수치 — 예: 100(회), 2.0(L), 10000(보). nil이면 미설정.
+    var activityTargetValueDouble: Double? {
+        get { activityTargetValue?.doubleValue }
+        set { activityTargetValue = newValue.map(NSNumber.init(value:)) }
+    }
+
+    /// 활동 측정 source. nil 또는 manual default.
+    var activitySource: ActivitySourceType {
+        get { ActivitySourceType(rawValue: activitySourceType?.int16Value ?? 0) ?? .manual }
+        set { activitySourceType = NSNumber(value: newValue.rawValue) }
+    }
+
+    /// 활동 목표 수치 — Phase B는 정수만 입력. UI 바인딩 편의용 Int accessor.
+    var activityTargetValueInt: Int? {
+        get { activityTargetValueDouble.map { Int($0) } }
+        set { activityTargetValueDouble = newValue.map { Double($0) } }
+    }
+
+    /// 활동 target 기반 quick step 계산 — 사용자가 ~20회 누르면 완료되는 정도의 "nice" 단위.
+    /// 후보 nice step: 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000.
+    /// 예: target=100 → step=5, target=20000 → step=1000.
+    private static let activityNiceSteps: [Int] = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
+
+    static func activityQuickStep(target: Int) -> Int {
+        let goal = max(target / 20, 1)
+        return activityNiceSteps.first(where: { $0 >= goal }) ?? 10000
     }
 
     /// 새 NTD 생성 시 default 시작 시각: 현재 시각의 다음 정각(0~23).
@@ -86,6 +121,12 @@ extension Item {
         let m = comps.minute ?? 0
         return m == 0 ? h : (h + 1) % 24
     }
+
+    /// NTD default 시작 시각 — 오전 6시. 사용자 결정값 (16시간 단식 → 22시 종료 패턴).
+    static let defaultNTDStartHour: Int = 6
+
+    /// NTD default 목표 유지 시간 — 16시간 (대중적 단식). 목표 24시간 cap 안.
+    static let defaultNTDDurationHour: Int = 16
 
     /// 주어진 calendar date(UTC anchor)에서 이 NTD의 실제 시작 instant 계산.
     /// 의미: "그 날짜의 사용자 local hour:00" (wall-clock semantics).
@@ -135,15 +176,17 @@ extension Item {
         return Item.localInstant(fromCalendarDate: d, hour: dueHourInt)
     }
 
-    /// 단일 일정 판정 — startDate==dueDate 같은 날 + (시간 미설정 OR startHour==dueHour).
+    /// 단일 일정 판정 — startDate==dueDate 같은 날 + (종료 시각 미설정 OR startHour==dueHour).
     /// 사용자 정의:
-    ///   - 같은 날 + dueHour==24 (시간 미설정 종일): 단일
-    ///   - 같은 날 + startHour==dueHour: 단일 (시간 있는 단일)
+    ///   - 같은 날 + dueHour==24 (종료 시각 없음): 단일 (start time 유무 무관, 종일 의미)
+    ///     · startHour=0/dueHour=24 → 시간 미설정 종일
+    ///     · startHour=9/dueHour=24 → "9시 시작, 종일" (start-only)
+    ///   - 같은 날 + startHour==dueHour: 단일 (단일 시각)
     ///   - 다른 날 또는 같은 날 + startH<dueH: 기간
     var isSingleSchedule: Bool {
         guard let s = startDate, let d = dueDate else { return true }
         if !Calendar.gmt.isDate(s, inSameDayAs: d) { return false }
-        if !hasExplicitTime { return true }
+        if dueHourInt >= 24 { return true }
         return startHourInt == dueHourInt
     }
 
@@ -262,8 +305,12 @@ extension Item {
             return occ
         }
         guard let rule = recurrenceRule else { return nil }
-        let cursor = Calendar.gmt.date(byAdding: .day, value: -1, to: viewDate) ?? viewDate
-        return rule.nextOccurrence(after: cursor, startDate: startDate, endDate: recurrenceEndDate)
+        // cursor=viewDate — nextOccurrence는 referenceDate 포함 검사 (CLAUDE.md 명시).
+        // 위에서 occurrenceStartDate가 nil 반환 = viewDate 자체는 occurrence 아님 →
+        // nextOccurrence가 viewDate skip하고 다음 future occurrence 반환.
+        // ⚠️ 이전엔 cursor = viewDate-1로 잘못 set돼서 과거 DTSTART(예: 5/30 토 anchor)가
+        // 반환되는 버그가 있었음 (5/31 일요일 viewDate인데 cursor 5/30이 DTSTART 매치).
+        return rule.nextOccurrence(after: viewDate, startDate: startDate, endDate: recurrenceEndDate)
     }
 
     /// 1회성 Todo 섹션 분류 (TodayView / ItemRow 공유 helper).
@@ -340,13 +387,17 @@ extension Item {
     }
 
     /// occurrence 기록 전체 (성공·포기 포함). completedAt 최신순(사용자 액션 시점).
-    /// 편집 화면 "활동 기록" section 표시용. Todo routine + NTD(1회성·반복) 공통.
-    /// 빈 RoutineCompletion(done=false, failed=false)은 의미 없으므로 제외.
+    /// 편집 화면 "활동 기록" section 표시용. Todo routine + NTD(1회성·반복) + 활동 공통.
+    /// 표시 조건: done OR failed OR (활동 progress: valueRecorded > 0).
+    /// 빈 RoutineCompletion은 의미 없으므로 제외.
     /// completedAt이 nil인 legacy record는 record.date로 fallback 정렬.
     var routineHistoryRecords: [RoutineCompletion] {
         let comps = (completions as? Set<RoutineCompletion>) ?? []
         return comps
-            .filter { $0.done || $0.failed }
+            .filter { rc in
+                let value = rc.valueRecorded?.doubleValue ?? 0
+                return rc.done || rc.failed || value > 0
+            }
             .sorted {
                 let l = $0.completedAt ?? $0.date ?? .distantPast
                 let r = $1.completedAt ?? $1.date ?? .distantPast
@@ -765,6 +816,13 @@ extension Item {
     private static func processOneOffNTD(_ item: Item, now: Date, in context: NSManagedObjectContext) {
         guard let occurrenceDate = item.startDate else { return }
         guard item.ntdState(on: occurrenceDate, now: now) == .ended else { return }
+        // **createdAt floor**: 사용자가 startDate를 과거로 지정해 NTD 생성하면 ntdEndInstant가
+        //   생성 시점 이전이라 즉시 auto-complete되는 버그 방지. 실제 종료가 생성 이후일 때만 처리.
+        if let endInst = item.ntdEndInstant(on: occurrenceDate),
+           let created = item.createdAt,
+           endInst < created {
+            return
+        }
         // 중복 방지 — 이미 기록(성공/포기) 있으면 skip.
         if item.hasRoutineRecord(on: occurrenceDate) { return }
         // 1회성도 RoutineCompletion 생성 — 반복과 일관된 occurrence 기록 (활동 기록 표시).
@@ -786,11 +844,21 @@ extension Item {
 
     private static func processRecurringNTD(_ item: Item, now: Date, in context: NSManagedObjectContext) {
         // 최근 7일치 occurrence 검사. 끝났는데 기록 없으면 done=true 기록 생성.
+        // **createdAt floor**: 사용자가 startDate를 과거로 retroactive 변경 시 (e.g., 새 NTD startDate=5/19),
+        //   item 생성일 이전 occurrence들이 lookback 윈도우에 들어가 false done 기록이 생성되는 버그 방지.
+        //   occurrence의 종료 instant가 createdAt(item 생성 instant)보다 이전이면 skip — item이 존재하지
+        //   않았던 시점에 종료된 occurrence는 auto-complete 대상 아님.
         let today: Date = .todayCalendarAnchor
         let existingRecords = (item.completions as? Set<RoutineCompletion>) ?? []
         for offset in 0...7 {
             guard let candidate = Calendar.gmt.date(byAdding: .day, value: -offset, to: today) else { continue }
             guard item.ntdOccurs(on: candidate) else { continue }
+            // 종료 instant가 createdAt 이전이면 skip.
+            if let endInst = item.ntdEndInstant(on: candidate),
+               let created = item.createdAt,
+               endInst < created {
+                continue
+            }
             guard item.ntdState(on: candidate, now: now) == .ended else { continue }
             // 이미 기록(성공/포기) 있으면 skip.
             let alreadyRecorded = existingRecords.contains { c in
@@ -893,11 +961,29 @@ extension Item {
         // 1회성·routine 공통으로 처리하기 위해 sync에서는 occurrences 배열만 사용.
         // 1회성은 nextOccurrenceDates가 startDate 1개를 반환 (또는 빈 배열).
         // Reminder의 fire instant 계산은 occurrence별로 다르므로 inner loop.
+        // 이미 완료/포기된 occurrence는 알림 등록 skip — refresh 시 cancelled 알림 재등록 방지.
+        // 버그: 어제 시작 multi-day NTD 포기 → cancelNotifications(forOccurrence:)로 즉시 cancel됐지만,
+        // 다음 scenePhase=.active 시 refreshAllRoutineNotifications → syncNotifications가 다시 등록 →
+        // 종료 시각에 "성공" 알림 fire. 이 가드로 해결.
+        let finishedOccurrences: Set<String> = {
+            let comps = (completions as? Set<RoutineCompletion>) ?? []
+            var set = Set<String>()
+            for rc in comps {
+                guard let d = rc.date, (rc.done || rc.failed) else { continue }
+                set.insert(Self.occurrenceIDStamp(for: d))
+            }
+            return set
+        }()
+        // 1회성 NTD/Todo가 명시적 status로 done/failed 된 경우도 skip.
+        let itemFinished = (itemStatus == .done || itemStatus == .failed)
         Task {
             await NotificationService.shared.cancel(matchingPrefixes: prefixes)
+            guard !itemFinished else { return }  // 1회성 완료/포기면 모든 알림 등록 skip
             for reminder in reminderSet {
                 guard let rid = reminder.id?.uuidString else { continue }
                 for occDate in occurrences {
+                    let stamp = Self.occurrenceIDStamp(for: occDate)
+                    if finishedOccurrences.contains(stamp) { continue }
                     guard let fireDate = notificationFireDate(
                         for: reminder, occurrenceDate: occDate
                     ) else { continue }
@@ -906,7 +992,7 @@ extension Item {
                         [.year, .month, .day, .hour, .minute],
                         from: fireDate
                     )
-                    let occID = "\(rid):\(Self.occurrenceIDStamp(for: occDate))"
+                    let occID = "\(rid):\(stamp)"
                     NotificationService.shared.schedule(
                         id: occID,
                         title: titleText,
@@ -935,6 +1021,22 @@ extension Item {
         Task {
             await NotificationService.shared.cancel(matchingPrefixes: [prefix])
         }
+    }
+
+    /// 특정 occurrence(reminders 전부)의 알림만 취소.
+    /// 사용처:
+    ///   - NTD 포기: 그 occurrence의 시작/종료 알림 cancel (다음 occurrence는 보존)
+    ///   - 반복 Todo/습관 미리 체크: 그 occurrence 알림 cancel
+    /// ID 패턴: `{Reminder.id}:{yyyyMMdd}` — 해당 occurrence 정확히 match.
+    func cancelNotifications(forOccurrence occurrenceDate: Date) {
+        let stamp = Item.occurrenceIDStamp(for: occurrenceDate)
+        let reminders = (self.reminders as? Set<Reminder>) ?? []
+        let ids = reminders.compactMap { r -> String? in
+            guard let rid = r.id?.uuidString else { return nil }
+            return "\(rid):\(stamp)"
+        }
+        guard !ids.isEmpty else { return }
+        NotificationService.shared.cancel(ids: ids)
     }
 
     /// 모든 Item의 reminders 중 같은 anchor에 중복된 레코드를 1개만 남기고 정리.
@@ -1127,5 +1229,63 @@ extension Item {
         item.createdAt = now  // instant
         item.updatedAt = now  // instant
         return item
+    }
+
+    // MARK: - 활동 occurrence accessor / 증가
+
+    /// 활동 occurrence의 현재 누적값. occurrenceDate에 해당하는 RC.valueRecorded.
+    /// RC 없으면 0.
+    func activityCurrentValue(on occurrenceDate: Date) -> Int {
+        guard let rc = routineRecord(on: occurrenceDate) else { return 0 }
+        return Int(rc.valueRecorded?.doubleValue ?? 0)
+    }
+
+    /// 활동 occurrence에 N만큼 증가. RC 없으면 생성. target 도달 시 done=true 자동 flip.
+    /// 1회성 활동(recurrenceRule=nil)도 같은 RC 패턴 — 활동 기록·일관성 위해.
+    /// 호출 측에서 context.save() 책임.
+    static func incrementActivityValue(
+        for item: Item,
+        by amount: Int,
+        occurrenceDate: Date,
+        in context: NSManagedObjectContext
+    ) {
+        let now = Date()
+        let day = Calendar.gmt.startOfDay(for: occurrenceDate)
+        let completions = (item.completions as? Set<RoutineCompletion>) ?? []
+        let existing = completions.first { c in
+            guard let d = c.date else { return false }
+            return Calendar.gmt.isDate(d, inSameDayAs: day)
+        }
+        let rc: RoutineCompletion
+        if let existing {
+            rc = existing
+        } else {
+            rc = RoutineCompletion(context: context)
+            rc.id = UUID()
+            rc.date = day
+            rc.item = item
+            rc.failed = false
+        }
+        let prev = Int(rc.valueRecorded?.doubleValue ?? 0)
+        let next = max(prev + amount, 0)
+        rc.valueRecorded = NSNumber(value: Double(next))
+        // target 도달 — done=true 자동. 이미 done이면 그대로 (초과 누적 허용).
+        if let target = item.activityTargetValueInt, next >= target, !rc.done {
+            rc.done = true
+        }
+        // completedAt은 활동 record에서 "마지막 업데이트 시각" 의미로 사용 — 정렬에서 최신 활동이 위로.
+        // progress record(미완성)에도 갱신 — 안 그러면 nil로 sort 시 맨 아래로 가버림.
+        rc.completedAt = now
+        // 1회성 활동의 Item.status sync — target 도달 시 done, 그 외 pending.
+        if item.recurrenceRule == nil {
+            if rc.done {
+                item.itemStatus = .done
+                item.completedAt = now
+            } else {
+                item.itemStatus = .pending
+                item.completedAt = nil
+            }
+        }
+        item.updatedAt = now
     }
 }

@@ -19,7 +19,12 @@ import SwiftUI
 struct NTDRow: View {
 
     @ObservedObject var item: Item
-    let occurrenceDate: Date  // UTC anchor
+    let occurrenceDate: Date  // UTC anchor — occurrence의 시작 calendar date
+    /// 이 row가 표시되는 view date (UTC anchor). multi-day occurrence가 여러 일자에 걸쳐 노출되는 경우
+    /// 어느 일자의 row인지 구분하는 용도. 미지정 시 occurrenceDate를 사용 (단일 일자 occurrence).
+    /// 정책: (x) 포기 버튼은 displayedDate == 오늘인 row에서만 노출 — 어제 시작 + 오늘 진행 중인
+    /// multi-day occurrence가 어제·오늘 두 row 모두 보일 때, 액션은 오늘 row에서만 받음.
+    var displayedDate: Date? = nil
     /// compact 표시 — 그룹 내 마지막이 아닌 row용. notes/statusIcons 숨김.
     /// (x) 버튼은 compactMode 무관 cancelMode 기준으로 표시.
     var compactMode: Bool = false
@@ -39,9 +44,11 @@ struct NTDRow: View {
             let completed = isCompleted(now: now)
             let failed = isFailed()
 
-            HStack(alignment: .top, spacing: 12) {
+            // .firstTextBaseline — leading icon(title3 SF Symbol)이 title 텍스트(body)의 baseline에 정렬. ItemRow와 동일.
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 leadingIcon(completed: completed, failed: failed)
-                    .padding(.top, 1)
+                    // SF Symbol baseline이 text baseline과 미세히 어긋나 icon이 살짝 위로 보임 — 2pt 내려서 시각 중심 보정.
+                    .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -56,7 +63,25 @@ struct NTDRow: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 4)
-                        trailingDisplay(now: now, completed: completed, failed: failed)
+                        // 미래 일자엔 trailing(progress/countdown) 숨김 — 활동(+)/습관(체크)과 일관성.
+                        // 다른 type들은 미래 trailing 인터랙션을 숨기는데 NTD만 countdown("1일 11시간 후")을
+                        // 보여주던 게 일관성 떨어짐 → 같은 정책 적용. 오늘/과거는 그대로.
+                        if occurrenceDate <= .todayCalendarAnchor || completed || failed {
+                            // trailing + (x)/check/nosign 사이 간격은 activity (progress + (+)) 패턴과 동일 4pt.
+                            HStack(spacing: 4) {
+                                trailingDisplay(now: now, completed: completed, failed: failed)
+                                // 우측 status/action 아이콘 — displayedDate=오늘인 row에서만 노출.
+                                // 어제 시작 + 오늘 진행 중인 multi-day occurrence는 두 row 모두 표시되는데,
+                                // 아이콘은 오늘 row에서만 (이중 노출 방지 + 액션 위치 일관성).
+                                // - 미완료/미포기: (x) 포기 버튼 (interactive)
+                                // - 완료: checkmark.circle (display only, 시각적 균형)
+                                // - 포기: nosign (display only, 시각적 균형)
+                                // 색상은 모두 goalAccentColor (item.iconColorHex) — 정체성 통일.
+                                if isActionableDisplayedDate {
+                                    trailingStatusIcon(completed: completed, failed: failed)
+                                }
+                            }
+                        }
                     }
 
                     if !compactMode, let notes = item.notes, !notes.isEmpty {
@@ -71,20 +96,6 @@ struct NTDRow: View {
                         statusIcons
                     }
                 }
-
-                // 포기 버튼 — 취소 모드 + 미완료 미포기일 때만 노출.
-                // 평시엔 숨김 (사용자 의도: 우발 액션 방지, 모드 진입 후 명시적 조작).
-                if cancelMode && !completed && !failed {
-                    Button {
-                        showGiveUpSheet = true
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 1)
-                }
             }
             .contentShape(Rectangle())
         }
@@ -98,6 +109,63 @@ struct NTDRow: View {
         }
     }
 
+    // MARK: - scheduled label
+
+    /// 시작 전 capsule overlay 라벨 — "X시 시작" / "5:00 PM 시작" (시스템 12h/24h).
+    /// `todo.list.today_start_format` 키 재활용 (할일과 동일 패턴).
+    private var scheduledStartLabel: String {
+        let h = item.startHourInt
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("j")
+        var comps = DateComponents()
+        comps.hour = h
+        comps.minute = 0
+        let hourText = Calendar.current.date(from: comps).map(formatter.string(from:)) ?? "\(h)"
+        return String.localizedStringWithFormat(
+            NSLocalizedString("todo.list.today_start_format", comment: ""),
+            hourText
+        )
+    }
+
+    // MARK: - action eligibility
+
+    /// 이 row가 액션(포기 (x)) 받을 수 있는 displayedDate인지.
+    /// - displayedDate 미지정: occurrenceDate 사용 (단일 일자 occurrence)
+    /// - 지정: displayedDate가 오늘이어야 액션 가능 (multi-day는 오늘 row에서만)
+    private var isActionableDisplayedDate: Bool {
+        let day = displayedDate ?? occurrenceDate
+        return Calendar.gmt.isDate(day, inSameDayAs: .todayCalendarAnchor)
+    }
+
+    /// trailing status/action 아이콘 — 미완료(=interactive 포기 버튼), 완료/포기(=display only 아이콘).
+    /// 시각적 균형 위해 완료/포기 케이스에도 같은 사이즈 아이콘 노출.
+    @ViewBuilder
+    private func trailingStatusIcon(completed: Bool, failed: Bool) -> some View {
+        if completed {
+            Image(systemName: "checkmark.circle")
+                .font(.title3)
+                .foregroundStyle(goalAccentColor)
+                .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+        } else if failed {
+            Image(systemName: "nosign")
+                .font(.title3)
+                .foregroundStyle(goalAccentColor)
+                .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+        } else {
+            // 미완료/미포기 — 포기 액션 버튼.
+            Button {
+                showGiveUpSheet = true
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .font(.title3)
+                    .foregroundStyle(goalAccentColor)
+            }
+            .buttonStyle(.plain)
+            .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+        }
+    }
+
     // MARK: - streak
 
     private var streakValue: Int? {
@@ -106,8 +174,13 @@ struct NTDRow: View {
         return s > 0 ? s : nil
     }
 
-    /// 카테고리 색 — 제목 앞 세로 bar (ItemRow와 동일 규칙). 없으면 nil.
+    /// 제목 앞 세로 bar 색상. NTDRow는 목표 전용이므로 Item.iconColorHex 사용.
+    /// 카테고리 미사용 정책(목표는 카테고리 없음) — legacy 카테고리 데이터는 fallback으로 사용.
     private var categoryBarColor: Color? {
+        if let raw = item.iconColorHex,
+           let cc = CategoryColor(rawValue: raw) {
+            return cc.color
+        }
         guard let cat = item.category,
               let raw = cat.colorHex,
               let cc = CategoryColor(rawValue: raw)
@@ -203,35 +276,54 @@ struct NTDRow: View {
 
     // MARK: - trailing 영역 (progress capsule 또는 plain text)
 
-    /// title 옆 trailing 영역에 표시할 내용:
-    /// - 진행 중(.inProgress): progress capsule (fill bar + 카운트다운 글자 overlay)
-    /// - 시작 전/완료/포기: plain text (기존 trailingText 그대로)
+    /// title 옆 trailing 영역에 표시할 내용. 활동(activity) progress 패턴과 일관성:
+    /// - **시작 전(.scheduled)**: plain text ("X시간 후 시작") — 0% bar는 misleading해서 텍스트만
+    /// - **진행 중(.inProgress)**: progress capsule (fill 0~100% + 카운트다운 글자)
+    /// - **완료**: progress capsule (full bar + "목표 달성")
+    /// - **포기**: progress capsule (포기 시점까지의 진행률 + "포기")
+    ///   - 포기 시각은 활동 기록에서 확인 가능 — capsule에는 표시 안 함
     @ViewBuilder
     private func trailingDisplay(now: Date, completed: Bool, failed: Bool) -> some View {
-        if !completed, !failed,
-           let state = item.ntdState(on: occurrenceDate, now: now),
-           state == .inProgress {
-            progressCapsule(now: now)
+        let goalColor = goalAccentColor
+        if completed {
+            // 목표 달성 — full bar + "목표 달성" 텍스트.
+            progressCapsule(
+                progress: 1.0,
+                text: String(localized: "ntd.countdown.ended"),
+                goalColor: goalColor
+            )
+        } else if failed {
+            // 포기 — 포기 시점까지의 진행률 + "포기" 텍스트.
+            let giveUpInstant = item.ntdLastCompletionInstant(on: occurrenceDate) ?? now
+            progressCapsule(
+                progress: progressValue(at: giveUpInstant),
+                text: String(localized: "ntd.countdown.failed"),
+                goalColor: goalColor
+            )
+        } else if let state = item.ntdState(on: occurrenceDate, now: now), state == .inProgress {
+            // 진행 중 — 현재 시점 progress + 카운트다운.
+            progressCapsule(
+                progress: progressValue(at: now),
+                text: countdownText(now: now),
+                goalColor: goalColor
+            )
         } else {
-            Text(verbatim: trailingText(now: now, completed: completed, failed: failed))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .layoutPriority(1)
+            // 시작 전(.scheduled) — empty progress bar + "X시 시작" 텍스트 (통일성).
+            progressCapsule(
+                progress: 0,
+                text: scheduledStartLabel,
+                goalColor: goalColor
+            )
         }
     }
 
-    /// 진행 중 NTD의 progress capsule.
+    /// progress capsule renderer — (progress, text, color)를 받아 일관된 시각 출력.
     /// - 배경: systemGray5 capsule (고정폭)
-    /// - 채움: accent.opacity(0.35) capsule, leading부터 progress 비율
-    /// - 글자: 카운트다운(`남음`/`경과`) 중앙 overlay
-    /// progress 계산:
-    /// - duration 설정: elapsed / total
-    /// - duration 미설정: elapsed / 30일 cap (위젯 progressArc과 동일)
-    /// 최소 가시 폭 4pt — progress > 0이면 매우 낮아도 약간 보이게.
+    /// - 채움: goalColor.opacity(0.35), leading부터 progress 비율
+    /// - 글자: 중앙 overlay (라이트=goalColor, 다크=white)
+    /// - 최소 가시 폭 4pt — progress > 0이면 매우 낮아도 약간 보이게
     @ViewBuilder
-    private func progressCapsule(now: Date) -> some View {
-        let progress = trailingProgressValue(now: now)
-        let text = countdownText(now: now)
+    private func progressCapsule(progress: Double, text: String, goalColor: Color) -> some View {
         ZStack(alignment: .trailing) {
             Capsule()
                 .fill(Color(.systemGray5))
@@ -240,29 +332,39 @@ struct NTDRow: View {
                 let target = fullWidth * CGFloat(progress)
                 let fillWidth: CGFloat = progress > 0 ? max(4, target) : 0
                 Capsule()
-                    .fill(Color.accentColor.opacity(0.35))
+                    .fill(goalColor.opacity(0.35))
                     .frame(width: fillWidth)
             }
             .clipShape(Capsule())
             Text(verbatim: text)
-                // 라이트: accent semibold (black은 fill 따뜻한 톤과 부딪혀 어색)
-                // 다크: white(.primary) — fill 위에서 가장 또렷 (accent는 어두워 묻힘)
+                // 라이트: goalColor semibold (black은 fill 따뜻한 톤과 부딪혀 어색)
+                // 다크: white(.primary) — fill 위에서 가장 또렷 (goalColor는 어두워 묻힘)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(colorScheme == .dark ? Color.primary : Color.accentColor)
+                .foregroundStyle(colorScheme == .dark ? Color.primary : goalColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .padding(.trailing, 8)
         }
-        .frame(width: 140, height: 22)
+        .frame(width: 130, height: 22)
         .layoutPriority(1)
     }
 
-    /// trailing capsule용 progress 값 (0~1). 진행 중에만 호출 가정.
+    /// 목표 아이콘 색 (iconColorHex → Color). 미설정 시 accent fallback.
+    /// progress capsule 색 통일에 사용.
+    private var goalAccentColor: Color {
+        guard let raw = item.iconColorHex,
+              let cc = CategoryColor(rawValue: raw) else {
+            return Color.accentColor
+        }
+        return cc.color
+    }
+
+    /// trailing capsule용 progress 값 (0~1). 임의 instant 기준 — 진행 중(now)/포기(giveUpInstant) 둘 다 사용.
     /// - duration 있음: elapsed / total
     /// - duration 없음: elapsed / 30일 cap (위젯 progressArc과 동일 정책)
-    private func trailingProgressValue(now: Date) -> Double {
+    private func progressValue(at instant: Date) -> Double {
         guard let start = item.ntdStartInstant(on: occurrenceDate) else { return 0 }
-        let elapsed = now.timeIntervalSince(start)
+        let elapsed = instant.timeIntervalSince(start)
         if let end = item.ntdEndInstant(on: occurrenceDate) {
             let total = end.timeIntervalSince(start)
             guard total > 0 else { return 0 }
@@ -275,6 +377,9 @@ struct NTDRow: View {
     // MARK: - 상태 판정
 
     private func isCompleted(now: Date) -> Bool {
+        // 명시적 포기(record.failed / status.failed)면 시간 기반 fallback 무시 — 포기 상태 보존.
+        // 이전엔 .ended 시간 기반만 검사해 포기된 과거 NTD가 "목표 달성"으로 잘못 표시됐음.
+        if isFailed() { return false }
         if item.recurrenceRule != nil {
             if let record = item.routineRecord(on: occurrenceDate), record.done {
                 return true
@@ -282,6 +387,8 @@ struct NTDRow: View {
         } else if item.itemStatus == .done {
             return true
         }
+        // Fallback: 명시 record/status 없는데 시간 지남 → 자동 완료 간주.
+        // (completeFinishedNTDs가 일반적으로 record를 만들지만 transient 케이스 대비)
         return item.ntdState(on: occurrenceDate, now: now) == .ended
     }
 
@@ -299,11 +406,57 @@ struct NTDRow: View {
 
     @ViewBuilder
     private func leadingIcon(completed: Bool, failed: Bool) -> some View {
-        // 4-state 색·fill (ItemRow.ntdIconStyle과 동일 규칙):
-        //   진행 전(scheduled):  clock outline + secondary
-        //   진행 중(inProgress): clock outline + accent
-        //   완료(done/auto-ended): clock.fill + accent
-        //   포기(failed):         clock.fill + secondary
+        // 목표 (goalIcon + goalColor 지정됨)이면 사용자 지정 아이콘 + 4-state 색 패턴.
+        // legacy NTD (iconName 미설정)는 기존 clock 패턴 fallback.
+        if let icon = item.iconName.flatMap(GoalIcon.init(rawValue:)) {
+            goalLeadingIcon(icon: icon, completed: completed, failed: failed)
+        } else {
+            legacyClockIcon(completed: completed, failed: failed)
+        }
+    }
+
+    /// 목표 사용자 지정 아이콘 — 4-state 시각 (ItemRow.goalLeadingIcon과 동일 규칙).
+    /// scheduled = 회색 outline circle + 회색 icon.
+    /// 크기: 20×20 (Todo 체크박스 시각 균형). icon 11pt.
+    @ViewBuilder
+    private func goalLeadingIcon(icon: GoalIcon, completed: Bool, failed: Bool) -> some View {
+        let color = item.iconColorHex.flatMap { CategoryColor(rawValue: $0) }?.color ?? .secondary
+        let style: (background: Color, iconColor: Color, border: Color, borderWidth: CGFloat) = {
+            if completed {
+                return (color, .white, .clear, 0)
+            }
+            if failed {
+                return (Color(.systemGray3), .white, .clear, 0)
+            }
+            // pending — occurrence state 판정
+            let now = Date()
+            let state = item.ntdState(on: occurrenceDate, now: now) ?? .scheduled
+            switch state {
+            case .inProgress: return (.clear, color, color, 1)        // goalColor outline + icon
+            case .ended:      return (color, .white, .clear, 0)
+            case .scheduled:  return (.clear, .secondary, .secondary, 1)  // gray outline + icon
+            }
+        }()
+        ZStack {
+            Circle()
+                .fill(style.background)
+                .overlay(Circle().strokeBorder(style.border, lineWidth: style.borderWidth))
+                .frame(width: 20, height: 20)
+            Image(systemName: icon.symbolName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(style.iconColor)
+        }
+        // SF Symbol Image와 시각 baseline 매칭 — ItemRow.goalLeadingIcon과 동일 offset 보정.
+        .offset(y: -3)
+    }
+
+    /// legacy NTD(iconName 없음) — 기존 4-state clock 패턴:
+    ///   진행 전(scheduled):  clock outline + secondary
+    ///   진행 중(inProgress): clock outline + accent
+    ///   완료(done/auto-ended): clock.fill + accent
+    ///   포기(failed):         clock.fill + secondary
+    @ViewBuilder
+    private func legacyClockIcon(completed: Bool, failed: Bool) -> some View {
         let now = Date()
         let style: (String, Color) = {
             if failed    { return ("clock.fill", Color.secondary) }
@@ -420,6 +573,10 @@ struct NTDRow: View {
             item.itemStatus = .failed
             item.completedAt = now
             item.cancelAllNotifications()
+        } else {
+            // 반복 NTD: 그 occurrence만 알림 cancel (다음 occurrence는 유지).
+            // 이미 fire된 시작 알림은 영향 없음. 미래 종료 알림이 "성공"으로 fire되는 버그 방지.
+            item.cancelNotifications(forOccurrence: occurrenceDate)
         }
         ItemEvent.log(.failed, on: item, in: context, note: comment)
         // 완료/취소와 동일한 animation 정책 — row 제거·재배치를 부드럽게.

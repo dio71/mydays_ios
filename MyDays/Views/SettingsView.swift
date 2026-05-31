@@ -6,6 +6,10 @@ struct SettingsView: View {
     @State private var showWipeConfirm = false
     // 아이콘 export 결과 — 비어있지 않으면 ShareLink 노출.
     @State private var exportedIconURL: URL?
+    // 건강 앱 이동 안내 alert — 권한 확인 row 탭 시 path 안내.
+    @State private var showHealthAppPathAlert = false
+
+    @Environment(\.openURL) private var openURL
 
     // 사용자 테마 설정 — MyDaysApp의 @AppStorage와 같은 키 → 즉시 sync.
     // store: .appShared — App Group 공유. 위젯에서도 같은 값 읽음.
@@ -41,10 +45,46 @@ struct SettingsView: View {
                     CategoryListView()
                 }
             }
+            Section("settings.section.permission") {
+                // 앱 권한: 마이크 / 음성 인식 / 알림 등 — app-settings: deep link 노출.
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        openURL(url)
+                    }
+                } label: {
+                    HStack {
+                        Text("settings.permission.app")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                // 건강 앱 권한: HealthKit은 app-settings에 안 보임 → 건강 앱으로 직접 이동.
+                // 곧바로 이동하지 않고 path 안내 alert 거침 (건강 앱 안에서 MyDays까지 깊이 들어가야 함).
+                Button {
+                    showHealthAppPathAlert = true
+                } label: {
+                    HStack {
+                        Text("settings.permission.health")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
             Section("settings.section.activity") {
-                // RC 기반 활동 기록 — 카테고리 필터 + 검색.
-                NavigationLink("settings.activity_history") {
-                    ActivityHistoryView(item: nil)
+                // RC 기반 활동 기록 — 목표·할일 정체성 분리 (필터 차원 다름).
+                NavigationLink("settings.history.goal") {
+                    ActivityHistoryView(item: nil, scope: .goal)
+                }
+                NavigationLink("settings.history.todo") {
+                    ActivityHistoryView(item: nil, scope: .todo)
                 }
                 // ItemEvent 기반 lifecycle 로그 — 사용자 액션 / 시스템 자동 처리 기록.
                 NavigationLink("settings.activity_log") {
@@ -112,6 +152,20 @@ struct SettingsView: View {
             }
         } message: {
             Text(verbatim: "iCloud에 동기화된 데이터도 함께 삭제됩니다. 되돌릴 수 없습니다.")
+        }
+        // 건강 앱 경로 안내 — 건강 앱 안에서 MyDays 권한까지 직접 navigate해야 함 (deep link 불가).
+        .alert(
+            "permission.health.dialog.title",
+            isPresented: $showHealthAppPathAlert
+        ) {
+            Button("common.cancel", role: .cancel) {}
+            Button("permission.health.dialog.confirm") {
+                if let url = URL(string: "x-apple-health://") {
+                    openURL(url)
+                }
+            }
+        } message: {
+            Text("permission.health.dialog.message")
         }
     }
 

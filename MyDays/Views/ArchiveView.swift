@@ -12,7 +12,8 @@ struct ArchiveView: View {
     // ArchiveView는 isSomeday=true 항목만 보여주므로 사실상 referenceDate 영향 작지만,
     // 일관성을 위해 UTC anchor로 통일.
     @State private var referenceDate: Date = .todayCalendarAnchor
-    /// 카테고리 필터 — nil = 전체. 매 launch마다 초기화 (저장 X — 사용자 결정).
+    /// 카테고리 필터 — nil = 무관. 매 launch마다 초기화.
+    /// 보관함은 isSomeday=true 항목만 (목표는 일정 필수라 보관함에 못 들어옴) → 목표 유형 필터 없음.
     @State private var filterCategoryID: UUID?
     /// 카테고리 그룹핑 모드 — active section만. 완료는 그룹핑 무시.
     /// 앱 재실행 시 마지막 상태 복원.
@@ -39,14 +40,20 @@ struct ArchiveView: View {
     )
     private var categories: FetchedResults<Category>
 
+    /// 카테고리 필터만 (보관함은 목표 못 들어옴).
+    private func matchesFilter(_ item: Item) -> Bool {
+        if let id = filterCategoryID {
+            return item.category?.id == id
+        }
+        return true
+    }
+
     private var filteredItems: [Item] {
-        filterCategoryID.map { id in items.filter { $0.category?.id == id } }
-            ?? Array(items)
+        items.filter { matchesFilter($0) }
     }
 
     private var filteredCompletedItems: [Item] {
-        filterCategoryID.map { id in completedItems.filter { $0.category?.id == id } }
-            ?? Array(completedItems)
+        completedItems.filter { matchesFilter($0) }
     }
 
     /// 카테고리별 그룹 — 비어있는 카테고리 제외.
@@ -68,9 +75,16 @@ struct ArchiveView: View {
     }
 
     var body: some View {
+        let hasFilter = filterCategoryID != nil
         List {
-            // 그룹 모드 / 평소 모드(필터 활성 시 header) 분기.
-            if groupByCategory {
+            if hasFilter {
+                // 필터 활성 — 단일 섹션 (그 카테고리 항목만).
+                Section {
+                    activeContent
+                } header: {
+                    filterSectionHeader
+                }
+            } else if groupByCategory {
                 let groups = groupedActiveItems
                 let uncat = uncategorizedActiveItems
                 if groups.isEmpty && uncat.isEmpty {
@@ -92,13 +106,6 @@ struct ArchiveView: View {
                             }
                         }
                     }
-                }
-            } else if let id = filterCategoryID,
-                      let cat = categories.first(where: { $0.id == id }) {
-                Section {
-                    activeContent
-                } header: {
-                    categorySectionHeader(cat)
                 }
             } else {
                 Section {
@@ -166,8 +173,8 @@ struct ArchiveView: View {
         }
         .sheet(item: $sheet) { mode in
             switch mode {
-            case .new(let baseDate, let categoryID):
-                AddItemView(baseDate: baseDate, categoryID: categoryID)
+            case .new(let baseDate, let categoryID, let goalKind):
+                AddItemView(baseDate: baseDate, categoryID: categoryID, goalKind: goalKind)
             case .edit(let item):
                 AddItemView(editing: item)
             }
@@ -225,7 +232,16 @@ struct ArchiveView: View {
         }
     }
 
-    /// 카테고리 필터 Menu — ListView와 동일 패턴.
+    /// 필터 활성 시 섹션 헤더 — 카테고리 또는 목표 유형 표시.
+    @ViewBuilder
+    private var filterSectionHeader: some View {
+        if let id = filterCategoryID,
+           let cat = categories.first(where: { $0.id == id }) {
+            categorySectionHeader(cat)
+        }
+    }
+
+    /// 카테고리 필터 Menu — 보관함은 목표 미사용이라 카테고리만.
     @ViewBuilder
     private var categoryFilterMenu: some View {
         Menu {
@@ -241,7 +257,6 @@ struct ArchiveView: View {
             ForEach(categories, id: \.id) { cat in
                 Button {
                     filterCategoryID = cat.id
-                    // 특정 카테고리 필터 선택 시 그룹 모드 해제 (ListView와 동일).
                     groupByCategory = false
                 } label: {
                     if filterCategoryID == cat.id {

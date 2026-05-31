@@ -18,6 +18,7 @@ struct ItemRow: View {
     var compactMode: Bool = false
     @Environment(\.managedObjectContext) private var context
     @Environment(\.cancelMode) private var cancelMode
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showCompleteSheet = false
     @State private var showCancelSheet = false
     /// 체크 transient 상태 — 사용자가 체크 탭한 직후 0.5s 동안 true.
@@ -28,6 +29,7 @@ struct ItemRow: View {
     /// 체크리스트 inline expand 토글. row마다 독립 — 한 row 펼친다고 다른 row 자동 닫지 않음.
     /// 일자/탭 navigation 시 ItemRow 재생성으로 자동 reset.
     @State private var checklistExpanded: Bool = false
+    @State private var presentFocusSession: Bool = false
 
     /// 루틴 체크박스 동작 여부. 목록탭은 referenceDate 컨텍스트가 명확하지 않아 비활성.
     private var routineCheckable: Bool { mode != .list }
@@ -61,13 +63,21 @@ struct ItemRow: View {
                 performCancel(comment: comment)
             }
         }
+        .fullScreenCover(isPresented: $presentFocusSession) {
+            FocusSessionView(item: item, occurrenceDate: focusOccurrenceDate)
+        }
     }
 
     @ViewBuilder
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 12) {
+        // .firstTextBaseline — leadingControl 아이콘(title3 SF Symbol)이 title 텍스트(body)의 baseline에 정렬.
+        // .top 정렬은 icon line box top과 text line box top이 같아 cap height 차이로 icon이 위로 떠 보이는데,
+        // baseline 매칭이 시각적으로 가장 자연스러움.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             leadingControl
-                .padding(.top, 1)
+                // SF Symbol baseline이 text baseline과 미세히 어긋나 icon이 살짝 위로 보임 — 2pt 내려서 시각 중심 보정.
+                // d[.firstTextBaseline] - 2 → 내가 주장하는 baseline이 2pt 위 → HStack이 정렬 시 view를 2pt 아래로 밀어줌.
+                .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -119,18 +129,46 @@ struct ItemRow: View {
                 // 여기에 두면 row 내부 VStack이 expansion 높이를 흡수해 title이 중앙으로 떠 보임.
             }
 
+            // 습관 trailing 체크 버튼 — leading icon은 display only이라 사용자에게 명시적 체크 액션 제공.
+            // 정책 (습관은 "오늘/이전에 했나/안 했나" 관점):
+            //   - **오늘 + 과거 일자만 노출** — 미래 일자는 미리 완료 의미 없음 → hide
+            //   - 완료/미완료 무관하게 노출 — 미스 클릭 해제용 (checked square 보이면 체크 해제 가능)
+            //   - 과거 일자도 노출 — 까먹고 안 한 거 나중에 기록 가능
+            //   - 취소 모드일 땐 (x) 버튼 우선
+            // 습관 trailing 체크 — 오늘/보관함 모드만. 목록 탭에선 숨김 (NTD progress·활동 progress와 동일 정책 — D-day 중심 조망).
+            if isHabit && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
+                habitTrailingCheck
+            }
+
+            // 활동 trailing — progress text + quick [+N] 버튼.
+            // 정책: 오늘/보관함 모드만 노출. 목록 탭(.list)에선 숨김 — NTD가 목록 탭에서 progress 안 보이는 것과 동일.
+            //       (목록 탭은 D-day 중심 조망용 — progress 인터랙션은 오늘 탭에서만 수행)
+            // 미래 일자 / 시작 전 / 취소 모드 제외.
+            if isActivity && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
+                activityTrailingProgress
+            }
+
+            // 집중 trailing — progress capsule + ▶ 시작 버튼.
+            // 정책: 오늘 모드 + 오늘 일자만 (다른 일자 시작은 의미 없음 — 사용자가 원하는 시점에 시작).
+            // 진행 중인 active session이 있으면 ▶ disabled (전역 single-active).
+            if isFocus && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
+                focusTrailingProgress
+            }
+
             // 취소 모드 + 미완료/미취소 row에만 (x) 노출.
-            // NTD는 NTDRow가 자체 처리하므로 여기는 Todo(1회성/루틴) 한정.
-            if cancelMode && !isNTD && !isCompletedForDate && !isCancelled {
+            // NTD는 NTDRow가 자체 처리. 습관은 cancel 의미 없음 (단순 미체크가 곧 미수행) → 제외.
+            // 여기 (x)는 Todo(1회성/루틴) 한정 — 미래 일자도 허용 (미리 취소 가능).
+            if cancelMode && !isGoal && !isCompletedForDate && !isCancelled {
                 Button {
                     showCancelSheet = true
                 } label: {
                     Image(systemName: "xmark.circle")
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.red)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 1)
+                // leadingControl과 동일 — SF Symbol baseline 보정으로 살짝 내려 텍스트 시각 중심에 정렬.
+                .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
             }
         }
         .contentShape(Rectangle())
@@ -140,13 +178,262 @@ struct ItemRow: View {
 
     @ViewBuilder
     private var leadingControl: some View {
-        if isNTD {
+        // 목표(절제/활동/집중/습관) — 사용자 지정 goalIcon + goalColor 사용. 4-state 시각 유지.
+        // 모든 목표 type은 leading icon은 display only. 습관은 trailing square check 버튼으로 toggleDone.
+        // iconName 없는 legacy NTD는 기존 clock fallback.
+        if isGoal, item.iconName != nil {
+            goalLeadingIcon
+        } else if isNTD {
             ntdStatusIcon
         } else if isRoutine && !routineCheckable {
             routineStatusIcon
         } else {
             todoCheckbox
         }
+    }
+
+    /// 습관 trailing 체크 버튼 — square / checkmark.square.fill 토글.
+    /// 4-state(scheduled/inProgress/done/failed)는 goalLeadingIcon이 표현하고,
+    /// 여기 trailing 버튼은 명시적 "체크" 액션만 담당.
+    @ViewBuilder
+    private var habitTrailingCheck: some View {
+        let checked = isCompletedForDate
+        Button(action: toggleDone) {
+            Image(systemName: checked ? "checkmark.square.fill" : "square")
+                .font(.title3)
+                .foregroundStyle(checked ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        // leadingControl과 동일 baseline 보정.
+        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+    }
+
+    /// 습관 판정 — trailing 체크 버튼 노출 여부.
+    private var isHabit: Bool { item.itemKind == .habit }
+
+    /// 활동 판정 — trailing progress + [+N] 버튼 노출 여부.
+    private var isActivity: Bool { item.itemKind == .activity }
+    /// 집중 판정 — trailing progress + ▶ 버튼 노출 여부.
+    private var isFocus: Bool { item.itemKind == .focus }
+
+    /// activity occurrence date — 반복은 referenceDate, 1회성은 item.startDate 사용.
+    private var activityOccurrenceDate: Date {
+        if item.recurrenceRule != nil {
+            return occurrenceStartOverride ?? referenceDate
+        }
+        return item.startDate ?? referenceDate
+    }
+
+    /// 활동 progress capsule (NTDRow 패턴 재활용) + 우측 (+) 심볼 버튼 or HK auto badge.
+    /// progress fill 색·텍스트 색·(+) 색 모두 **goalColor 통일** (앱 tint 대신 항목 아이콘 색).
+    /// - manual: 탭 → valueRecorded += step (target 도달 시 자동 done).
+    /// - steps/distance (HK auto): (+) 버튼 대신 heart.fill badge (non-interactive).
+    ///   HK sync는 RootView .task + scenePhase.active 트리거.
+    @ViewBuilder
+    private var activityTrailingProgress: some View {
+        let target = item.activityTargetValueInt ?? 0
+        let current = item.activityCurrentValue(on: activityOccurrenceDate)
+        let step = Item.activityQuickStep(target: max(target, 1))
+        let progress: Double = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
+        let goalColor = goalAccentColor
+        let isAutoSource = item.activitySource != .manual
+        // 과거 일자(occurrence가 어제 이전)는 입력 불가 — 당일에만 추가 가능.
+        // progress bar는 계속 노출(그날 결과 확인) + trailing icon은 outline/secondary로 inactive 표시.
+        let isPastDate = activityOccurrenceDate < .todayCalendarAnchor
+        // spacing 2 + (+)/heart 크기를 NTD (x) (title3, ~20pt)에 맞춰 — 전체 trailing 폭이 NTD와 일치하도록.
+        // 이전엔 (+) title2 + heart frame 28로 더 넓어서 progress capsule이 왼쪽으로 더 튀어나옴.
+        HStack(spacing: 2) {
+            // Progress capsule — goalColor 기반.
+            ZStack(alignment: .trailing) {
+                Capsule()
+                    .fill(Color(.systemGray5))
+                GeometryReader { geo in
+                    let fullWidth = geo.size.width
+                    let targetWidth = fullWidth * CGFloat(progress)
+                    let fillWidth: CGFloat = progress > 0 ? max(4, targetWidth) : 0
+                    Capsule()
+                        .fill(goalColor.opacity(0.35))
+                        .frame(width: fillWidth)
+                }
+                .clipShape(Capsule())
+                Text(verbatim: "\(current)/\(target)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : goalColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .padding(.trailing, 8)
+            }
+            .frame(width: 130, height: 22)
+
+            // 과거 일자는 trailing 아이콘 완전 숨김 — progress bar만으로 그날 결과 표시.
+            // 입력 정책: 활동은 당일에만 가능. 과거는 결과 확인만.
+            if !isPastDate {
+                if isAutoSource {
+                    // HK auto source — heart.fill badge (non-interactive). Apple Health 시각 cue.
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(goalColor.opacity(0.85))
+                        .frame(width: 22, alignment: .center)
+                        .accessibilityLabel(Text("activity.source.auto.accessibility"))
+                } else {
+                    // Manual — (+) 심볼 버튼. plus.circle.fill + goalColor.
+                    // .title3 — NTD (x) 버튼과 같은 visual size로 alignment 일관성.
+                    Button {
+                        Item.incrementActivityValue(
+                            for: item,
+                            by: step,
+                            occurrenceDate: activityOccurrenceDate,
+                            in: context
+                        )
+                        saveContext()
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(goalColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .layoutPriority(1)
+        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+    }
+
+    // MARK: - 집중 trailing
+
+    /// 집중 occurrence date — 반복은 referenceDate, 1회성은 item.startDate. (활동과 동일 패턴)
+    private var focusOccurrenceDate: Date {
+        if item.recurrenceRule != nil {
+            return occurrenceStartOverride ?? referenceDate
+        }
+        return item.startDate ?? referenceDate
+    }
+
+    /// 집중 trailing — progress capsule (활동과 동일 시각) + ▶ 시작 버튼.
+    /// 진행 중 글로벌 active session이 이 item이면 ▶ 대신 stopwatch.fill 표시 (이미 modal에 있을 거지만).
+    /// past 일자는 progress만 (▶ 숨김).
+    @ViewBuilder
+    private var focusTrailingProgress: some View {
+        let target = item.activityTargetValueInt ?? 0
+        let current = Int(item.focusCurrentMinutes(on: focusOccurrenceDate))
+        let progress: Double = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
+        let goalColor = goalAccentColor
+        let isPastDate = focusOccurrenceDate < .todayCalendarAnchor
+        HStack(spacing: 2) {
+            // Progress capsule — activity와 동일 시각. 분 단위로 표시 ("45/60").
+            ZStack(alignment: .trailing) {
+                Capsule()
+                    .fill(Color(.systemGray5))
+                GeometryReader { geo in
+                    let fullWidth = geo.size.width
+                    let targetWidth = fullWidth * CGFloat(progress)
+                    let fillWidth: CGFloat = progress > 0 ? max(4, targetWidth) : 0
+                    Capsule()
+                        .fill(goalColor.opacity(0.35))
+                        .frame(width: fillWidth)
+                }
+                .clipShape(Capsule())
+                Text(verbatim: "\(current)/\(target)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : goalColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .padding(.trailing, 8)
+            }
+            .frame(width: 130, height: 22)
+
+            // ▶ 시작 버튼 — 오늘 일자에만. focusSessionPresentation 트리거.
+            if !isPastDate {
+                Button {
+                    presentFocusSession = true
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(goalColor)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .layoutPriority(1)
+        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+    }
+
+    /// 목표 아이콘 색 (iconColorHex → Color). 미설정 시 accent fallback.
+    /// 활동 progress · NTD progress 통일에 사용.
+    private var goalAccentColor: Color {
+        guard let raw = item.iconColorHex,
+              let cc = CategoryColor(rawValue: raw) else {
+            return Color.accentColor
+        }
+        return cc.color
+    }
+
+    /// 현재 view가 오늘 일자인지 — 미사용이지만 다른 케이스용 reserved.
+    private var isViewingToday: Bool { referenceDate == .todayCalendarAnchor }
+
+    /// 미래 일자 판정 — 습관 체크 버튼 노출 막기용 (미리 완료 의미 없음).
+    private var isFutureDate: Bool { referenceDate > .todayCalendarAnchor }
+
+    /// Item이 아직 시작 전인지 — startDate가 오늘보다 미래.
+    /// 목록 탭에서 referenceDate는 오늘이지만 항목 startDate가 미래인 케이스 처리:
+    /// 시작 안 한 습관/활동에 대한 trailing 체크/(+) 버튼을 막아 미리 완료 입력 방지.
+    private var isItemNotYetStarted: Bool {
+        guard let start = item.startDate else { return false }
+        return start > .todayCalendarAnchor
+    }
+
+    private var isGoal: Bool { item.itemKind.isGoal }
+
+    /// 목표 leading 아이콘 — Item.iconName + iconColorHex 기반. 4-state 색 패턴:
+    ///   - scheduled (pending + 시작 전): 회색 outline circle + 회색 icon
+    ///   - inProgress (pending + 진행 중): 투명 + goalColor icon
+    ///   - done: goalColor full 배경 + 흰색 icon
+    ///   - failed: 회색 full 배경 + 흰색 icon
+    /// 크기: 20×20 (Todo 체크박스 title3 circle과 시각 균형). icon 11pt.
+    @ViewBuilder
+    private var goalLeadingIcon: some View {
+        let icon = item.iconName.flatMap(GoalIcon.init(rawValue:))
+        let color = item.iconColorHex.flatMap { CategoryColor(rawValue: $0) }?.color ?? .secondary
+        let style = goalIconRenderStyle(color: color)
+        ZStack {
+            Circle()
+                .fill(style.background)
+                .overlay(Circle().strokeBorder(style.border, lineWidth: style.borderWidth))
+                .frame(width: 20, height: 20)
+            if let icon {
+                Image(systemName: icon.symbolName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(style.iconColor)
+            }
+        }
+        // SF Symbol Image와 시각 baseline 매칭 — ZStack은 default firstTextBaseline이 frame 하단(20pt)이라
+        // text baseline 정렬 시 시각적으로 아래로 떠 보임. @ViewBuilder + 외곽 alignmentGuide 체인 때문에
+        // 내부 alignmentGuide 효과가 약함 → offset으로 visual 보정 (layout box는 유지).
+        .offset(y: -3)
+    }
+
+    private struct GoalIconRenderStyle {
+        let background: Color
+        let iconColor: Color
+        let border: Color
+        let borderWidth: CGFloat
+    }
+
+    /// 목표 아이콘의 4-state 시각 스타일.
+    /// isCompletedForDate / isCancelled / isInProgress 기존 abstraction 재활용 — 1회성·반복 양쪽 호환.
+    private func goalIconRenderStyle(color: Color) -> GoalIconRenderStyle {
+        if isCompletedForDate {
+            return GoalIconRenderStyle(background: color, iconColor: .white, border: .clear, borderWidth: 0)
+        }
+        if isCancelled {
+            return GoalIconRenderStyle(background: Color(.systemGray3), iconColor: .white, border: .clear, borderWidth: 0)
+        }
+        if isInProgress {
+            // 진행 중 — goalColor outline circle + goalColor icon. scheduled와 같은 outline 패턴, 색만 다름.
+            return GoalIconRenderStyle(background: .clear, iconColor: color, border: color, borderWidth: 1)
+        }
+        // scheduled — 회색 outline circle + 회색 icon.
+        return GoalIconRenderStyle(background: .clear, iconColor: .secondary, border: .secondary, borderWidth: 1)
     }
 
     /// Todo/routine 일반 체크박스 아이콘:
@@ -288,6 +575,10 @@ struct ItemRow: View {
             pendingCompletion = false
             ItemEvent.log(.uncompleted, on: item, in: context)
             saveContext()
+            // 미리 체크해서 cancel됐던 알림 재등록 — 사용자가 마음 바꿔 uncheck하면 해당 occurrence
+            // (또는 다음 future occurrence들)에 대해 시작/종료 알림 다시 fire되어야 함.
+            // syncNotifications가 prefix 일괄 cancel + future occurrence 일괄 register라 안전.
+            item.syncNotifications()
             return
         }
 
@@ -333,6 +624,12 @@ struct ItemRow: View {
             if !isRoutine {
                 item.itemStatus = .done
                 item.completedAt = now
+                // 1회성: 모든 미래 알림 취소.
+                item.cancelAllNotifications()
+            } else {
+                // 반복: 그 occurrence의 알림만 취소 (다음 occurrence 알림 유지).
+                // 미리 체크 시 시작/종료 알림이 그대로 fire되는 버그 방지.
+                item.cancelNotifications(forOccurrence: day)
             }
             item.updatedAt = now
             ItemEvent.log(.completed, on: item, in: context, note: comment)
@@ -389,8 +686,17 @@ struct ItemRow: View {
         }
     }
 
-    /// 카테고리 색 — 제목 앞 세로 bar 색상. 카테고리 없거나 colorHex 미매칭 시 nil(bar 안 보임).
+    /// 제목 앞 세로 bar 색상.
+    /// - Todo: 카테고리 color
+    /// - 목표(절제/활동): Item.iconColorHex (사용자 지정 color)
+    /// 매칭 안 되면 nil (bar 안 보임).
     private var categoryBarColor: Color? {
+        if item.itemKind.isGoal {
+            guard let raw = item.iconColorHex,
+                  let cc = CategoryColor(rawValue: raw)
+            else { return nil }
+            return cc.color
+        }
         guard let cat = item.category,
               let raw = cat.colorHex,
               let cc = CategoryColor(rawValue: raw)
@@ -415,18 +721,19 @@ struct ItemRow: View {
         return false
     }
 
-    /// 순서: 체크리스트 칩 / 깃발 / streak / 알림 / 반복 / NTD 목표 시간.
+    /// 순서: 깃발 / 체크리스트 칩 / streak / 알림 / 반복 / NTD 목표 시간.
     /// today·list 모드 공통 — 항목의 메타 정보를 일관되게 노출.
+    /// 깃발이 제일 앞 — 우선순위가 가장 중요한 식별 정보.
     @ViewBuilder
     private var statusIcons: some View {
         HStack(spacing: 8) {
-            if hasChecklistDisplay {
-                checklistChip
-            }
             if item.itemPriority != .none {
                 Image(systemName: "flag.fill")
                     .font(.caption)
                     .foregroundStyle(flagColor(for: item.itemPriority))
+            }
+            if hasChecklistDisplay {
+                checklistChip
             }
             if let streak = streakValue {
                 HStack(spacing: 2) {
@@ -513,7 +820,9 @@ struct ItemRow: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Capsule().fill(Color(.systemGray6)))
+            // secondarySystemFill — light/dark 양쪽에서 List 배경과 명확히 구분되는 semantic fill.
+            // systemGray6은 다크모드에서 grouped List 배경과 비슷한 톤이라 chip이 묻혀 보임.
+            .background(Capsule().fill(Color(.secondarySystemFill)))
         }
         .buttonStyle(.plain)
         // chip이 외부 ambient animation(List row resize 등) 영향을 받지 않도록 면제.
@@ -580,7 +889,7 @@ struct ItemRow: View {
     private func flagColor(for priority: Priority) -> Color {
         switch priority {
         case .high:   return .red
-        case .medium: return .orange
+        case .medium: return .yellow
         case .low:    return .blue
         case .none:   return .secondary
         }
@@ -661,6 +970,13 @@ struct ItemRow: View {
         guard let occurrenceDate = item.ntdRelevantOccurrenceDate(at: now),
               let state = item.ntdState(on: occurrenceDate, now: now) else {
             return nil
+        }
+        // 목록 탭 + 미래 일자 occurrence → Todo와 동일하게 D-N 형식.
+        // ("1일 21시간 후 시작" 같은 실시간 카운트다운은 목록 탭에선 부적합 — D-day 중심 조망용)
+        // 오늘 occurrence는 그대로 countdown(시작/종료 시간) 유지 — 활성 정보가 가치 있음.
+        if mode == .list, occurrenceDate > .todayCalendarAnchor {
+            let days = Calendar.gmt.dateComponents([.day], from: .todayCalendarAnchor, to: occurrenceDate).day ?? 0
+            return formatDDay(days)
         }
         switch state {
         case .scheduled:
@@ -765,25 +1081,37 @@ struct ItemRow: View {
         // **view가 real today일 때만 적용** — 다른 날짜 페이지에서는 today-mode d-day 규칙으로 떨어져야
         // "view=5/27인데 5/26 시작 일정이 '9시 시작'으로 보이는" 혼동 회피.
         // list mode는 referenceDate가 항상 today라 isViewToday=true → 영향 없음.
+        //
+        // hasExplicitTime = startH > 0 || dueH < 24. 분기 결정 시 명시된 쪽 우선:
+        // - hasEnd(dueH<24): "X시 종료" 가능
+        // - hasStart(startH>0): "X시 시작" 가능
+        // - start만 (dueH=24): 시작 전 → "X시 시작", 진행 중 → "오늘 종료" (start-only 종일)
+        let hasEnd = dueH < 24
+        let hasStart = startH > 0
         if hasExplicitTime && (!isTodayMode || isViewToday) {
             if isStartToday && isDueToday {
-                // 시작=종료=오늘. 단일시간(s==e)이거나 시작 전 → "s시 시작". 시작 후 → "e시 종료".
-                // 단일시간 + 오늘탭에서 오늘 페이지: "s시" (시작 prefix 생략 — view 자체가 "오늘"을 제공).
-                if startH == dueH {
+                // 시작=종료=오늘. 단일시간(s==e, 둘 다 명시)이거나 시작 전 → "s시 시작". 시작 후 → "e시 종료".
+                if hasEnd && hasStart && startH == dueH {
                     if isTodayMode && isViewToday {
                         return hourLabel(forHour: startH)
                     }
                     return startTimeLabel(startH)
                 }
-                if let inst = startInst, now < inst {
+                // 시작 전 — start가 명시됐고 아직 안 옴.
+                if hasStart, let inst = startInst, now < inst {
                     return startTimeLabel(startH)
                 }
+                // 시작 후. 종료 시각 있으면 "X시 종료".
+                if hasEnd {
+                    return endTimeLabel(dueH)
+                }
+                // start만 + 진행 중 → "오늘 종료" (start-only 종일 패턴).
+                return String(localized: "todo.list.ends_today")
+            }
+            if isDueToday && hasEnd {
                 return endTimeLabel(dueH)
             }
-            if isDueToday {
-                return endTimeLabel(dueH)
-            }
-            if isStartToday {
+            if isStartToday && hasStart {
                 return startTimeLabel(startH)
             }
             // 그 외 — d-day fall through
@@ -817,8 +1145,10 @@ struct ItemRow: View {
             let days = Calendar.gmt.dateComponents([.day], from: realTodayDay, to: startDay).day ?? 0
             return formatDDay(days)
         }
-        if !hasExplicitTime && isDueToday {
-            // 단일 일자(start==due==today) + 시간 미설정 → "오늘". 기간(start<today, due=today)이면 "오늘 종료".
+        // 종료 시각 없음(hasEnd=false) + 오늘이 종료일 → "오늘"/"오늘 종료" 라벨.
+        // hasExplicitTime이 start-only로 true여도 (dueH=24) 이 분기로 옴 — 시각 라벨 분기는 위에서
+        // 처리됐고, 여기 떨어진 건 isStartToday/isDueToday 케이스 아닌 fall-through 케이스.
+        if !hasEnd && isDueToday {
             if isSameDay {
                 return String(localized: "todo.list.today")
             }

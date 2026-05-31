@@ -2,7 +2,7 @@ import CoreData
 import Foundation
 
 enum ItemSheetMode: Identifiable {
-    case new(baseDate: Date?, categoryID: UUID? = nil)
+    case new(baseDate: Date?, categoryID: UUID? = nil, goalKind: ItemKind? = nil)
     case edit(Item)
 
     var id: String {

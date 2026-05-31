@@ -10,6 +10,8 @@ struct AddItemView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
+    /// 활동 목표 수치 TextField focus — quick add chip 탭 시 dismiss용.
+    @FocusState private var activityTargetFocused: Bool
 
     @State private var title: String
     @State private var notes: String
@@ -32,6 +34,14 @@ struct AddItemView: View {
     @State private var recurrenceEndDate: Date?
     // NTD 전용. ntdDurationHour=nil = 미설정 = "한계까지" (반복 의미 X).
     @State private var ntdDurationHour: Int?
+    /// 활동 전용 — 목표 수치 (정수). 입력 폼에선 TextField 바인딩.
+    /// 0 = 미설정 (canSave에서 검증).
+    @State private var activityTarget: Int = 0
+    /// 활동 측정 source — manual / steps / distance / calories / flights. 신규는 manual default.
+    /// HealthKit 권한 요청은 저장 시점 (attemptSave) — picker 선택할 때마다 prompt 뜨지 않게.
+    @State private var activitySource: ActivitySourceType = .manual
+    /// 건강 앱 이동 alert — auto source hint의 link 탭 시 안내 dialog 표시.
+    @State private var showHealthAppPathAlert: Bool = false
     // legacy: 시간대 chip은 UI에서 제거됨. Core Data 호환 위해 state는 유지 (save 시 .none 고정).
     @State private var startTimeOfDay: TimeOfDay = .none
     @State private var dueTimeOfDay: TimeOfDay = .none
@@ -69,6 +79,10 @@ struct AddItemView: View {
     @State private var selectedCategoryID: UUID?
     /// 카테고리 picker sheet 노출 여부.
     @State private var showCategoryPicker: Bool = false
+    /// 목표(절제/활동) 전용 — 사용자 지정 아이콘. nil=미선택(저장 불가).
+    @State private var goalIcon: GoalIcon?
+    /// 목표 전용 — 사용자 지정 색. nil=미선택(저장 불가).
+    @State private var goalColor: CategoryColor?
     /// 체크리스트 draft 배열 — 저장 시 reconcile.
     /// active(soft-deleted 아닌) ChecklistItem만 form에 노출. 사용자가 minus 누르면 array에서 제거 →
     /// save 시 매칭 existing은 soft-delete(deletedAt 마킹). 새 draft는 새 ChecklistItem 생성.
@@ -77,6 +91,10 @@ struct AddItemView: View {
     @State private var notificationAuthStatus: UNAuthorizationStatus = .authorized
     /// 저장 시 알림 있는데 권한 거부 상태면 확인 dialog.
     @State private var showPermissionSaveAlert: Bool = false
+    /// 저장 시 누락 항목 안내 alert. canSave=false일 때 사용자가 저장 시도하면 뭘 채워야 하는지 안내.
+    @State private var showMissingFieldsAlert: Bool = false
+    /// 목표 저장 시 반복 미설정 confirmation alert — 사용자가 의도적으로 1회성인지 확인.
+    @State private var showOneOffGoalAlert: Bool = false
     @Environment(\.scenePhase) private var addItemScenePhase
     @Environment(\.openURL) private var openURL
     /// 새로 추가한 draft 자동 focus.
@@ -95,7 +113,7 @@ struct AddItemView: View {
     )
     private var categories: FetchedResults<Category>
 
-    init(editing: Item? = nil, baseDate: Date? = nil, categoryID: UUID? = nil) {
+    init(editing: Item? = nil, baseDate: Date? = nil, categoryID: UUID? = nil, goalKind: ItemKind? = nil) {
         self.editingItem = editing
         // 모든 startDate/dueDate state는 UTC anchor Date로 통일.
         // 새 항목의 default 또는 nil fallback도 todayCalendarAnchor 사용.
@@ -130,6 +148,8 @@ struct AddItemView: View {
             }
             _recurrenceEndDate = State(initialValue: item.recurrenceEndDate)
             _ntdDurationHour = State(initialValue: item.ntdDurationHourInt)
+            _activityTarget = State(initialValue: item.activityTargetValueInt ?? 0)
+            _activitySource = State(initialValue: item.activitySource)
             // 기존 Reminder 레코드에서 알림 offset 복원 (anchor별 1개 가정).
             let reminders = (item.reminders as? Set<Reminder>) ?? []
             let startReminder = reminders.first { ReminderAnchor(rawValue: $0.anchor) == .start }
@@ -151,6 +171,9 @@ struct AddItemView: View {
                 _recurrenceConfig = State(initialValue: nil)
             }
             _selectedCategoryID = State(initialValue: item.category?.id)
+            // 목표 아이콘·색 — 기존 값 있으면 복원, 없으면 nil.
+            _goalIcon = State(initialValue: GoalIcon.from(item.iconName))
+            _goalColor = State(initialValue: item.iconColorHex.flatMap { CategoryColor(rawValue: $0) })
             // 체크리스트 — active만 load, sortOrder asc.
             let allChecklist = (item.checklistItems as? Set<ChecklistItem>) ?? []
             let activeChecklist = allChecklist
@@ -162,7 +185,9 @@ struct AddItemView: View {
         } else {
             _title = State(initialValue: "")
             _notes = State(initialValue: "")
-            _kind = State(initialValue: .todo)
+            // goalKind preset 있으면 그 type으로 시작 (필터 활성 시 (+) 탭 케이스).
+            // 추가적인 kind별 default(시작시간/duration 등)는 .task에서 handleKindChange로 적용.
+            _kind = State(initialValue: goalKind ?? .todo)
             if let base = baseDate {
                 // baseDate는 호출자(TodayView)가 UTC anchor로 넘김.
                 _hasStart = State(initialValue: true)
@@ -183,6 +208,8 @@ struct AddItemView: View {
             _dueHour = State(initialValue: 24)
             _recurrenceEndDate = State(initialValue: nil)
             _ntdDurationHour = State(initialValue: nil)  // 미설정 = 한계까지
+            _activityTarget = State(initialValue: 0)     // 신규 활동: 사용자 명시 입력 필요
+            _activitySource = State(initialValue: .manual)  // 신규는 수동 default
             // 새 항목 알림 default:
             //  - NTD: 시작/종료 모두 정시(0) ON
             //  - Todo: OFF (사용자 명시 ON)
@@ -193,6 +220,12 @@ struct AddItemView: View {
             _recurrenceConfig = State(initialValue: nil)
             // 카테고리 — 호출자가 명시한 categoryID 우선 (필터 적용 상태에서 신규 추가 등).
             _selectedCategoryID = State(initialValue: categoryID)
+            // 목표 아이콘·색.
+            // - 아이콘: 미선택 (저장 시 검증 — 사용자가 명시 선택해야 함).
+            // - 색: 신규는 랜덤 preset (아이콘 grid의 background가 색에 의존하므로 색 미설정 상태에서
+            //   아이콘 미리보기가 회색이 되어 시각 약함 → 색은 자동 선택, 사용자가 원하면 변경).
+            _goalIcon = State(initialValue: nil)
+            _goalColor = State(initialValue: CategoryColor.allCases.randomElement())
             // 체크리스트 — 신규는 빈 배열로 시작.
             _checklistDrafts = State(initialValue: [])
         }
@@ -213,9 +246,107 @@ struct AddItemView: View {
 
     private var isEditing: Bool { editingItem != nil }
     private var isNTD: Bool { kind == .notTodo }
+    /// 목표(절제/활동/집중/습관) 그룹 판정 — 같은 섹션·같은 입력 UI 사용.
+    private var isGoal: Bool { kind.isGoal }
+    private var isActivity: Bool { kind == .activity }
+    /// 습관 판정 — 시각 UI(기간/시간설정) 숨김용.
+    private var isHabit: Bool { kind == .habit }
+    /// 집중 판정 — target 분 입력 + 알림 숨김 + source picker 숨김.
+    private var isFocus: Bool { kind == .focus }
 
+    /// 입력폼 top-level 종류 — 할일 vs 목표. 데이터 모델 ItemKind는 평면 3-way지만 UI에선 2-level로 표현.
+    enum TopLevelKind: Hashable {
+        case todo, goal
+    }
+
+    /// Top picker(할일/목표) binding. 토글 시 kind state도 변경 + handleKindChange 호출.
+    private var topLevelKindBinding: Binding<TopLevelKind> {
+        Binding(
+            get: { isGoal ? .goal : .todo },
+            set: { newTop in
+                switch newTop {
+                case .todo:
+                    let newKind = ItemKind.todo
+                    kind = newKind
+                    handleKindChange(newKind)
+                case .goal:
+                    // 목표 첫 진입 default = 절제. 이전에 활동 선택 후 todo→목표 토글이면 절제로 reset.
+                    let newKind = ItemKind.notTodo
+                    kind = newKind
+                    handleKindChange(newKind)
+                }
+            }
+        )
+    }
+
+    /// 저장 가능 여부 — 제목 필수. 목표는 추가로 아이콘·색상 필수.
     private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if isGoal {
+            guard goalIcon != nil, goalColor != nil else { return false }
+        }
+        // 활동/집중은 추가로 목표 수치(>0) 필수.
+        if (isActivity || isFocus), activityTarget <= 0 { return false }
+        return true
+    }
+
+    /// 저장 버튼 탭 핸들러 — 검증 alerts 순차 처리.
+    /// 1. canSave=false → 누락 필드 안내
+    /// 2. 목표 + 반복 미설정 (신규 항목만) → 1회성 confirmation
+    /// 3. 활동 + auto source → HealthKit 권한 요청 (이미 결정된 경우 즉시 반환)
+    /// 4. 알림 권한 거부 → permission warning
+    /// 5. 정상 → save()
+    private func attemptSave() {
+        if !canSave {
+            showMissingFieldsAlert = true
+            return
+        }
+        // 신규 목표 + 반복 미설정 → 1회성 confirmation. 편집 모드는 skip (사용자 의도 존중).
+        if !isEditing, isGoal, recurrenceConfig == nil {
+            showOneOffGoalAlert = true
+            return
+        }
+        // HK auto source → 권한 요청 후 저장 흐름 이어감. 이미 결정된 경우 prompt 없이 즉시 반환.
+        // 거부돼도 저장은 진행 — 다음 sync 시 fetch nil로 단순히 자동 갱신 안 됨.
+        if isActivity, activitySource != .manual {
+            Task {
+                _ = await HealthKitService.shared.requestAuthorization(for: activitySource)
+                await MainActor.run { continueSaveFlow() }
+            }
+            return
+        }
+        continueSaveFlow()
+    }
+
+    /// HK 권한 요청 이후 / 비-활동 항목의 저장 흐름. 알림 권한 거부 분기 + save().
+    private func continueSaveFlow() {
+        if hasAlertConfigured && notificationAuthStatus == .denied {
+            showPermissionSaveAlert = true
+        } else {
+            save()
+        }
+    }
+
+    /// canSave=false 시 alert에 표시할 누락 항목 안내 문구.
+    /// 누락된 필드만 bullet으로 나열.
+    private var missingFieldsMessage: String {
+        var lines: [String] = []
+        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("- " + String(localized: "add.field.title"))
+        }
+        if isGoal {
+            if goalIcon == nil {
+                lines.append("- " + String(localized: "add.section.goal_icon"))
+            }
+            if goalColor == nil {
+                lines.append("- " + String(localized: "add.section.goal_color"))
+            }
+        }
+        if (isActivity || isFocus), activityTarget <= 0 {
+            lines.append("- " + String(localized: isFocus ? "add.field.focus_target" : "add.field.activity_target"))
+        }
+        let header = String(localized: "alert.missing_fields.body")
+        return header + "\n" + lines.joined(separator: "\n")
     }
 
     /// 반복 설정은 일정(시작일)이 있을 때만 의미 있음 — 미정(hasStart=false)이면 anchor가 없어 반복 정의 불가.
@@ -412,11 +543,13 @@ struct AddItemView: View {
 
     /// 활동 기록 row — 날짜 + (시간) + 상태 라벨 + 코멘트(있을 때, 포기엔 "사유: " prefix).
     /// 날짜·시간은 모두 RoutineCompletion.completedAt 기준 (= 사용자가 체크/포기한 실제 시점).
-    /// RC.date는 occurrence 식별 용도라 표시에는 안 씀 — 미래 occurrence 미리 체크해도
-    /// 표시는 체크한 그 시점으로 나타남.
+    /// 활동 type이면 상태 자리에 누적값/목표 ("75/100") 표시.
     @ViewBuilder
     private func activityRow(_ record: RoutineCompletion) -> some View {
         let isDone = record.done
+        let isActivity = record.item?.itemKind == .activity
+        let valueRecorded = Int(record.valueRecorded?.doubleValue ?? 0)
+        let target = record.item?.activityTargetValueInt ?? 0
         // 표시 날짜는 completedAt 기준. 누락된 legacy record는 record.date로 fallback.
         let displayDay: Date? = record.completedAt?.calendarDateAnchor ?? record.date
         HStack(spacing: 8) {
@@ -428,7 +561,12 @@ struct AddItemView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            if isDone {
+            // 활동: 누적값/목표. 그 외: 상태 라벨.
+            if isActivity, target > 0 {
+                Text(verbatim: "\(valueRecorded)/\(target)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(isDone ? Color.accentColor : .secondary)
+            } else if isDone {
                 Text("activity.status.done")
                     .font(.subheadline)
                     .foregroundStyle(Color.accentColor)
@@ -515,9 +653,16 @@ struct AddItemView: View {
         if item.recurrenceEndDate != recurrenceEndDate { return true }
         // 카테고리.
         if item.category?.id != selectedCategoryID { return true }
+        // 목표 아이콘/색.
+        if item.iconName != goalIcon?.rawValue { return true }
+        if item.iconColorHex != goalColor?.rawValue { return true }
         // NTD 목표 시간.
         if kind == .notTodo {
             if item.ntdDurationHourInt != ntdDurationHour { return true }
+        }
+        // 활동 목표 수치.
+        if kind == .activity {
+            if (item.activityTargetValueInt ?? 0) != activityTarget { return true }
         }
         // 반복 규칙 비교.
         let hadRule = (item.recurrenceRule != nil)
@@ -562,7 +707,35 @@ struct AddItemView: View {
 
     var body: some View {
         NavigationStack {
+            // .appTint()을 NavigationStack 안쪽에도 적용 — iOS 26에서 sheet root의 tint가
+            // 일정 idle 후 환경에서 사라지는 케이스 방어 (사용자 보고: ~1분 후 form 전체 tint 풀림).
+            // 외부에도 .appTint()가 한 번 더 있음 (belt-and-suspenders).
             Form {
+                // 편집 모드 — 목표 유형 식별 배지 (kind picker 숨김 보완).
+                // 신규에서는 goalTypeRow chip + 설명으로 type 표시, 편집에서는 type 변경 불가니까
+                // 어떤 유형의 목표인지 시각적으로 확인할 수 있도록 chip과 동일 크기·스타일의 filled circle을 가운데 표시.
+                // 섹션 카드 배경은 숨김 — Form 위에 떠 있는 듯한 시각. 제목 섹션 위(form 최상단)에 배치.
+                if isGoal, isEditing {
+                    Section {
+                        HStack {
+                            Spacer()
+                            ZStack {
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 64, height: 64)
+                                Image(systemName: kind.goalTypeSymbolName)
+                                    .font(.title.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            Spacer()
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
+                        .listRowSeparator(.hidden)
+                    }
+                    .listSectionSpacing(.compact)
+                }
+
                 Section {
                     TextField("add.field.title", text: $title)
                         .focused($titleFocused)
@@ -570,33 +743,133 @@ struct AddItemView: View {
                         .lineLimit(2...5)
                 }
 
-                // 종류 picker. 편집 시엔 숨김 (Todo↔NTD 변환은 의미 shift 위험).
+                // 종류 picker. 편집 시엔 숨김 (kind 변환은 의미 shift 위험).
+                // Top-level: 할일/목표 segmented.
                 if !isEditing {
                     Section {
-                        Picker(selection: $kind) {
-                            Text(ItemKind.todo.displayName).tag(ItemKind.todo)
-                            Text(ItemKind.notTodo.displayName).tag(ItemKind.notTodo)
+                        Picker(selection: topLevelKindBinding) {
+                            Text("kind.top.todo").tag(TopLevelKind.todo)
+                            Text("kind.top.goal").tag(TopLevelKind.goal)
                         } label: {
                             Text("add.section.kind")
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: kind) { _, newKind in
-                            handleKindChange(newKind)
+                    }
+
+                    // 목표 선택 시 — 별도 "목표 유형" section에 4 chip 가로 + 선택한 유형 설명.
+                    if isGoal {
+                        Section("add.section.goal_type") {
+                            goalTypeRow
                         }
                     }
                 }
 
+                // 목표(절제/활동): 색·아이콘 통합 섹션. 아이콘 grid 위, 색상 chip 아래.
+                // Todo: 카테고리 + 우선순위 (기존 그대로).
+                if isGoal {
+                    Section("add.section.goal_icon") {
+                        goalIconGrid
+                        // 색상 row — 같은 섹션 내 아래에 배치. 아이콘 grid의 background는 이 색을 사용.
+                        goalColorGrid
+                    }
+                } else {
+                    // 카테고리 — Todo 한정. 등록된 카테고리가 없으면 section 자체 숨김 (진입 장벽 0).
+                    if !categories.isEmpty {
+                        Section("add.section.category") {
+                            categoryPickerRow
+                        }
+                    }
+                    // Todo 전용: 우선순위.
+                    Section("add.section.priority") {
+                        HStack(spacing: 12) {
+                            ForEach(Priority.pickerOrder, id: \.self) { p in
+                                priorityButton(p)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+
+                // 활동/집중 입력 section — target 수치 입력 공유. focus는 source picker 숨김.
+                if isActivity || isFocus {
+                    Section(isFocus ? "add.section.focus" : "add.section.activity") {
+                        // Source chip row + 안내 (activity 전용; focus는 자체 timer 시스템이라 source 불필요).
+                        if isActivity {
+                            // chip: 수동 / 걸음수 / 거리 / 칼로리 / 계단. 횡스크롤 X — HStack flow.
+                            // HealthKit 권한 요청은 저장 시점에 처리 (attemptSave) — 선택할 때마다 prompt 뜨지 않게.
+                            //
+                            // **편집 모드**: 현재 source만 display (변경 불가).
+                            // 이유: source 변경 시 기존 RC.valueRecorded의 의미가 달라짐
+                            // (예: 5000이 걸음수 → 거리(m) → 칼로리(kcal)로 의미가 shift).
+                            //
+                            // 안내:
+                            // - manual: 자동 측정 불가 항목 안내 (단순 hint) — 신규 작성 시에만 (편집은 변경 불가).
+                            // - auto: 권한 거부 시 건강 앱 link로 안내 (편집에서도 유효 — 권한 토글).
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 6) {
+                                    if isEditing {
+                                        sourceChip(activitySource, titleKey: activitySourceTitleKey(activitySource), locked: true)
+                                        Spacer()
+                                    } else {
+                                        sourceChip(.manual, titleKey: "activity_source.manual")
+                                        sourceChip(.steps, titleKey: "activity_source.steps")
+                                        sourceChip(.distance, titleKey: "activity_source.distance")
+                                        sourceChip(.calories, titleKey: "activity_source.calories")
+                                        sourceChip(.flights, titleKey: "activity_source.flights")
+                                    }
+                                }
+                                if activitySource == .manual {
+                                    if !isEditing {
+                                        manualSourceHint
+                                    }
+                                } else {
+                                    autoSourcePermissionHint
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        // Target value 필드 + quick add chip을 한 Form row(VStack)로 묶어 사이 분리선 제거.
+                        // 큰 수치 입력 부담 회피 — quick increment chip(+1/+10/+100/+1000/초기화).
+                        // focus는 label "목표 시간" + 단위 "분", activity는 label "목표 수치" + source별 단위.
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(isFocus ? "add.field.focus_target" : "add.field.activity_target")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                TextField("0", value: $activityTarget, format: .number)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(maxWidth: 100)
+                                    .focused($activityTargetFocused)
+                                // 단위 hint — focus는 항상 "분", activity는 source별.
+                                if let unit = activityUnitHint {
+                                    Text(verbatim: unit)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            activityQuickAddRow
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
+                // 일정 + 반복 통합 섹션 — 카테고리/색상 아래로 이동.
+                // 반복 row는 일정 anchor가 있을 때만(isRecurrenceSectionVisible) 노출.
                 Section("add.section.schedule") {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            // NTD는 발생 calendar date 필수 + 단일 시작일만 의미 있음.
-                            // → "미정" / "기간" chip은 NTD에선 숨김. NTD엔 시간설정도 항상 ON.
-                            if !isNTD {
+                            // NTD/습관/활동은 발생 calendar date 필수 + 단일 시작일만 의미 있음.
+                            // → "미정"/"기간"/"시간설정" chip 모두 숨김.
+                            if !isNTD && !isHabit && !isActivity && !isFocus {
                                 quickChip("add.chip.no_date", daysFromToday: nil)
                             }
                             quickChip("add.chip.today", daysFromToday: 0)
-                            quickChip("add.chip.tomorrow", daysFromToday: 1)
-                            if !isNTD {
+                            // 목표는 "Tomorrow", 할일은 "+1" — Todo는 D-day 중심이라 +1이 더 직관적,
+                            // 목표(절제/활동/집중/습관)는 1회성 의미가 강해 "내일"이 더 자연스러움.
+                            quickChip(isGoal ? "add.chip.tomorrow.goal" : "add.chip.tomorrow", daysFromToday: 1)
+                            if !isNTD && !isHabit && !isActivity && !isFocus {
                                 periodChip
                                 // 시간 설정 toggle은 hasStart일 때만 의미 있음 — 미정이면 시각 설정 불가하니
                                 // divider + chip 둘 다 숨김.
@@ -676,59 +949,23 @@ struct AddItemView: View {
                     // NTD 목표 시간 — 일정 section의 별도 row(고정). 탭하면 인라인 wheel 확장.
                     // 펼침 시 dateExpansion(.startTime 등)은 함께 접어 동시 펼침 방지.
                     if isNTD {
-                        Button {
-                            withAnimation {
-                                durationExpanded.toggle()
-                                if durationExpanded { dateExpansion = .none }
-                            }
-                        } label: {
-                            HStack {
-                                Text("add.field.duration")
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Text(verbatim: durationDisplayText)
-                                    .foregroundStyle(durationExpanded ? Color.accentColor : Color.secondary)
-                                Image(systemName: durationExpanded ? "chevron.down" : "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .contentShape(Rectangle())
+                        // 라벨 + chip 패턴 — 일정의 시간 선택 chip과 동일 UI (timeSubchip 패턴).
+                        HStack {
+                            Text("add.field.duration")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            durationChip
                         }
-                        .buttonStyle(.plain)
                         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         if durationExpanded {
                             inlineDurationEditor
                                 .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         }
                     }
-                }
 
-                // 카테고리 — NTD/Todo 공통. 등록된 카테고리가 없으면 section 자체 숨김 (진입 장벽 0).
-                if !categories.isEmpty {
-                    Section("add.section.category") {
-                        categoryPickerRow
-                    }
-                }
-
-                // Todo 전용: 우선순위.
-                if !isNTD {
-                    Section("add.section.priority") {
-                        HStack(spacing: 12) {
-                            ForEach(Priority.pickerOrder, id: \.self) { p in
-                                priorityButton(p)
-                            }
-                            Spacer()
-                        }
-                    }
-                }
-
-                // 알림 section — NTD는 항상(시작/종료), Todo는 dueDate 있을 때만 마감 알림.
-                alertSection
-
-                // 반복 section: Todo는 항상, NTD는 목표 시간이 있을 때만.
-                if isRecurrenceSectionVisible {
-                    Section("add.section.recurrence") {
-                        // 좌측 타이틀 + 우측 설정값 (다른 row와 일관된 layout).
+                    // 반복 row — 일정 anchor 있을 때만 (isRecurrenceSectionVisible).
+                    // Todo: 항상 / NTD: 목표 시간 있을 때만. 일정 섹션 내 같은 위치에 통합.
+                    if isRecurrenceSectionVisible {
                         Button {
                             showRecurrenceSheet = true
                         } label: {
@@ -745,9 +982,9 @@ struct AddItemView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
 
                         // 반복 종료일 row — 반복 패턴이 설정된 경우에만 노출.
-                        // 패턴 없이 종료일만 입력해도 의미 없으므로 숨김 → UI 단순화.
                         if recurrenceConfig != nil {
                             Button {
                                 toggleDateExpansion(.recurrenceEnd)
@@ -765,15 +1002,25 @@ struct AddItemView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                             if dateExpansion == .recurrenceEnd {
                                 inlineRecurrenceEndEditor
+                                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                             }
                         }
                     }
                 }
 
-                // 체크리스트 section — 모든 항목(신규/편집/Todo/NTD)에 노출.
-                checklistSection
+                // 알림 section — NTD는 항상(시작/종료), Todo는 dueDate 있을 때만 마감 알림.
+                // 집중은 시작 시각이 정해져 있지 않음(사용자가 원하는 시점) → 알림 의미 없음, 숨김.
+                if !isFocus {
+                    alertSection
+                }
+
+                // 체크리스트 section — Todo 전용. 목표(절제/활동)는 단일 의미라 체크리스트 비활성.
+                if !isGoal {
+                    checklistSection
+                }
 
                 if isEditing {
                     // 활동 기록 — 성공·포기 occurrence 일자별 표시 (Todo/NTD 공통).
@@ -793,7 +1040,8 @@ struct AddItemView: View {
                             Button("common.cancel", role: .cancel) {}
                             Button("common.delete", role: .destructive) { deleteItem() }
                         } message: {
-                            Text("add.delete_alert.message")
+                            // 할일 vs 목표 — 활동 기록 cascade 안내 + 호칭(을/를) 분기.
+                            Text(isGoal ? "add.delete_alert.message.goal" : "add.delete_alert.message.todo")
                         }
                     }
                 }
@@ -835,19 +1083,13 @@ struct AddItemView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     // 변경사항이 있을 때만 빨강 강조. 기본 상태는 시스템 toolbar 기본 색상(.primary).
+                    // canSave=false여도 disabled 안 함 — tap 시 어떤 항목이 누락됐는지 alert로 안내.
                     Button {
-                        // 알림 설정돼 있고 권한 거부 상태면 확인 dialog 띄움.
-                        // 그 외 일반 경로는 바로 저장.
-                        if hasAlertConfigured && notificationAuthStatus == .denied {
-                            showPermissionSaveAlert = true
-                        } else {
-                            save()
-                        }
+                        attemptSave()
                     } label: {
                         Text("common.save")
                             .foregroundStyle(hasChanges ? Color.red : Color.primary)
                     }
-                    .disabled(!canSave)
                     .alert(
                         "alert.permission.save_warning.title",
                         isPresented: $showPermissionSaveAlert
@@ -864,6 +1106,46 @@ struct AddItemView: View {
                     } message: {
                         Text("alert.permission.save_warning.body")
                     }
+                    .alert(
+                        "alert.missing_fields.title",
+                        isPresented: $showMissingFieldsAlert
+                    ) {
+                        Button("common.ok", role: .cancel) {}
+                    } message: {
+                        Text(verbatim: missingFieldsMessage)
+                    }
+                    .alert(
+                        "alert.goal_no_recurrence.title",
+                        isPresented: $showOneOffGoalAlert
+                    ) {
+                        Button("alert.goal_no_recurrence.set_recurrence") {
+                            showRecurrenceSheet = true
+                        }
+                        Button("alert.goal_no_recurrence.save_anyway") {
+                            // 권한 dialog 거쳐서 저장 진행.
+                            if hasAlertConfigured && notificationAuthStatus == .denied {
+                                showPermissionSaveAlert = true
+                            } else {
+                                save()
+                            }
+                        }
+                        Button("common.cancel", role: .cancel) {}
+                    } message: {
+                        Text("alert.goal_no_recurrence.body")
+                    }
+                    .alert(
+                        "permission.health.dialog.title",
+                        isPresented: $showHealthAppPathAlert
+                    ) {
+                        Button("common.cancel", role: .cancel) {}
+                        Button("permission.health.dialog.confirm") {
+                            if let url = URL(string: "x-apple-health://") {
+                                openURL(url)
+                            }
+                        }
+                    } message: {
+                        Text("permission.health.dialog.message")
+                    }
                 }
             }
             .task {
@@ -871,15 +1153,15 @@ struct AddItemView: View {
                 notificationAuthStatus = await NotificationService.shared.currentAuthorizationStatus()
 
                 guard !isEditing else { return }
-                // NTD 신규 진입 시 기본 카테고리 preselect (categoryID arg 없을 때만).
-                // selectedCategoryID 변경은 .onChange로 흘러가 알림 default 자동 적용.
-                if isNTD, selectedCategoryID == nil,
-                   let def = Category.defaultForNTD(in: context) {
-                    selectedCategoryID = def.id
+                // goalKind preset(필터 활성 시 (+) 탭)으로 시작했으면 kind별 defaults 적용.
+                // init에서 kind만 set하고 다른 state는 default(.todo 기준)라 명시 호출 필요.
+                if kind.isGoal {
+                    handleKindChange(kind)
                 }
-                // categoryID arg로 init 시점에 이미 set된 경우, init은 .onChange 트리거 X →
+                // 목표(절제/활동)는 카테고리 사용 안 함 — selectedCategoryID 무시.
+                // Todo: categoryID arg로 init 시점에 이미 set된 경우, init은 .onChange 트리거 X →
                 // 여기서 한 번 알림 default 수동 적용 (신규 항목 작성 시 1회).
-                if let id = selectedCategoryID,
+                if !isGoal, let id = selectedCategoryID,
                    let cat = categories.first(where: { $0.id == id }) {
                     applyCategoryAlertDefaults(cat)
                 }
@@ -916,6 +1198,9 @@ struct AddItemView: View {
                     }
                 )
             }
+            // NavigationStack root에 직접 .appTint() — iOS 26 idle-tint-loss 방어.
+            // 외곽 .appTint()와 함께 belt-and-suspenders로 propagation 보장.
+            .appTint()
         }
         // 변경사항이 있으면 스와이프-다운으로 sheet 닫는 행위를 차단.
         // 닫을 때는 반드시 (x) 버튼을 통해서 → 확인 dialog 거치게 함 (실수 방지).
@@ -927,52 +1212,88 @@ struct AddItemView: View {
     }
 
     /// kind 변경 시 state 일관성 유지.
-    /// NTD로 전환: 시작일 강제 ON (anchor 필수), 단일 모드, startHour 보장.
-    /// Todo로 전환: 별도 정리 없음 (NTD 잔재는 save에서 정리).
+    /// - .notTodo: 시작일 강제 ON, 단일 모드, startHour/duration default 적용 (신규만).
+    /// - .activity: 시작일 ON. target value/unit은 별도 UI 입력 (Phase B/C).
+    /// - .focus: 시작일 ON. timer target은 별도 UI (Phase D).
+    /// - .habit: 시작일 ON, startHour=0/dueHour=24 종일 의미로 고정 (사용자에게 시간 UI 노출 X).
+    /// - .todo: 별도 정리 없음 (목표 잔재는 save에서 정리).
+    /// 목표는 카테고리 사용 안 함 → 신규 진입 시 selectedCategoryID 비움.
     private func handleKindChange(_ newKind: ItemKind) {
         // kind 변경 시 인라인 캘린더·duration 닫음.
         dateExpansion = .none
         durationExpanded = false
-        guard newKind == .notTodo else { return }
-        if !hasStart {
-            hasStart = true
-            startDate = .todayCalendarAnchor
+
+        switch newKind {
+        case .todo:
+            return  // Todo 전환은 별도 처리 없음
+        case .notTodo:
+            if !hasStart {
+                hasStart = true
+                startDate = .todayCalendarAnchor
+            }
+            showPeriod = false
+            // 신규 NTD: 시작시간 6시 + 목표시간 16시간 default. 편집 모드는 기존 값 보존.
+            if !isEditing {
+                startHour = Item.defaultNTDStartHour
+                ntdDurationHour = Item.defaultNTDDurationHour
+            } else if startHour == 0 {
+                // 편집 모드 + legacy(nil → 0) 보정.
+                startHour = Item.defaultNTDStartHour
+            }
+            // NTD는 시간 chip이 항상 보여야 하므로 dueHour를 startHour로 sync해서 hasTime=true 보장.
+            if dueHour == 24 {
+                dueHour = startHour
+            }
+        case .activity:
+            // 활동: 시작일 anchor 필수. 종일 의미(0/24) 고정 — 시각 window는 Phase B 범위 밖.
+            if !hasStart {
+                hasStart = true
+                startDate = .todayCalendarAnchor
+            }
+            showPeriod = false
+            startHour = 0
+            dueHour = 24
+            ntdDurationHour = nil
+        case .focus:
+            // 집중: 시작일 anchor 필수. 시각 무관 (사용자가 원하는 시점에 시작).
+            // 종일 의미(0/24) 고정 — 시각/알림 UI 모두 비노출.
+            // target은 activityTargetValue를 분 단위로 재활용 (default 60분).
+            if !hasStart {
+                hasStart = true
+                startDate = .todayCalendarAnchor
+            }
+            showPeriod = false
+            startHour = 0
+            dueHour = 24
+            ntdDurationHour = nil
+            if !isEditing, activityTarget == 0 {
+                activityTarget = 60  // default 60분
+            }
+        case .habit:
+            // 습관: 종일 의미로 startHour=0, dueHour=24 고정. 시각 UI 비노출.
+            if !hasStart {
+                hasStart = true
+                startDate = .todayCalendarAnchor
+            }
+            showPeriod = false
+            startHour = 0
+            dueHour = 24
+            ntdDurationHour = nil  // 절제 전용 — habit에선 사용 안 함
         }
-        showPeriod = false
-        // NTD: startHour 필수, dueHour 미사용 (24 sentinel 유지 — hasTime은 derived).
-        // NTD는 시간 chip이 항상 보여야 하므로 dueHour를 startHour로 sync해서 hasTime=true 보장.
-        if startHour == 0 {
-            startHour = Item.defaultNextTopOfHour
-        }
-        if dueHour == 24 {
-            dueHour = startHour
-        }
-        // NTD 전환 시 기본 카테고리 자동 채움 (신규 항목 + 카테고리 비어있을 때).
-        // 이미 다른 카테고리 선택돼 있으면 사용자 의도 존중 — 덮어쓰지 않음.
-        if !isEditing, selectedCategoryID == nil,
-           let def = Category.defaultForNTD(in: context) {
-            selectedCategoryID = def.id
-            // selectedCategoryID 변경은 .onChange가 알림 default 적용 처리.
-            return
-        }
-        // 카테고리 그대로지만 kind가 바뀌었으므로 알림 default 재적용 (해당 kind용 필드로).
-        if !isEditing, let id = selectedCategoryID,
-           let cat = categories.first(where: { $0.id == id }) {
-            applyCategoryAlertDefaults(cat)
+
+        // 목표는 카테고리 사용 안 함 — 신규 진입 시 selectedCategoryID 비움.
+        if !isEditing, newKind.isGoal {
+            selectedCategoryID = nil
         }
     }
 
-    /// 카테고리의 알림 default를 현재 UI state에 적용.
-    /// - NTD: ntdStart/End ← defaultNtdStart/Due
+    /// 카테고리의 알림 default를 현재 UI state에 적용 (Todo 전용 — 목표는 카테고리 미사용).
     /// - Todo + hasTime=true: todoStart ← defaultTodoTimedStart, todoDue(period) ← defaultTodoTimedDue
     /// - Todo + hasTime=false: todoStart ← defaultTodoUntimedStart, todoDue(period) ← defaultTodoUntimedDue
-    /// 호출 시점: 신규 항목 작성 중 (.task initial / .onChange of category / kind 토글 / hasTime 토글).
+    /// 호출 시점: 신규 항목 작성 중 (.task initial / .onChange of category / hasTime 토글).
     /// 편집 모드(isEditing)에서는 호출 안 함 — 사용자가 설정한 알림 보존.
     private func applyCategoryAlertDefaults(_ cat: Category) {
-        if isNTD {
-            ntdStartAlertOffset = cat.defaultNtdStartAlertInt
-            ntdEndAlertOffset = cat.defaultNtdDueAlertInt
-        } else if hasTime {
+        if hasTime {
             todoStartAlertOffset = cat.defaultTodoTimedStartAlertInt
             if showPeriod {
                 todoDueAlertOffset = cat.defaultTodoTimedDueAlertInt
@@ -1008,79 +1329,34 @@ struct AddItemView: View {
         )
     }
 
-    /// 목표 유지 시간 인라인 picker — 2 wheel.
-    /// Day wheel: "미설정"(nil) + 0~30일. Hour wheel: 0~23 (항상 enable).
-    /// 상호작용 규칙:
-    /// - 총합 == 0 → state nil (미설정)
-    /// - 총합 > 0 → state = days*24 + hours
-    /// - 미설정 상태에서 hour spin → day=0으로 자동 변경 (총합 > 0이 되므로 nil 해제)
-    /// - 0일+0시간 선택 → 자동 미설정 (총합 0)
-    /// - 시간>0 + 일=미설정 선택 → 총합 0이 되어 hour wheel도 0으로 reset
+    /// 목표 유지 시간 인라인 picker — 단일 row, 1~24시간.
+    /// 1시간 단위, 최대 24시간 (목표 스트릭 단위 cap). 24시간 초과 legacy 데이터는 24로 clamp 표시.
+    /// nil(legacy 미설정) 데이터는 row 펼침 시점에 16으로 commit됨 — 여기 binding은 항상 1~24 보장.
     @ViewBuilder
     private var inlineDurationEditor: some View {
-        HStack(spacing: 0) {
-            Picker(selection: ntdDurationDaysBinding) {
-                Text("ntd.duration.unset").tag(Optional<Int>.none)
-                ForEach(0...30, id: \.self) { d in
-                    Text(verbatim: ntdDayLabel(d)).tag(Optional(d))
-                }
-            } label: { EmptyView() }
-                .pickerStyle(.wheel)
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-
-            Picker(selection: ntdDurationHoursBinding) {
-                ForEach(0...23, id: \.self) { h in
-                    Text(verbatim: ntdHourLabel(h)).tag(h)
-                }
-            } label: { EmptyView() }
-                .pickerStyle(.wheel)
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-        }
-        .padding(.vertical, 4)
+        Picker(selection: ntdDurationBinding) {
+            ForEach(1...24, id: \.self) { h in
+                Text(verbatim: ntdHourLabel(h)).tag(h)
+            }
+        } label: { EmptyView() }
+            .pickerStyle(.wheel)
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
     }
 
-    /// 일 단위 wheel binding (Optional<Int>).
-    /// - get: state nil → "미설정". 그 외 days = total/24.
-    /// - set nil(미설정 선택) → state nil. set day=N → 총합 N*24+현재hour. 총합 0이면 nil로 normalize.
-    private var ntdDurationDaysBinding: Binding<Int?> {
+    /// 단일 wheel binding (Int 1~24).
+    /// - get: state nil이면 default 16, 그 외 1~24 clamp.
+    /// - set: 항상 1~24 값 저장.
+    private var ntdDurationBinding: Binding<Int> {
         Binding(
             get: {
-                guard let total = ntdDurationHour else { return nil }
-                return total / 24
+                guard let total = ntdDurationHour else { return Item.defaultNTDDurationHour }
+                return min(max(total, 1), 24)
             },
-            set: { newDays in
-                guard let d = newDays else {
-                    ntdDurationHour = nil
-                    return
-                }
-                let currentHours = (ntdDurationHour ?? 0) % 24
-                let total = d * 24 + currentHours
-                ntdDurationHour = total == 0 ? nil : total
+            set: { newValue in
+                ntdDurationHour = newValue
             }
-        )
-    }
-
-    /// 시 단위 wheel binding (non-optional Int, 0~23).
-    /// - get: state nil이면 0. 그 외 hours = total%24.
-    /// - set: 총합 = (현재day)*24 + newHours. 총합 0이면 nil로 normalize.
-    ///   미설정 상태에서 hour spin해서 >0 되면 day 자동 0 (nil 해제).
-    private var ntdDurationHoursBinding: Binding<Int> {
-        Binding(
-            get: { (ntdDurationHour ?? 0) % 24 },
-            set: { newHours in
-                let currentDays = (ntdDurationHour ?? 0) / 24
-                let total = currentDays * 24 + newHours
-                ntdDurationHour = total == 0 ? nil : total
-            }
-        )
-    }
-
-    private func ntdDayLabel(_ d: Int) -> String {
-        String.localizedStringWithFormat(
-            NSLocalizedString("ntd.duration.day_format", comment: ""),
-            d
         )
     }
 
@@ -1109,23 +1385,47 @@ struct AddItemView: View {
         )
     }
 
-    /// Duration row 우측에 표시할 텍스트.
-    /// nil이면 "미설정", 값이 있으면 "n일 m시간" / "n일" / "m시간" 중 적합한 표기.
+    /// Duration row 우측 chip 텍스트. 항상 "n시간" (1~24).
+    /// legacy nil 데이터는 display 단계에서 16시간으로 보여줌 (실제 commit은 chip tap 시).
     private var durationDisplayText: String {
-        guard let total = ntdDurationHour else {
-            return String(localized: "ntd.duration.unset")
+        let total = ntdDurationHour ?? Item.defaultNTDDurationHour
+        let clamped = min(max(total, 1), 24)
+        return String.localizedStringWithFormat(
+            NSLocalizedString("ntd.duration_format", comment: ""), clamped
+        )
+    }
+
+    /// 목표 유지 시간 chip — timeSubchip과 동일 스타일.
+    /// expanded면 accent 배경, 평소엔 secondarySystemFill.
+    private var durationChip: some View {
+        Button {
+            withAnimation {
+                durationExpanded.toggle()
+                if durationExpanded {
+                    dateExpansion = .none
+                    // 미설정 옵션 제거 — 펼침 시 nil(legacy)이면 16으로 commit.
+                    if ntdDurationHour == nil {
+                        ntdDurationHour = Item.defaultNTDDurationHour
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "hourglass")
+                    .foregroundStyle(durationExpanded ? Color.accentColor : Color.primary)
+                Text(verbatim: durationDisplayText)
+            }
+            .font(.subheadline)
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(
+                    durationExpanded ? Color.accentColor.opacity(0.15) : Color(.secondarySystemFill)
+                )
+            )
         }
-        let days = total / 24
-        let hours = total % 24
-        let dayPart = String.localizedStringWithFormat(
-            NSLocalizedString("ntd.duration.day_format", comment: ""), days
-        )
-        let hourPart = String.localizedStringWithFormat(
-            NSLocalizedString("ntd.duration_format", comment: ""), hours
-        )
-        if days == 0  { return hourPart }
-        if hours == 0 { return dayPart }
-        return "\(dayPart) \(hourPart)"
+        .buttonStyle(.plain)
     }
 
     private func quickChip(_ titleKey: LocalizedStringKey, daysFromToday days: Int?) -> some View {
@@ -1417,10 +1717,305 @@ struct AddItemView: View {
     static func flagColor(for priority: Priority) -> Color {
         switch priority {
         case .high:   return .red
-        case .medium: return .orange
+        case .medium: return .yellow
         case .low:    return .blue
         case .none:   return .secondary
         }
+    }
+
+    // MARK: - 활동 source / unit
+
+    /// Source 선택 chip — quickChip(날짜 chip)과 동일 시각 패턴(active=fill, inactive=stroke).
+    /// 탭 → activitySource 변경. 권한 요청은 저장 시점 (attemptSave)에 한 번.
+    /// locked=true (편집 모드): 탭 무효 + 회색 톤으로 "변경 불가" 시각화.
+    private func sourceChip(
+        _ source: ActivitySourceType,
+        titleKey: LocalizedStringKey,
+        locked: Bool = false
+    ) -> some View {
+        let active = activitySource == source
+        let fillColor: Color = locked ? Color(.secondarySystemFill) : (active ? Color.accentColor : Color.clear)
+        let strokeColor: Color = locked ? .clear : (active ? .clear : Color.accentColor)
+        let textColor: Color = locked ? .secondary : (active ? Color.white : Color.accentColor)
+        return Button {
+            guard !locked else { return }
+            activitySource = source
+        } label: {
+            Text(titleKey)
+                .font(.system(size: 14))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(fillColor))
+                .overlay(Capsule().stroke(strokeColor, lineWidth: 1))
+                .foregroundStyle(textColor)
+        }
+        .buttonStyle(.plain)
+        .disabled(locked)
+    }
+
+    /// ActivitySourceType → 로컬 키. sourceChip 호출 편의용.
+    private func activitySourceTitleKey(_ source: ActivitySourceType) -> LocalizedStringKey {
+        switch source {
+        case .manual:   return "activity_source.manual"
+        case .steps:    return "activity_source.steps"
+        case .distance: return "activity_source.distance"
+        case .calories: return "activity_source.calories"
+        case .flights:  return "activity_source.flights"
+        }
+    }
+
+    /// Auto source 선택 시 — 권한이 거부됐을 수 있다는 inline 안내 + 설정 앱 deep link.
+    /// iOS HealthKit read 권한은 status 조회 불가 (privacy) + 같은 type 재-prompt 불가.
+    /// 사용자가 자동 측정 안 됨을 발견하면 설정에서 직접 켜야 함.
+    /// 안내 문구 + 설정 링크를 한 줄에 — localized string에 Markdown link 임베드.
+    /// link tap → openURL("app-settings:") → iOS가 설정 앱 열음.
+    @ViewBuilder
+    private var autoSourcePermissionHint: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("activity.source.auto.permission_hint")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .tint(Color.accentColor)
+                // markdown link 탭 → 건강 앱으로 바로 이동하지 않고 안내 alert 띄움.
+                // 사용자가 건강 앱 안에서 MyDays까지 navigate하는 경로 명시 (deep link 불가).
+                .environment(\.openURL, OpenURLAction { url in
+                    if url.scheme == "x-apple-health" {
+                        showHealthAppPathAlert = true
+                        return .handled
+                    }
+                    return .systemAction
+                })
+        }
+    }
+
+    /// Manual source 선택 시 — 자동 측정 불가 항목 안내 (단순 hint).
+    @ViewBuilder
+    private var manualSourceHint: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("activity.source.manual.hint")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// 현재 source의 단위 hint — TextField 우측에 표시.
+    /// focus는 활동 소스와 무관하게 항상 "분" 표시.
+    /// activity manual은 nil (자유 단위), auto source는 각자 단위.
+    private var activityUnitHint: String? {
+        if isFocus { return String(localized: "activity.unit.minutes") }
+        switch activitySource {
+        case .manual:   return nil
+        case .steps:    return String(localized: "activity.unit.steps")
+        case .distance: return String(localized: "activity.unit.meter")
+        case .calories: return String(localized: "activity.unit.calories")
+        case .flights:  return String(localized: "activity.unit.flights")
+        }
+    }
+
+    // MARK: - 활동 quick add chip row
+
+    /// 활동 목표 수치 quick add — TextField 아래 chip 행. +1/+10/+100/+1000/초기화.
+    /// 큰 수치(20000 등) 입력 + 작은 수치(squat 100회) 모두 키보드 부담 없이.
+    @ViewBuilder
+    private var activityQuickAddRow: some View {
+        HStack(spacing: 8) {
+            activityAddChip("+1") {
+                activityTargetFocused = false
+                activityTarget += 1
+            }
+            activityAddChip("+10") {
+                activityTargetFocused = false
+                activityTarget += 10
+            }
+            activityAddChip("+100") {
+                activityTargetFocused = false
+                activityTarget += 100
+            }
+            activityAddChip("+1000") {
+                activityTargetFocused = false
+                activityTarget += 1000
+            }
+            Spacer()
+            activityResetChip {
+                activityTargetFocused = false
+                activityTarget = 0
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func activityAddChip(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(verbatim: label)
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func activityResetChip(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("add.activity.reset")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color(.secondarySystemFill)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 목표 type 선택 (4 chip + 설명)
+
+    /// chip 순서: 절제 → 활동 → 집중 → 습관.
+    static let goalSubKindOrder: [ItemKind] = [.notTodo, .activity, .focus, .habit]
+
+    /// 목표 유형 row — 4 chip 가로 + 선택한 type의 이름 + 설명.
+    /// chip 자체엔 이름 표시 안 함. 활동/집중은 작은 "(준비중)" 라벨로 status 표시.
+    @ViewBuilder
+    private var goalTypeRow: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                ForEach(Self.goalSubKindOrder, id: \.self) { type in
+                    goalTypeChip(type)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            // 선택한 유형의 이름 + 설명.
+            VStack(alignment: .leading, spacing: 4) {
+                Text(kind.displayName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(goalKindDescription(for: kind))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// 개별 chip — filled circle + icon. 이름 미표시.
+    /// 선택: accent fill. 미선택: gray fill. 비활성(활동/집중)은 gray + 아래 "(준비중)" 라벨 + 탭 X.
+    @ViewBuilder
+    private func goalTypeChip(_ type: ItemKind) -> some View {
+        let selected = (kind == type)
+        let available = type.isAvailableForInput
+        Button {
+            guard available else { return }
+            kind = type
+            handleKindChange(type)
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(selected ? Color.accentColor : Color(.systemGray3))
+                    .frame(width: 48, height: 48)
+                Image(systemName: type.goalTypeSymbolName)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!available)
+    }
+
+    /// 각 type의 설명 텍스트 — chip row 아래에 표시.
+    private func goalKindDescription(for type: ItemKind) -> LocalizedStringKey {
+        switch type {
+        case .notTodo:  return "kind.desc.not_todo"
+        case .activity: return "kind.desc.activity"
+        case .focus:    return "kind.desc.focus"
+        case .habit:    return "kind.desc.habit"
+        case .todo:     return ""
+        }
+    }
+
+    // MARK: - 목표 아이콘·색 picker (CategoryEditSheet 패턴 재활용)
+
+    /// 색상 grid — 8열 LazyVGrid. CategoryColor 8색 그대로 재활용.
+    @ViewBuilder
+    private var goalColorGrid: some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 8),
+            spacing: 8
+        ) {
+            ForEach(CategoryColor.allCases) { cc in
+                goalColorChip(cc)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// 아이콘 grid — 6열 LazyVGrid, GoalIcon 12개 (2행).
+    @ViewBuilder
+    private var goalIconGrid: some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6),
+            spacing: 8
+        ) {
+            ForEach(GoalIcon.allCases) { icon in
+                goalIconChip(icon)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func goalColorChip(_ cc: CategoryColor) -> some View {
+        let selected = goalColor == cc
+        Button {
+            goalColor = cc
+        } label: {
+            Circle()
+                .fill(cc.color)
+                .frame(width: 30, height: 30)
+                .overlay {
+                    if selected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .accessibilityLabel(Text(cc.labelKey))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func goalIconChip(_ icon: GoalIcon) -> some View {
+        let selected = goalIcon == icon
+        // 선택된 색상으로 활성 chip background. 색 미선택 시 accent fallback.
+        let color = goalColor?.color ?? .accentColor
+        Button {
+            goalIcon = icon
+        } label: {
+            Image(systemName: icon.symbolName)
+                .font(.body)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(selected ? color : Color(.systemGray5)))
+                .overlay {
+                    if !selected {
+                        Circle().stroke(Color(.systemGray3), lineWidth: 0.5)
+                    }
+                }
+                .foregroundStyle(selected ? .white : .primary)
+        }
+        .buttonStyle(.plain)
     }
 
     private var periodChip: some View {
@@ -1795,35 +2390,83 @@ struct AddItemView: View {
         item.dueDate = hasDue ? dueDate : nil
         item.isSomeday = !hasStart && !hasDue
         item.recurrenceEndDate = recurrenceEndDate
-        // 카테고리 — selectedCategoryID로 fetch한 Category 또는 nil(미분류).
-        if let id = selectedCategoryID,
-           let cat = categories.first(where: { $0.id == id }) {
-            item.category = cat
-        } else {
+        // 카테고리 + 목표 아이콘/색 — kind에 따라 분기.
+        // 목표: category nil + iconName/iconColorHex 사용자 선택값.
+        // Todo: iconName/iconColorHex nil + category 선택값 (또는 미분류).
+        if isGoal {
             item.category = nil
+            item.iconName = goalIcon?.rawValue       // semantic rawValue 저장 (Android 호환)
+            item.iconColorHex = goalColor?.rawValue  // CategoryColor rawValue 저장
+        } else {
+            if let id = selectedCategoryID,
+               let cat = categories.first(where: { $0.id == id }) {
+                item.category = cat
+            } else {
+                item.category = nil
+            }
+            item.iconName = nil
+            item.iconColorHex = nil
         }
         item.updatedAt = Date()
 
-        if isNTD {
+        switch kind {
+        case .notTodo:
             // NTD: startHour 필수 anchor. dueHour는 NTD에서 미사용이지만,
             // hasTime(dueHour<24) 판정이 NTD에서도 true가 되도록 startHour와 sync.
-            // (24로 저장하면 재진입 시 hasTime=false → 시간 chip 숨겨지는 버그)
             item.startHourInt = startHour
             item.dueHourInt = startHour
             item.ntdDurationHourInt = ntdDurationHour
             item.itemPriority = .none
             item.itemStartTimeOfDay = .none
             item.itemDueTimeOfDay = .none
-            item.ntdStartHour = nil  // legacy
             if item.startDate == nil {
                 item.startDate = .todayCalendarAnchor
                 item.isSomeday = false
             }
-        } else {
+        case .habit:
+            // 습관: 종일 의미 — startHour=0, dueHour=24 고정. NTD duration 사용 X.
+            // 우선순위 사용 X (목표 정체성).
+            item.startHourInt = 0
+            item.dueHourInt = 24
+            item.ntdDurationHourInt = nil
+            item.itemPriority = .none
+            item.itemStartTimeOfDay = .none
+            item.itemDueTimeOfDay = .none
+            if item.startDate == nil {
+                item.startDate = .todayCalendarAnchor
+                item.isSomeday = false
+            }
+        case .activity:
+            // 활동: 종일 의미(0/24) + target value 저장. 우선순위 없음.
+            item.startHourInt = 0
+            item.dueHourInt = 24
+            item.ntdDurationHourInt = nil
+            item.activityTargetValueInt = activityTarget
+            item.activitySource = activitySource  // Phase C: 사용자 선택 source 저장
+            item.itemPriority = .none
+            item.itemStartTimeOfDay = .none
+            item.itemDueTimeOfDay = .none
+            if item.startDate == nil {
+                item.startDate = .todayCalendarAnchor
+                item.isSomeday = false
+            }
+        case .focus:
+            // 집중: 종일 의미(0/24) + target 분 저장 (activityTargetValue 재활용).
+            // source는 manual 강제 (focus는 자체 timer 시스템). 우선순위 없음. 알림 미사용.
+            item.startHourInt = 0
+            item.dueHourInt = 24
+            item.ntdDurationHourInt = nil
+            item.activityTargetValueInt = activityTarget
+            item.activitySource = .manual
+            item.itemPriority = .none
+            item.itemStartTimeOfDay = .none
+            item.itemDueTimeOfDay = .none
+            if item.startDate == nil {
+                item.startDate = .todayCalendarAnchor
+                item.isSomeday = false
+            }
+        case .todo:
             // Todo: 시각 0~23(start), 0~24(due). 24=시간 미설정 sentinel.
-            // hasTime=false → 종일 일정: startHour=0, dueHour=24.
-            // hasTime=true + 단일 모드: dueHour=startHour로 sync.
-            // hasTime=true + 기간 모드: 둘 다 그대로.
             item.itemPriority = priority
             if !hasTime {
                 item.startHourInt = 0
@@ -1834,7 +2477,6 @@ struct AddItemView: View {
             }
             item.itemStartTimeOfDay = .none
             item.itemDueTimeOfDay = .none
-            item.ntdStartHour = nil
             item.ntdDurationHourInt = nil
         }
 
