@@ -134,6 +134,8 @@ struct TodayView: View {
             VStack(spacing: 8) {
                 if itemPickerMode {
                     pickerModeBanner
+                } else if cancelMode {
+                    cancelModeBanner
                 }
                 viewModeContent
             }
@@ -410,6 +412,22 @@ struct TodayView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .center)
             .background(Color.accentColor.opacity(0.12))
+    }
+
+    /// 취소 모드 안내 banner — pickerModeBanner와 동일 시각. inline icon으로 nosign 버튼 시각 hint.
+    @ViewBuilder
+    private var cancelModeBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "nosign")
+                .font(.subheadline)
+            Text("today.cancel.banner")
+                .font(.subheadline.weight(.medium))
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(Color.accentColor.opacity(0.12))
     }
 
     /// 상단 viewMode content — Day(WeekStripView) / Month(MonthGridView) 분기.

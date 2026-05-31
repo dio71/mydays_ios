@@ -178,7 +178,7 @@ struct ItemRow: View {
                 Button {
                     showCancelSheet = true
                 } label: {
-                    Image(systemName: "xmark.circle")
+                    Image(systemName: "nosign")
                         .font(.title3)
                         .foregroundStyle(.red)
                 }

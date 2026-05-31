@@ -76,7 +76,8 @@ struct NTDRow: View {
                         // 미래 일자엔 trailing(progress/countdown) 숨김 — 활동(+)/습관(체크)과 일관성.
                         // 다른 type들은 미래 trailing 인터랙션을 숨기는데 NTD만 countdown("1일 11시간 후")을
                         // 보여주던 게 일관성 떨어짐 → 같은 정책 적용. 오늘/과거는 그대로.
-                        if occurrenceDate <= .todayCalendarAnchor || completed || failed {
+                        // cancelMode/itemPickerMode에선 trailing 전체 숨김 — 활동/습관과 일관성 (모드 액션에 집중).
+                        if (occurrenceDate <= .todayCalendarAnchor || completed || failed) && !cancelMode && !itemPickerMode {
                             // trailing + (x)/check/nosign 사이 간격은 activity (progress + (+)) 패턴과 동일 4pt.
                             HStack(spacing: 4) {
                                 trailingDisplay(now: now, completed: completed, failed: failed)

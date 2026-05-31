@@ -5439,6 +5439,22 @@
         }
       }
     },
+    "today.cancel.banner" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap the (/) button to cancel a todo"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "버튼을 눌러서 할일을 취소"
+          }
+        }
+      }
+    },
     "today.picker.banner" : {
       "localizations" : {
         "en" : {
