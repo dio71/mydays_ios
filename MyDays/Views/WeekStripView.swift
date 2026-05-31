@@ -110,25 +110,33 @@ struct WeekStripView: View {
             .foregroundStyle(isToday ? Color.accentColor : .secondary)
     }
 
-    /// 날짜 cell (하단 row) — tap 활성. selectedDate=accent fill, today=반투명 accent fill.
+    /// 날짜 cell (하단 row) — tap 활성. MonthGridView와 동일 시각 정책:
+    /// - Today: 우상단 작은 red dot
+    /// - Selected: 가는 accent stroke 1pt
+    /// - 숫자 색: today면 accent, 그 외 primary
     @ViewBuilder
     private func dayCell(for date: Date) -> some View {
         let isSelected = Calendar.gmt.isDate(date, inSameDayAs: selectedDate)
         let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
-        let bgFill: Color? = {
-            if isSelected { return Color.accentColor }
-            if isToday { return Color.accentColor.opacity(0.5) }
-            return nil
-        }()
-        Text(verbatim: Self.dayNumber(date))
-            .font(.callout.weight(isSelected ? .semibold : .regular))
-            .foregroundStyle(isSelected ? .white : .primary)
-            .frame(width: 28, height: 28)
-            .background {
-                if let bgFill {
-                    Circle().fill(bgFill)
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                Text(verbatim: Self.dayNumber(date))
+                    .font(.callout.weight(isToday ? .semibold : .regular))
+                    .foregroundStyle(isToday ? Color.accentColor : Color.primary)
+                if isSelected {
+                    Circle().stroke(Color.accentColor, lineWidth: 1)
                 }
             }
+            .frame(width: 28, height: 28)
+
+            if isToday {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 4, height: 4)
+                    .offset(x: 1, y: -1)
+            }
+        }
+        .frame(width: 28, height: 28)
     }
 
     /// 요일 라벨 — EEE 템플릿. 한국어 "수" / 영어 "Wed" 자동.

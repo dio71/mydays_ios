@@ -31,6 +31,8 @@ struct NTDRow: View {
 
     @Environment(\.managedObjectContext) private var context
     @Environment(\.cancelMode) private var cancelMode
+    @Environment(\.itemPickerMode) private var itemPickerMode
+    @Environment(\.pickedItemID) private var pickedItemID
     @Environment(\.colorScheme) private var colorScheme
     @State private var showGiveUpSheet = false
 
@@ -46,6 +48,14 @@ struct NTDRow: View {
 
             // .firstTextBaseline — leading icon(title3 SF Symbol)이 title 텍스트(body)의 baseline에 정렬. ItemRow와 동일.
             HStack(alignment: .firstTextBaseline, spacing: 12) {
+                // 항목 선택 모드 — 모든 row 앞에 checkmark slot 예약. ItemRow와 동일 시각.
+                if itemPickerMode {
+                    let isPicked = (pickedItemID != nil && pickedItemID == item.id)
+                    Image(systemName: isPicked ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(isPicked ? Color.accentColor : Color.secondary.opacity(0.4))
+                        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+                }
                 leadingIcon(completed: completed, failed: failed)
                     // SF Symbol baseline이 text baseline과 미세히 어긋나 icon이 살짝 위로 보임 — 2pt 내려서 시각 중심 보정.
                     .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }

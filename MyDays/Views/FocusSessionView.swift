@@ -32,6 +32,11 @@ struct FocusSessionView: View {
     /// 정지 사유 — UI에 안내 메시지 표시용 (현재 미사용, 향후 toast 등)
     @State private var endReason: EndReason? = nil
 
+    /// target 도달 자동 트리거 task — 세션 시작 시 (target - 누적)분 만큼 sleep 후 한 번만 fire.
+    /// dismiss / 다른 종료 시 cancel — 가드 + 자원 정리.
+    /// (이전엔 5초 polling timer였음 — wasteful. 도달 시점은 결정적이라 single delayed trigger로 충분.)
+    @State private var targetTask: Task<Void, Never>?
+
     enum EndReason {
         case userStop
         case background
@@ -40,9 +45,9 @@ struct FocusSessionView: View {
 
     var body: some View {
         ZStack {
-            // 배경: 어두운 색 강제 (배터리 + 집중 환경).
-            // target 도달 시 goalColor의 약한 톤으로 전환.
-            backgroundColor
+            // 배경: 항상 어두운 색 강제 (배터리 + 집중 환경).
+            // target 도달 시 배경은 그대로 두고 "달성!" 문구만 capsule(밝은 배경)로 시각 강조 → 화면 전체 변화로 인한 산만 회피.
+            Color.black
                 .ignoresSafeArea()
 
             VStack(spacing: 32) {
@@ -62,10 +67,24 @@ struct FocusSessionView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
 
-                // 메인 메시지
-                Text(targetReached ? "focus.session.target_reached" : "focus.session.in_progress")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                // 메인 메시지 — target 도달 시 goalColor capsule + 흰 글자로 강조, 그 외엔 plain text.
+                // 달성 capsule은 tappable — 하단 종료 버튼과 동일하게 세션 종료 + dismiss.
+                // (자연스러운 finish 흐름: 달성 표시 직접 탭으로 마무리)
+                if targetReached {
+                    Button(action: userStop) {
+                        Text("focus.session.target_reached")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 12)
+                            .background(Capsule().fill(goalColor))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("focus.session.in_progress")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
 
                 Spacer()
 
@@ -103,10 +122,13 @@ struct FocusSessionView: View {
             FocusSessionManager.shared.startSession(item: item, occurrenceDate: occurrenceDate)
             UIApplication.shared.isIdleTimerDisabled = true
             motionObserver.start()
+            scheduleTargetReachedTrigger()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             motionObserver.stop()
+            targetTask?.cancel()
+            targetTask = nil
         }
         .onChange(of: scenePhase) { _, newPhase in
             // .background = 잠금/홈/앱 전환/전화 받음 → 세션 종료.
@@ -120,25 +142,34 @@ struct FocusSessionView: View {
                 terminate(reason: .motion)
             }
         }
-        .onChange(of: currentAccumulatedMinutes()) { old, new in
-            // target 도달 감지 — overshoot 허용이라 도달 후에도 계속 누적.
-            // 도달 시 한 번만 haptic + 화면 색 전환.
-            guard !targetReached, let target = item.activityTargetValueDouble, new >= target else { return }
+    }
+
+    /// target 도달 자동 트리거 — 세션 시작 시 한 번만 schedule.
+    /// 남은 시간 = target - 현재 누적. 0 이하면 진입 즉시 도달 상태로 마킹.
+    /// dismiss / terminate 시 onDisappear에서 cancel — fire 안 됨.
+    private func scheduleTargetReachedTrigger() {
+        guard let target = item.activityTargetValueDouble else { return }
+        let stored = item.focusCurrentMinutes(on: occurrenceDate)
+        let remainingMinutes = target - stored
+        if remainingMinutes <= 0 {
+            // 진입 시점에 이미 도달 — 즉시 마킹 (haptic은 새 도달이 아니라 생략).
             targetReached = true
-            // success haptic
-            let gen = UINotificationFeedbackGenerator()
-            gen.notificationOccurred(.success)
+            return
+        }
+        let delaySeconds = remainingMinutes * 60
+        targetTask = Task {
+            try? await Task.sleep(for: .seconds(delaySeconds))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !targetReached else { return }
+                targetReached = true
+                let gen = UINotificationFeedbackGenerator()
+                gen.notificationOccurred(.success)
+            }
         }
     }
 
     // MARK: - 색상
-
-    private var backgroundColor: Color {
-        if targetReached {
-            return goalColor.opacity(0.4)
-        }
-        return Color.black
-    }
 
     private var goalColor: Color {
         guard let raw = item.iconColorHex,

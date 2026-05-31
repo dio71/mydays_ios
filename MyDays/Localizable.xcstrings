@@ -522,13 +522,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Health App"
+            "value" : "Health permissions"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "건강 앱 열기"
+            "value" : "건강앱 권한"
           }
         }
       }
@@ -3338,13 +3338,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ended"
+            "value" : "Gave up"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "포기됨"
+            "value" : "포기"
           }
         }
       }
@@ -4870,13 +4870,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Categories"
+            "value" : "Todo categories"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "카테고리"
+            "value" : "할일 카테고리"
           }
         }
       }
@@ -5439,19 +5439,51 @@
         }
       }
     },
+    "today.picker.banner" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap an item to filter the calendar"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "항목을 탭하여 캘린더에 표시"
+          }
+        }
+      }
+    },
+    "today.menu.pick_item" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick item"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "항목 선택하기"
+          }
+        }
+      }
+    },
     "today.menu.cancel_mode" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cancel items"
+            "value" : "Cancel todos"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "활동 취소하기"
+            "value" : "할일 취소하기"
           }
         }
       }

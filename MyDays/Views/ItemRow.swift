@@ -18,6 +18,9 @@ struct ItemRow: View {
     var compactMode: Bool = false
     @Environment(\.managedObjectContext) private var context
     @Environment(\.cancelMode) private var cancelMode
+    @Environment(\.itemPickerMode) private var itemPickerMode
+    @Environment(\.pickedItemID) private var pickedItemID
+    @Environment(\.onPickItem) private var onPickItem
     @Environment(\.colorScheme) private var colorScheme
     @State private var showCompleteSheet = false
     @State private var showCancelSheet = false
@@ -68,12 +71,25 @@ struct ItemRow: View {
         }
     }
 
+    /// 항목 선택 모드 + 선택된 row 여부 — background highlight 결정.
+    private var isPickerSelected: Bool {
+        itemPickerMode && pickedItemID != nil && pickedItemID == item.id
+    }
+
     @ViewBuilder
     private var rowContent: some View {
         // .firstTextBaseline — leadingControl 아이콘(title3 SF Symbol)이 title 텍스트(body)의 baseline에 정렬.
         // .top 정렬은 icon line box top과 text line box top이 같아 cap height 차이로 icon이 위로 떠 보이는데,
         // baseline 매칭이 시각적으로 가장 자연스러움.
         HStack(alignment: .firstTextBaseline, spacing: 12) {
+            // 항목 선택 모드 — 모든 row 앞에 checkmark slot 예약 (mode 안에서 toggle 시 layout shift 회피).
+            // selected = checkmark.circle.fill (accent), unselected = circle outline (faint).
+            if itemPickerMode {
+                Image(systemName: isPickerSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isPickerSelected ? Color.accentColor : Color.secondary.opacity(0.4))
+                    .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
+            }
             leadingControl
                 // SF Symbol baseline이 text baseline과 미세히 어긋나 icon이 살짝 위로 보임 — 2pt 내려서 시각 중심 보정.
                 // d[.firstTextBaseline] - 2 → 내가 주장하는 baseline이 2pt 위 → HStack이 정렬 시 view를 2pt 아래로 밀어줌.

@@ -47,9 +47,13 @@ final class FocusSessionManager: ObservableObject {
         sessionStartedAt = Date()
     }
 
-    /// session 정지 — elapsed 계산해 ≥10분이면 RC에 누적 add.
+    /// session 정지 — elapsed 계산해 RC에 누적 add 여부 결정.
+    /// 누적 조건:
+    /// - elapsed ≥ 10분: 항상 누적
+    /// - elapsed < 10분 + 이 세션으로 **target 도달**: 누적 인정 (final stretch)
+    /// - elapsed < 10분 + target 미도달: 폐기 (게이밍 방지)
     /// occurrenceDate는 startSession 시점의 값을 사용 (RAM 보존).
-    /// 호출 지점: 사용자 정지 버튼 / scenePhase=.background / motion 임계치 초과 / target 도달은 별도 처리 안 함(overshoot).
+    /// 호출 지점: 사용자 정지 / scenePhase=.background / motion 임계치 / target 자동 종료.
     @discardableResult
     func stopSession() -> SessionResult {
         guard let item = activeItem, let start = sessionStartedAt else {
@@ -61,11 +65,14 @@ final class FocusSessionManager: ObservableObject {
             activeItem = nil
             sessionStartedAt = nil
         }
-        guard elapsedMinutes >= Self.minSessionMinutes else {
+        let occDate = focusOccurrenceDate(for: item, at: start)
+        // target 도달 시 길이 무관 인정 — final stretch (예: 누적 55/60에서 5분 세션) 케이스 커버.
+        let storedMinutes = item.focusCurrentMinutes(on: occDate)
+        let projectedTotal = storedMinutes + elapsedMinutes
+        let willReachTarget = item.activityTargetValueDouble.map { projectedTotal >= $0 } ?? false
+        guard elapsedMinutes >= Self.minSessionMinutes || willReachTarget else {
             return .discardedShort(elapsedMinutes: elapsedMinutes)
         }
-        // occurrence date 결정: 반복은 ntdRelevantOccurrenceDate 또는 referenceOccurrenceStartDate, 1회성은 startDate.
-        let occDate = focusOccurrenceDate(for: item, at: start)
         Item.addFocusMinutes(elapsedMinutes, for: item, occurrenceDate: occDate)
         if let ctx = item.managedObjectContext {
             do { try ctx.save() } catch {

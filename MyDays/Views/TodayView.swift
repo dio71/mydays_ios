@@ -18,6 +18,38 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Item Picker Mode Environment
+//
+// 항목 선택 모드 — 사용자가 toolbar에서 "항목 선택하기" 진입 시 활성.
+// 활성일 때: ItemRow/NTDRow는 tap 시 onPickItem callback 호출 (edit sheet 안 띄움) + leading checkmark 시각.
+// 캘린더는 pickedItemID 받아서 그 항목만 표시.
+// 모드 종료 시 자동 해제 (item filter도 해제).
+
+private struct ItemPickerModeKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+private struct PickedItemIDKey: EnvironmentKey {
+    static let defaultValue: UUID? = nil
+}
+private struct OnPickItemKey: EnvironmentKey {
+    static let defaultValue: (UUID?) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var itemPickerMode: Bool {
+        get { self[ItemPickerModeKey.self] }
+        set { self[ItemPickerModeKey.self] = newValue }
+    }
+    var pickedItemID: UUID? {
+        get { self[PickedItemIDKey.self] }
+        set { self[PickedItemIDKey.self] = newValue }
+    }
+    var onPickItem: (UUID?) -> Void {
+        get { self[OnPickItemKey.self] }
+        set { self[OnPickItemKey.self] = newValue }
+    }
+}
+
 struct TodayView: View {
 
     // displayedDate는 calendar date 의미 → UTC anchor Date로 관리.
@@ -30,6 +62,13 @@ struct TodayView: View {
     @State private var lastNavigationForward: Bool = true
     // 취소 모드 — 메뉴에서 진입, 모든 미완료 row에 (x) 버튼 노출.
     @State private var cancelMode: Bool = false
+    // 항목 선택 모드 — 메뉴에서 진입, row 탭으로 캘린더 단일 항목 filter 설정.
+    // 종료 시 pickedItemID 자동 해제 → 캘린더 전체 종합 복귀.
+    @State private var itemPickerMode: Bool = false
+    @State private var pickedItemID: UUID? = nil
+    /// picker 진입 시 forced viewMode 변경 했는지 표시 — 종료 시 복원용.
+    /// 예: Day view에서 picker 진입 → 자동 Month 전환 → 종료 시 Day 복귀.
+    @State private var preFocusViewMode: TodayViewMode? = nil
     // 상단 영역 모드 — Day (WeekStrip) / Month (MonthGrid). TodayList 본문은 두 모드 공통.
     // 앱 종료 후 재실행 시 마지막 선택 모드 복원 (@AppStorage).
     @AppStorage(UIStateKey.todayViewMode) private var viewMode: TodayViewMode = .day
@@ -92,39 +131,11 @@ struct TodayView: View {
         // 감지 못해 floating 탭바가 opaque로 fallback됨 (다른 탭은 반투명). transition overflow는
         // safeAreaInset 경계로 자연스럽게 잘림.
         .safeAreaInset(edge: .top, spacing: 8) {
-            Group {
-                switch viewMode {
-                case .day:
-                    WeekStripView(
-                        selectedDate: displayedDate,
-                        forward: lastNavigationForward,
-                        onSelectDate: { date in
-                            guard !cancelMode else { return }
-                            guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
-                            navigateTo(date, forward: date > displayedDate)
-                        },
-                        onShiftWeek: { days in
-                            guard !cancelMode else { return }
-                            shiftDay(days)
-                        }
-                    )
-                case .month:
-                    MonthGridView(
-                        selectedDate: displayedDate,
-                        forward: lastNavigationForward,
-                        onSelectDate: { date in
-                            guard !cancelMode else { return }
-                            guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
-                            navigateTo(date, forward: date > displayedDate)
-                        },
-                        onShiftMonth: { delta in
-                            guard !cancelMode else { return }
-                            shiftMonth(delta)
-                        },
-                        categoryFilter: filterCategoryID,
-                        goalKindFilter: filterGoalKind
-                    )
+            VStack(spacing: 8) {
+                if itemPickerMode {
+                    pickerModeBanner
                 }
+                viewModeContent
             }
             // 외곽 ZStack `.clipped()`를 제거해 floating 탭바 반투명을 복원하면서 safeAreaInset의
             // 암묵 backdrop도 사라짐 → List 본문이 inset 영역에 비침. 명시 systemBackground로 차단.
@@ -133,6 +144,12 @@ struct TodayView: View {
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.cancelMode, cancelMode)
+        .environment(\.itemPickerMode, itemPickerMode)
+        .environment(\.pickedItemID, pickedItemID)
+        .environment(\.onPickItem) { newID in
+            // 같은 ID 재선택 → toggle off (filter 해제, mode는 유지)
+            pickedItemID = (pickedItemID == newID) ? nil : newID
+        }
         .toolbar {
             if cancelMode {
                 // 취소 모드 — 우측에 체크 아이콘 버튼 (iOS 편집 모드 표준 위치).
@@ -140,6 +157,25 @@ struct TodayView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         cancelMode = false
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.accentColor)
+                    .accessibilityLabel("common.done")
+                }
+            } else if itemPickerMode {
+                // 항목 선택 모드 — 우측 "완료" 버튼. mode 종료 시 pickedItemID 자동 해제.
+                // preFocusViewMode 있으면 진입 전 viewMode로 복원 (예: Day → Month → Day).
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        itemPickerMode = false
+                        pickedItemID = nil
+                        if let prev = preFocusViewMode {
+                            viewMode = prev
+                            preFocusViewMode = nil
+                        }
                     } label: {
                         Image(systemName: "checkmark")
                             .foregroundStyle(Color.white)
@@ -175,6 +211,18 @@ struct TodayView: View {
                             cancelMode = true
                         } label: {
                             Label("today.menu.cancel_mode", systemImage: "xmark.circle")
+                        }
+                        Button {
+                            // 항목 선택 모드 — Month view에서만 의미 있음 (캘린더 표시).
+                            // Day view에 있으면 자동 Month로 전환 + 종료 시 복원 위해 preFocusViewMode 저장.
+                            if viewMode == .day {
+                                preFocusViewMode = .day
+                                viewMode = .month
+                            }
+                            itemPickerMode = true
+                            pickedItemID = nil
+                        } label: {
+                            Label("today.menu.pick_item", systemImage: "checkmark.circle")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -233,8 +281,8 @@ struct TodayView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            // 새 항목 추가 FAB — 취소 모드 중에는 숨김.
-            if !cancelMode {
+            // 새 항목 추가 FAB — 취소 모드 / 항목 선택 모드 중에는 숨김.
+            if !cancelMode && !itemPickerMode {
                 Button {
                     // 필터 활성 시 신규 항목에 preset — 카테고리(Todo) 또는 목표 유형.
                     sheet = .new(baseDate: displayedDate, categoryID: filterCategoryID, goalKind: filterGoalKind)
@@ -348,6 +396,60 @@ struct TodayView: View {
             }
         } else {
             displayedDate = date
+        }
+    }
+
+    /// 항목 선택 모드 안내 banner — picker mode 진입 시 상단에 노출.
+    /// 사용자에게 "항목을 탭하여 캘린더에 표시" 가이드. 시각: 옅은 accent 배경 + accent 텍스트, 가운데 정렬.
+    @ViewBuilder
+    private var pickerModeBanner: some View {
+        Text("today.picker.banner")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .background(Color.accentColor.opacity(0.12))
+    }
+
+    /// 상단 viewMode content — Day(WeekStripView) / Month(MonthGridView) 분기.
+    /// safeAreaInset 내부에서 banner와 함께 vstack에 배치되도록 분리.
+    @ViewBuilder
+    private var viewModeContent: some View {
+        Group {
+            switch viewMode {
+            case .day:
+                WeekStripView(
+                    selectedDate: displayedDate,
+                    forward: lastNavigationForward,
+                    onSelectDate: { date in
+                        guard !cancelMode else { return }
+                        guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
+                        navigateTo(date, forward: date > displayedDate)
+                    },
+                    onShiftWeek: { days in
+                        guard !cancelMode else { return }
+                        shiftDay(days)
+                    }
+                )
+            case .month:
+                MonthGridView(
+                    selectedDate: displayedDate,
+                    forward: lastNavigationForward,
+                    onSelectDate: { date in
+                        guard !cancelMode else { return }
+                        guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
+                        navigateTo(date, forward: date > displayedDate)
+                    },
+                    onShiftMonth: { delta in
+                        guard !cancelMode else { return }
+                        shiftMonth(delta)
+                    },
+                    categoryFilter: filterCategoryID,
+                    goalKindFilter: filterGoalKind,
+                    pickedItemID: pickedItemID
+                )
+            }
         }
     }
 
@@ -477,6 +579,8 @@ struct TodayList: View {
     @Binding var sheet: ItemSheetMode?
     /// 취소 모드 — 부모 TodayView가 environment로 inject. row tap 시 편집 sheet 차단.
     @Environment(\.cancelMode) private var cancelMode
+    @Environment(\.itemPickerMode) private var itemPickerMode
+    @Environment(\.onPickItem) private var onPickItem
 
     /// 할일(1회성+루틴) 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
     /// 같은 date 내에서 체크/취소 토글 시 즉시 reorder되지 않게 cache. 다음 navigation 시 재계산.
@@ -996,6 +1100,10 @@ struct TodayList: View {
                                     let isLast = (idx == group.occurrences.count - 1)
                                     Button {
                                         guard !cancelMode else { return }
+                                        if itemPickerMode {
+                                            onPickItem(group.item.id)
+                                            return
+                                        }
                                         sheet = .edit(group.item)
                                     } label: {
                                         goalRow(item: group.item, occurrenceDate: occ.occurrenceDate, isLast: isLast)
@@ -1054,6 +1162,11 @@ struct TodayList: View {
         Button {
             // 취소 모드에서는 편집 sheet 차단 — (x) 버튼 액션만 활성.
             guard !cancelMode else { return }
+            // 항목 선택 모드 — 그 항목을 picker target으로 (toggle).
+            if itemPickerMode {
+                onPickItem(item.id)
+                return
+            }
             sheet = .edit(item)
         } label: {
             ItemRow(
