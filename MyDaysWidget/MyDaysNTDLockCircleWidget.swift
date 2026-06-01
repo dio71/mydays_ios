@@ -78,11 +78,22 @@ struct GoalLockCircleProvider: TimelineProvider {
     /// 진행중/진행예정 bucket 목표만 — 락 위젯은 "지금 신경 써야 할 것" UX.
     /// past(완료/포기/만료)는 락 위젯 노출 가치 낮음 → 제외.
     /// internal — rectangular lock widget이 같은 fetch 재사용.
+    /// 락스크린 위젯은 **절제(NTD) + 활동(auto source 한정)**만 표시.
+    /// - 직접 입력 활동: 실시간 fetch 불가 → 잠금 화면에 띄울 의미 없음 (수동 진입 필요).
+    /// - 집중/습관: 잠금 화면에서 별도 진행 표시 패턴 미정 → 추후 phase.
     static func fetchActiveGoalSnapshots(now: Date) -> [ItemSnapshot] {
         let items = MyDaysHomeProvider.fetchActiveItems()
         let today: Date = .todayCalendarAnchor
         var snaps: [ItemSnapshot] = []
-        for item in items where item.itemKind.isGoal {
+        for item in items {
+            let kind = item.itemKind
+            // 절제는 모두 통과. 활동은 source가 manual이 아닐 때만.
+            let allowed: Bool = {
+                if kind == .notTodo { return true }
+                if kind == .activity, item.activitySource != .manual { return true }
+                return false
+            }()
+            guard allowed else { continue }
             if let s = MyDaysHomeProvider.snapshot(for: item, now: now, today: today),
                s.bucket != .past {
                 snaps.append(s)

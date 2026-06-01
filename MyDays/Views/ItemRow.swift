@@ -268,7 +268,7 @@ struct ItemRow: View {
                     let targetWidth = fullWidth * CGFloat(progress)
                     let fillWidth: CGFloat = progress > 0 ? max(4, targetWidth) : 0
                     Capsule()
-                        .fill(goalColor.opacity(0.35))
+                        .fill(goalColor.opacity(0.22))
                         .frame(width: fillWidth)
                 }
                 .clipShape(Capsule())
@@ -283,16 +283,18 @@ struct ItemRow: View {
 
             // 과거 일자는 trailing 아이콘 완전 숨김 — progress bar만으로 그날 결과 표시.
             // 입력 정책: 활동은 당일에만 가능. 과거는 결과 확인만.
+            // 진행 중은 line, 완료(target 도달)는 filled — 목표 trailing 시각 정책.
+            let isDone = current >= target && target > 0
             if !isPastDate {
                 if isAutoSource {
-                    // HK auto source — heart.fill badge (non-interactive). Apple Health 시각 cue.
-                    Image(systemName: "heart.fill")
+                    // HK auto source — heart badge (non-interactive). 진행 중=line, 완료=fill.
+                    Image(systemName: isDone ? "heart.fill" : "heart")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(goalColor.opacity(0.85))
                         .frame(width: 22, alignment: .center)
                         .accessibilityLabel(Text("activity.source.auto.accessibility"))
                 } else {
-                    // Manual — (+) 심볼 버튼. plus.circle.fill + goalColor.
+                    // Manual — (+) 심볼 버튼. 진행 중=line, 완료=fill.
                     // .title3 — NTD (x) 버튼과 같은 visual size로 alignment 일관성.
                     Button {
                         Item.incrementActivityValue(
@@ -303,7 +305,7 @@ struct ItemRow: View {
                         )
                         saveContext()
                     } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: isDone ? "plus.circle.fill" : "plus.circle")
                             .font(.title3)
                             .foregroundStyle(goalColor)
                     }
@@ -345,7 +347,7 @@ struct ItemRow: View {
                     let targetWidth = fullWidth * CGFloat(progress)
                     let fillWidth: CGFloat = progress > 0 ? max(4, targetWidth) : 0
                     Capsule()
-                        .fill(goalColor.opacity(0.35))
+                        .fill(goalColor.opacity(0.22))
                         .frame(width: fillWidth)
                 }
                 .clipShape(Capsule())
@@ -359,11 +361,13 @@ struct ItemRow: View {
             .frame(width: 130, height: 22)
 
             // ▶ 시작 버튼 — 오늘 일자에만. focusSessionPresentation 트리거.
+            // 진행 중(target 미달)=line, 완료(target 도달)=filled — 목표 trailing 시각 정책.
             if !isPastDate {
+                let isDone = target > 0 && current >= target
                 Button {
                     presentFocusSession = true
                 } label: {
-                    Image(systemName: "play.circle.fill")
+                    Image(systemName: isDone ? "play.circle.fill" : "play.circle")
                         .font(.title3)
                         .foregroundStyle(goalColor)
                 }

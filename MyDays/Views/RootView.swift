@@ -139,12 +139,12 @@ struct RootView: View {
 
             NavigationStack { ListView() }
                 .appTint()
-                .tabItem { Label("tab.list", systemImage: "list.bullet") }
+                .tabItem { Label("tab.list", systemImage: "note.text") }
                 .tag(SidebarItem.list)
 
             NavigationStack { ArchiveView() }
                 .appTint()
-                .tabItem { Label("tab.archive", systemImage: "archivebox") }
+                .tabItem { Label("tab.archive", systemImage: "tray.full.fill") }
                 .tag(SidebarItem.archive)
 
             NavigationStack { SettingsView() }
@@ -214,8 +214,8 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
             #else
             return "\(todayDay).calendar"
             #endif
-        case .list:     return "list.bullet"
-        case .archive:  return "archivebox"
+        case .list:     return "note.text"
+        case .archive:  return "tray.full.fill"
         case .settings: return "gearshape"
         }
     }

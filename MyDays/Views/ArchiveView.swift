@@ -76,6 +76,11 @@ struct ArchiveView: View {
 
     var body: some View {
         let hasFilter = filterCategoryID != nil
+        // 진짜 empty (Case A) — 필터 없음 + 활성/완료 모두 0개. Group으로 묶어 outer modifier 공유.
+        Group {
+        if !hasFilter && items.isEmpty && (!showCompleted || completedItems.isEmpty) {
+            archiveEmptyContent
+        } else {
         List {
             if hasFilter {
                 // 필터 활성 — 단일 섹션 (그 카테고리 항목만).
@@ -134,6 +139,8 @@ struct ArchiveView: View {
             }
         }
         .listStyle(.insetGrouped)
+        }
+        }
         // iPad/regular size class에서 content 폭 cap — 가독성.
         .iPadContentWidth()
         .scrollDismissesKeyboard(.immediately)
@@ -212,11 +219,18 @@ struct ArchiveView: View {
         .buttonStyle(.plain)
     }
 
-    /// 빈 상태 — "막연한 할일이 없습니다".
+    /// 빈 상태 — "막연한 할일이 없습니다" (필터/그룹 모드 내 부분 empty용).
     private var emptyActiveRow: some View {
         Text("archive.empty")
             .foregroundStyle(.secondary)
             .font(.subheadline)
+    }
+
+    /// 진짜 empty (필터 없음 + 0개) — first-launch 톤. 탭 아이콘 + 가이드 메시지.
+    /// QuickEntryBar로 즉시 등록 가능 — 별도 CTA 버튼 불필요.
+    @ViewBuilder
+    private var archiveEmptyContent: some View {
+        EmptyStateView(iconName: "tray.full.fill", message: "archive.empty.first")
     }
 
     /// filter 활성 시 section header — ListView와 동일 패턴(filled circle icon + 이름).

@@ -1765,9 +1765,11 @@ struct AddItemView: View {
         locked: Bool = false
     ) -> some View {
         let active = activitySource == source
-        let fillColor: Color = locked ? Color(.secondarySystemFill) : (active ? Color.accentColor : Color.clear)
-        let strokeColor: Color = locked ? .clear : (active ? .clear : Color.accentColor)
-        let textColor: Color = locked ? .secondary : (active ? Color.white : Color.accentColor)
+        // locked(편집 모드 변경 불가)도 시각은 active와 동일 accent fill — 회색 톤은 식별 어려워서 사용자 의견 반영.
+        // 탭 무효는 .disabled로 행동만 차단.
+        let fillColor: Color = (active || locked) ? Color.accentColor : Color.clear
+        let strokeColor: Color = (active || locked) ? .clear : Color.accentColor
+        let textColor: Color = (active || locked) ? Color.white : Color.accentColor
         return Button {
             guard !locked else { return }
             activitySource = source
@@ -1783,7 +1785,8 @@ struct AddItemView: View {
                 .foregroundStyle(textColor)
         }
         .buttonStyle(.plain)
-        .disabled(locked)
+        // .disabled는 chip 전체를 dim 처리해 white 텍스트가 회색처럼 보임 → allowsHitTesting으로 탭만 차단.
+        .allowsHitTesting(!locked)
     }
 
     /// ActivitySourceType → 로컬 키. sourceChip 호출 편의용.
@@ -2576,6 +2579,11 @@ struct AddItemView: View {
             Item.completeFinishedNTDs(in: context)
             // OS 알림 등록/갱신은 DB 저장 후. Reminder.id가 안정적이어야 OS notification id와 매칭됨.
             item.syncNotifications()
+            // 활동 + auto source: 등록 직후 HK 데이터 즉시 fetch — scenePhase 갱신 대기 없이 바로 progress 반영.
+            // 사용자가 "걸음수 10000 목표" 등록하자마자 캘린더·row에 오늘 누적값 보이도록.
+            if kind == .activity, activitySource != .manual {
+                Task { await Item.syncHealthKitActivities(in: context) }
+            }
             dismiss()
         } catch {
             assertionFailure("Save failed: \(error)")

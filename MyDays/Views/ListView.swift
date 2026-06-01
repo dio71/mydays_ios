@@ -241,6 +241,11 @@ struct ListView: View {
 
     @ViewBuilder
     private func normalList(hasFilter: Bool) -> some View {
+        // 진짜 empty (Case A) — 필터 없음 + 활성 0개 + 완료 섹션 0개(또는 토글 OFF).
+        // first-launch 또는 완전 비어있는 상태. 필터/토글 적용 empty는 기존 emptyRow 유지.
+        if !hasFilter && sortedActiveItems.isEmpty && (!showCompleted || filteredCompletedItems.isEmpty) {
+            EmptyStateView(iconName: "note.text", message: "list.empty.first")
+        } else {
         List {
             if hasFilter {
                 // 필터 활성 — 단일 섹션 (카테고리 필터=그 카테고리 Todo만, 목표 유형=그 type만).
@@ -299,6 +304,7 @@ struct ListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        }
     }
 
     // MARK: - Search banner

@@ -1104,6 +1104,20 @@ struct TodayList: View {
         let activitiesSorted = displayActivities()
         let showGoalSection = categoryFilter == nil  // 카테고리 필터엔 목표 hide
         let showTodoSection = goalKindFilter == nil  // 목표 유형 필터엔 할일 hide
+        // 진짜 empty (Case A) — 필터 없음 + 양 섹션 다 비어있을 때.
+        // first-launch 또는 오늘 일자 정말 항목 0개 케이스. 필터/토글 적용 empty는 별개 (작은 emptyRow).
+        let isGenuineEmpty = categoryFilter == nil
+            && goalKindFilter == nil
+            && ntdsForDate.isEmpty
+            && activitiesSorted.isEmpty
+        if isGenuineEmpty {
+            // 오늘 일자면 "오늘" 명시 메시지, 그 외 일자는 generic ("이 날짜에 ...").
+            let isViewingToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
+            EmptyStateView(
+                iconName: todayEmptyIconName,
+                message: isViewingToday ? "today.empty.first" : "today.empty.first.other"
+            )
+        } else {
         List {
             if showGoalSection {
                 Section {
@@ -1172,6 +1186,17 @@ struct TodayList: View {
                 stableActivityOrder = sortedActivities().map { $0.id }
             }
         }
+        }
+    }
+
+    /// TodayView empty state 아이콘 — 탭 아이콘과 동일 동적 calendar 사용 (Mac Catalyst는 static).
+    private var todayEmptyIconName: String {
+        let day = Calendar.current.component(.day, from: Date())
+        #if targetEnvironment(macCatalyst)
+        return "calendar"
+        #else
+        return "\(day).calendar"
+        #endif
     }
 
     /// occurrenceStart override + compact mode 전달.

@@ -235,7 +235,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Activity"
+            "value" : "Activity History"
           }
         },
         "ko" : {
@@ -284,7 +284,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Activity"
+            "value" : "Activity History"
           }
         },
         "ko" : {
@@ -489,7 +489,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Activity"
+            "value" : "Activity History"
           }
         },
         "ko" : {
@@ -1075,7 +1075,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Notify on goal reached"
+            "value" : "On Completion"
           }
         },
         "ko" : {
@@ -1123,7 +1123,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "End"
+            "value" : "Recurrence End"
           }
         },
         "ko" : {
@@ -1597,7 +1597,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mission alert"
+            "value" : "On Completion"
           }
         },
         "ko" : {
@@ -1613,7 +1613,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Start alert"
+            "value" : "On Start"
           }
         },
         "ko" : {
@@ -1925,13 +1925,29 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No archived tasks"
+            "value" : "No archived items"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "보관 중인 할일이 없습니다"
+            "value" : "보관 중인 항목이 없습니다"
+          }
+        }
+      }
+    },
+    "archive.empty.first" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture loose thoughts here.\nSort them out later."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아직 정리되지 않은 생각은 여기에 기록하세요."
           }
         }
       }
@@ -2136,6 +2152,23 @@
         }
       }
     },
+    "category.color.pink" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pink"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "분홍"
+          }
+        }
+      }
+    },
     "category.color.purple" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2193,13 +2226,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Yellow"
+            "value" : "Indigo"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "노랑"
+            "value" : "인디고"
           }
         }
       }
@@ -3009,13 +3042,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No active tasks"
+            "value" : "No active items"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "진행 중인 할일이 없습니다"
+            "value" : "진행 중인 항목이 없습니다"
           }
         }
       }
@@ -3025,13 +3058,29 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No completed tasks"
+            "value" : "No completed items"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "완료된 할일이 없습니다"
+            "value" : "완료된 항목이 없습니다"
+          }
+        }
+      }
+    },
+    "list.empty.first" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap (+) to add your first todo or mission."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(+) 를 눌러 당신의 첫 할일 또는 목표를 추가해보세요."
           }
         }
       }
@@ -3156,13 +3205,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Search Tasks"
+            "value" : "Search Items"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "활동 검색"
+            "value" : "항목 검색"
           }
         }
       }
@@ -3206,13 +3255,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "All Tasks"
+            "value" : "All Items"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "전체 활동"
+            "value" : "전체 항목"
           }
         }
       }
@@ -5111,7 +5160,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Activity"
+            "value" : "Activity History"
           }
         },
         "ko" : {
@@ -5565,6 +5614,38 @@
         }
       }
     },
+    "today.empty.first" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No todos or missions planned for today.\nTap (+) to add one."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘 계획된 할일이나 목표가 없어요.\n(+) 을 눌러 추가해보세요."
+          }
+        }
+      }
+    },
+    "today.empty.first.other" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No items planned for this day.\nTap (+) to add one."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 날짜에 계획된 할일이나 목표가 없어요.\n(+) 을 눌러 추가해보세요."
+          }
+        }
+      }
+    },
     "today.empty.in_progress" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -5704,7 +5785,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pick item"
+            "value" : "Select Item"
           }
         },
         "ko" : {
@@ -5871,7 +5952,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tasks"
+            "value" : "Todos"
           }
         },
         "ko" : {
@@ -5888,7 +5969,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cancel this task?\nFor recurring items, only this occurrence is cancelled."
+            "value" : "Cancel this todo?\nFor recurring items, only this occurrence is cancelled."
           }
         },
         "ko" : {
@@ -6058,13 +6139,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This task hasn't started yet.\nAre you sure you want to mark it complete?"
+            "value" : "This todo hasn't started yet.\nAre you sure you want to mark it complete?"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "아직 시작하지 않은 활동입니다.\n정말로 완료하시겠습니까?"
+            "value" : "아직 시작하지 않은 할일입니다.\n정말로 완료하시겠습니까?"
           }
         }
       }

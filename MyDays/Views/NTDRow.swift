@@ -150,21 +150,23 @@ struct NTDRow: View {
     }
 
     /// trailing status/action 아이콘 — 미완료(=interactive 포기 버튼), 완료/포기(=display only 아이콘).
-    /// 시각적 균형 위해 완료/포기 케이스에도 같은 사이즈 아이콘 노출.
+    /// 정책: 진행 중은 line(outline), 완료시는 filled.
     @ViewBuilder
     private func trailingStatusIcon(completed: Bool, failed: Bool) -> some View {
         if completed {
-            Image(systemName: "checkmark.circle")
+            // 완료 → filled
+            Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
                 .foregroundStyle(goalAccentColor)
                 .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
         } else if failed {
+            // 포기 → nosign (filled 변형 없음). 종결 상태 시각.
             Image(systemName: "nosign")
                 .font(.title3)
                 .foregroundStyle(goalAccentColor)
                 .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
         } else {
-            // 미완료/미포기 — 포기 액션 버튼.
+            // 미완료/미포기 진행 중 — 포기 액션 버튼 (line, outline).
             Button {
                 showGiveUpSheet = true
             } label: {
@@ -330,7 +332,7 @@ struct NTDRow: View {
 
     /// progress capsule renderer — (progress, text, color)를 받아 일관된 시각 출력.
     /// - 배경: systemGray5 capsule (고정폭)
-    /// - 채움: goalColor.opacity(0.35), leading부터 progress 비율
+    /// - 채움: goalColor.opacity(0.22), leading부터 progress 비율
     /// - 글자: 중앙 overlay (라이트=goalColor, 다크=white)
     /// - 최소 가시 폭 4pt — progress > 0이면 매우 낮아도 약간 보이게
     @ViewBuilder
@@ -343,7 +345,7 @@ struct NTDRow: View {
                 let target = fullWidth * CGFloat(progress)
                 let fillWidth: CGFloat = progress > 0 ? max(4, target) : 0
                 Capsule()
-                    .fill(goalColor.opacity(0.35))
+                    .fill(goalColor.opacity(0.22))
                     .frame(width: fillWidth)
             }
             .clipShape(Capsule())
