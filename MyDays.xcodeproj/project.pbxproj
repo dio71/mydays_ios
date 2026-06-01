@@ -59,6 +59,7 @@
 				Models/AppTheme.swift,
 				Models/CalendarDate.swift,
 				Models/CategoryColor.swift,
+				Models/GoalIcon.swift,
 				"Models/Item+Helpers.swift",
 				"Models/ItemEvent+Helpers.swift",
 				Models/ModelEnums.swift,
@@ -305,6 +306,7 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -340,6 +342,7 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -362,6 +365,9 @@
 				INFOPLIST_FILE = MyDays/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "My Days";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "걸음수와 거리 데이터를 읽어와서 활동 목표 진행도를 자동으로 측정합니다.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "음성으로 보관함 항목을 빠르게 입력하기 위해 마이크를 사용합니다.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "음성을 텍스트로 변환해 보관함 항목 제목으로 사용합니다.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -401,6 +407,9 @@
 				INFOPLIST_FILE = MyDays/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "My Days";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "걸음수와 거리 데이터를 읽어와서 활동 목표 진행도를 자동으로 측정합니다.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "음성으로 보관함 항목을 빠르게 입력하기 위해 마이크를 사용합니다.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "음성을 텍스트로 변환해 보관함 항목 제목으로 사용합니다.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

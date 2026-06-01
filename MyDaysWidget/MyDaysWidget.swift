@@ -2,314 +2,428 @@ import CoreData
 import SwiftUI
 import WidgetKit
 
-// MARK: - NTD Widget
+// MARK: - Home Widget (Small / Medium)
 //
-// 홈 스크린 위젯: 가장 relevant한 NTD occurrence 1개의 카운트다운 표시.
+// Redesign (2026-06-01):
+// - 시간 정보(카운트다운/시계) 모두 제거 — glance 시각에 집중.
+// - 목표(절제/활동/집중/습관) 4-type 통합 + 할일을 동일 row 폭으로 나열.
+// - Row 형태:
+//     - 목표: (아이콘) [────── 진행바 안에 타이틀 ──────]
+//     - 할일: (카테고리 아이콘) 타이틀
+// - 우상단 카운트 박스: (target) 미완료/전체 / (checkmark.circle) 미완료/전체.
+// - 정렬: group(목표→할일) → bucket(진행중→진행예정→종료지난) → sortAnchor.
+// - 종료지난 항목도 우선순위 끝에서 노출 — 공간 부족 시 자연 잘림.
+// - Reload tier: 시간 라벨 없어 30~60분 step으로 충분. transition instant만 강제 entry.
 //
 // 데이터 소스: App Group shared sqlite (`group.io.snapplay.MyDays/MyDays.sqlite`)
-// PersistenceController.shared가 widget process에서도 동일 store를 연다.
-//
-// Timeline 전략: entry는 transition 시점에만 새로 발급하고, 카운트다운 자체는
-// SwiftUI `Text(timerInterval:countsDown:)`이 OS-side로 매초 자동 갱신.
-// 따라서 entry 수가 적어 WidgetKit 60-entry 한계와 무관.
-//
-// 갱신 트리거:
-//   - 다음 transition instant (scheduled→inProgress, inProgress→ended)에서 reload
-//   - 또는 30분 후 (예: relevant NTD 없을 때 새로 들어왔는지 재확인)
 
-// MARK: Snapshot — NSManagedObject를 widget process에 안전하게 전달하기 위한 값 타입.
-// NTD/Todo/Routine 통합. kind + isRoutine + priority + state로 식별.
+// MARK: - StatusBucket
 
-struct ItemSnapshot: Equatable {
-    let kind: ItemKind             // .notTodo (NTD) / .todo
-    let isRoutine: Bool             // recurrenceRule != nil
+/// 정렬·표시용 상태 bucket. type 무관 통합 분류.
+enum StatusBucket: Int, Comparable {
+    case ongoing = 0    // 진행중
+    case scheduled = 1  // 진행예정
+    case past = 2       // 종료지난
+
+    static func < (a: StatusBucket, b: StatusBucket) -> Bool { a.rawValue < b.rawValue }
+}
+
+// MARK: - ItemSnapshot
+//
+// NSManagedObject를 widget process에 전달하기 위한 값 타입.
+// 4-type 목표 + 할일 통합. 기존 ItemSnapshot에서 시간 정보 제거 + progress 통합.
+
+struct ItemSnapshot: Equatable, Identifiable {
+    let id: String                 // ForEach용 — objectID + 부가 키
+    let kind: ItemKind
     let title: String
-    let priority: Priority          // 정렬 1순위 (high → none)
-    let state: DisplayState
-    let startInstant: Date
-    /// nil이면 끝 시각이 정의되지 않음:
-    /// - NTD inProgress: 한계까지 진행 중 → countup from startInstant
-    /// - untimed: 시간 미설정 → 카운트다운/카운트업 X, "오늘" 라벨
-    let endInstant: Date?
-    /// 카테고리 아이콘 SF Symbol 이름 (Category.iconName 그대로). 미설정 시 nil → fallback 아이콘.
-    let categoryIconName: String?
-    /// 카테고리 색상 rawValue (CategoryColor.rawValue, 예: "red"). 미설정 시 nil → 앱 tint fallback.
-    let categoryColorHex: String?
+    let bucket: StatusBucket
+    /// 0~1 진행률. 목표 type에서 의미 있음. 할일은 0 (사용 안 함).
+    /// 습관: 미체크=0, 체크=1 (binary). 일관성 위해 다른 목표와 같은 capsule 사용.
+    let progress: Double
+    /// 같은 bucket 안에서 정렬 기준 instant. 진행중=종료 가까운 순, 예정=시작 빠른 순, 지남=종료/완료 instant.
+    let sortAnchor: Date
+    /// SF Symbol 이름 (이미 resolved). 목표=`Item.iconName` (GoalIcon symbol) / 할일=카테고리 아이콘 or fallback.
+    let iconName: String
+    /// 색상 rawValue (CategoryColor: "red", "blue" 등). nil이면 위젯이 앱 tint로 fallback.
+    let iconColorHex: String?
 
-    /// 표시 상태. NTDState보다 generic — Todo의 overdue/untimed까지 표현.
-    enum DisplayState: Equatable {
-        case scheduled     // 시작 전 (시간 명시)
-        case inProgress    // 진행 중 (시간 명시 + 종료 전, 또는 NTD 한계까지)
-        case overdue       // Todo 마감 시각 지남 (NTD는 자동 완료라 도달 X)
-        case untimed       // 시간 미설정 — 오늘 일정/루틴이지만 시각 없음
-    }
+    var isGoal: Bool { kind != .todo }
+
+    /// group order — 목표(0) → 할일(1).
+    var groupOrder: Int { isGoal ? 0 : 1 }
 }
 
-// MARK: TimelineEntry
+// MARK: - Counts (우상단 박스)
 
-/// "오늘 활동" 종류별 active 개수. 위젯에 일부만 표시되니 전체 visibility 보조용.
-/// - ntdCount: relevant occurrence가 있고 ended 아님 (진행 중 + 예정)
-/// - todoCount: 1회성 Todo 중 오늘 todoSection 매칭
-/// - routineCount: 반복 Todo 중 오늘 occurrence + 미체크
-struct ActivitySummary: Equatable {
-    let ntdCount: Int
-    let todoCount: Int
-    let routineCount: Int
+struct ItemCounts: Equatable {
+    let goalActive: Int      // 진행중+진행예정 (미완료) 목표
+    let goalTotal: Int       // 오늘 노출 가능 전체 목표 (past 포함)
+    let todoActive: Int
+    let todoTotal: Int
 
-    static let empty = ActivitySummary(ntdCount: 0, todoCount: 0, routineCount: 0)
+    static let empty = ItemCounts(goalActive: 0, goalTotal: 0, todoActive: 0, todoTotal: 0)
 }
 
-struct NTDEntry: TimelineEntry {
+// MARK: - TimelineEntry
+
+struct MyDaysHomeEntry: TimelineEntry {
     let date: Date
-    let snapshots: [ItemSnapshot]  // 비어 있으면 표시할 항목 없음 (NTD/Todo/Routine 통합)
-    let summary: ActivitySummary
+    let snapshots: [ItemSnapshot]
+    let counts: ItemCounts
 }
 
-// MARK: Provider
-//
-// 정렬 우선순위 (사용자 정의):
-//   1. 진행 중 + 목표시간 있음 → endInstant(종료 예정) 이른 순
-//   2. 예정(scheduled) → startInstant 이른 순
-//   3. 진행 중 + 목표시간 없음 (한계까지) → 가장 마지막
-// → 종료 가까운 것 / 곧 시작할 것 / 한계 진행 중 순으로 노출.
-//
-// Provider는 최대 maxSnapshotCount(3)개를 미리 가져오고, View가 family에 따라 prefix.
+// MARK: - Provider
 
-struct NTDProvider: TimelineProvider {
+struct MyDaysHomeProvider: TimelineProvider {
 
-    /// 최대 10개까지 fetch. View가 family·항목 종류별 높이에 따라 들어가는 만큼만 렌더.
-    /// NTD/할일 box 높이가 달라 family당 고정 개수가 아닌 budget 기반 fit으로 처리.
-    private static let maxSnapshotCount = 10
+    /// 위젯 최대 노출 가능 수. View가 family·실제 공간에 맞춰 prefix.
+    private static let maxSnapshotCount: Int = 16
 
-    func placeholder(in context: Context) -> NTDEntry {
-        // iOS가 placeholder mode (loading)에서도 우리 layout이 보이도록 real data로 채움.
-        // RedactionReasons.placeholder는 자동 적용되어 text가 skeleton 회색 처리되지만
-        // view 구조/배경/icon 위치는 정확히 유지됨 — 빈 entry보다 시각적 일관성 우수.
+    func placeholder(in context: Context) -> MyDaysHomeEntry {
         let now = Date()
         let items = Self.fetchActiveItems()
-        return NTDEntry(
-            date: now,
-            snapshots: Self.makeSnapshots(items: items, now: now, limit: Self.maxSnapshotCount),
-            summary: Self.computeSummary(items: items, now: now)
-        )
+        return Self.makeEntry(items: items, now: now)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (NTDEntry) -> Void) {
+    func getSnapshot(in context: Context, completion: @escaping (MyDaysHomeEntry) -> Void) {
         let now = Date()
         let items = Self.fetchActiveItems()
-        let snaps = Self.makeSnapshots(items: items, now: now, limit: Self.maxSnapshotCount)
-        let summary = Self.computeSummary(items: items, now: now)
-        completion(NTDEntry(date: now, snapshots: snaps, summary: summary))
+        completion(Self.makeEntry(items: items, now: now))
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<NTDEntry>) -> Void) {
+    func getTimeline(in context: Context, completion: @escaping (Timeline<MyDaysHomeEntry>) -> Void) {
         let now = Date()
         let items = Self.fetchActiveItems()
 
-        // Lock widget과 동일 tiered granularity:
-        //   > 3h: 30min step / 3h~1h: 10min step / 1h~20m: 5min step / <20m: 1min step / 미설정: 1h step
-        // 멀리 있는 시점은 정밀도 낮춰도 무관, 가까운 시점만 빈번히 갱신해 budget 안에서 정확도 확보.
+        // Adaptive tier — 시간 라벨 없어 budget spare. 진행바 정밀도 위주:
+        //   > 1h: 60min step / 20m~1h: 10min step / 5m~20m: 5min step / <5m: 1min step / 미설정: 60min step.
+        // horizon: 6h — 한 timeline의 lookahead 범위. transition은 강제 entry.
         let transitions = Self.transitionInstants(items: items, after: now)
         let horizon = now.addingTimeInterval(6 * 60 * 60)
-        var dates: Set<Date> = []
+        var dates: Set<Date> = [now]
         var t = now
         while t <= horizon {
-            dates.insert(t)
             let nextT = transitions.first { $0 > t }
             let step: TimeInterval
             if let nt = nextT {
                 let ttt = nt.timeIntervalSince(t)
-                if ttt > 3 * 60 * 60 { step = 30 * 60 }
-                else if ttt > 60 * 60 { step = 10 * 60 }
-                else if ttt > 20 * 60 { step = 5 * 60 }
+                if ttt > 60 * 60 { step = 60 * 60 }
+                else if ttt > 20 * 60 { step = 10 * 60 }
+                else if ttt > 5 * 60 { step = 5 * 60 }
                 else { step = 60 }
             } else {
-                step = 60 * 60  // transition 없음 → 1시간 step
+                step = 60 * 60
             }
             let next = t.addingTimeInterval(step)
             if let nt = nextT, nt > t && nt < next {
                 dates.insert(nt)
             }
             t = next
+            dates.insert(t)
         }
-        let entries: [NTDEntry] = dates.sorted().map { date in
-            NTDEntry(
-                date: date,
-                snapshots: Self.makeSnapshots(items: items, now: date, limit: Self.maxSnapshotCount),
-                summary: Self.computeSummary(items: items, now: date)
-            )
+        let entries: [MyDaysHomeEntry] = dates.sorted().map { date in
+            Self.makeEntry(items: items, now: date)
         }
         let reloadAt = (entries.last?.date ?? now).addingTimeInterval(60)
         completion(Timeline(entries: entries, policy: .after(reloadAt)))
     }
 
-    // MARK: - 데이터 fetch
+    // MARK: - Entry 조립
 
-    /// 모든 active(status=0) 항목을 fetch — NTD 뿐 아니라 Todo/루틴 카운트도 같은 fetch 결과로 처리.
-    /// kind 필터는 호출 측에서 분기.
-    private static func fetchActiveItems() -> [Item] {
+    private static func makeEntry(items: [Item], now: Date) -> MyDaysHomeEntry {
+        let snaps = makeSnapshots(items: items, now: now, limit: maxSnapshotCount)
+        let counts = computeCounts(items: items, now: now)
+        return MyDaysHomeEntry(date: now, snapshots: snaps, counts: counts)
+    }
+
+    // MARK: - Fetch
+
+    /// status != deleted + isSomeday 제외 항목.
+    /// - done(status=1)/failed(status=3)도 fetch — "종료지난" bucket 노출에 필요.
+    /// - **isSomeday (보관함) 제외** — 보관함 항목은 일정 미정 inbox라 위젯 "오늘" 범위 밖.
+    /// - fetch는 status·deleted만 거르고 isSomeday는 메모리 필터로 처리 — Core Data Boolean optional의
+    ///   NULL semantics 때문에 SQL 단의 `isSomeday != YES`가 nil row를 포착 못 하는 케이스 회피.
+    static func fetchActiveItems() -> [Item] {
         let context = PersistenceController.shared.viewContext
-        // Multi-process Core Data — main app이 sqlite에 save해도 widget process의 row cache는 stale.
-        // refresh로 캐시된 객체를 fault 처리해 다음 access 시 store에서 다시 읽도록 강제.
+        // Multi-process Core Data — main app save 결과를 widget process 캐시에 반영.
         context.refreshAllObjects()
         let request: NSFetchRequest<Item> = Item.fetchRequest()
-        request.predicate = NSPredicate(format: "status == 0")
-        return (try? context.fetch(request)) ?? []
+        request.predicate = NSPredicate(format: "status != %d", Status.deleted.rawValue)
+        let raw = (try? context.fetch(request)) ?? []
+        return raw.filter { !$0.isSomeday }
     }
 
-    /// 주어진 `now` 기준으로 NTD/Todo/Routine snapshot 목록을 만들어 정렬 후 limit개 반환.
-    private static func makeSnapshots(items: [Item], now: Date, limit: Int) -> [ItemSnapshot] {
-        let today: Date = .todayCalendarAnchor
-        var candidates: [ItemSnapshot] = []
+    // MARK: - Snapshot 생성
 
+    static func makeSnapshots(items: [Item], now: Date, limit: Int) -> [ItemSnapshot] {
+        let today: Date = .todayCalendarAnchor
+        var snaps: [ItemSnapshot] = []
         for item in items {
-            if let snap = Self.snapshot(for: item, now: now, today: today) {
-                candidates.append(snap)
+            // past(완료/취소/만료) 항목은 row 표시에서 제외. 카운트(computeCounts)는 별도라 영향 X.
+            if let s = snapshot(for: item, now: now, today: today), s.bucket != .past {
+                snaps.append(s)
             }
         }
-
-        candidates.sort { a, b in
-            if a.kindOrder != b.kindOrder { return a.kindOrder < b.kindOrder }
-            if a.priorityOrder != b.priorityOrder { return a.priorityOrder < b.priorityOrder }
+        snaps.sort { a, b in
+            if a.groupOrder != b.groupOrder { return a.groupOrder < b.groupOrder }
+            if a.bucket != b.bucket { return a.bucket < b.bucket }
             return a.sortAnchor < b.sortAnchor
         }
-        return Array(candidates.prefix(limit))
+        return Array(snaps.prefix(limit))
     }
 
-    /// 한 항목에서 표시 가능 snapshot을 생성. 표시 안 할 항목(완료/오늘 occurrence 없음 등)은 nil.
-    private static func snapshot(for item: Item, now: Date, today: Date) -> ItemSnapshot? {
-        switch item.itemKind {
-        case .notTodo:
-            return ntdSnapshot(item: item, now: now)
-        case .todo:
-            if item.recurrenceRule != nil {
-                return routineSnapshot(item: item, now: now, today: today)
-            }
-            return todoSnapshot(item: item, now: now, today: today)
-        case .activity:
-            // TODO: 활동 위젯 snapshot — Phase B/C. 현재는 미노출.
-            return nil
-        case .focus:
-            // TODO: 집중 위젯 snapshot — Phase D. 현재는 미노출.
-            return nil
-        case .habit:
-            // 습관은 routine Todo와 동일 패턴이라 routineSnapshot 재활용 가능.
-            // Phase A 위젯 미노출 — 다음 phase에 통합.
-            return nil
-        }
-    }
-
-    private static func ntdSnapshot(item: Item, now: Date) -> ItemSnapshot? {
-        // 오늘 포기 occurrence가 있는 NTD는 위젯에서 제외 — 사용자가 포기한 항목이 다음 occurrence로
-        // 미루어져 노출되는 어색함 회피.
-        let today = Date.todayCalendarAnchor
-        if let record = item.routineRecord(on: today), record.failed {
-            return nil
-        }
-        guard let occ = item.ntdRelevantOccurrenceDate(at: now),
-              let ntdState = item.ntdState(on: occ, now: now),
-              ntdState != .ended,
-              let start = item.ntdStartInstant(on: occ)
-        else { return nil }
-        // 오늘보다 미래 occurrence(예: 3일 뒤 시작)는 위젯에서 제외 — "오늘 일정" 범위.
-        let occDay = Calendar.gmt.startOfDay(for: occ)
-        if occDay > today { return nil }
-        let end = item.ntdEndInstant(on: occ)
-        let display: ItemSnapshot.DisplayState
-        switch ntdState {
-        case .scheduled:  display = .scheduled
-        case .inProgress: display = .inProgress  // end nil이면 한계까지 — countdownText에서 countup 분기
-        case .ended:      return nil  // 안전망, 위에서 이미 걸러짐
-        }
+    /// 한 항목에서 표시 가능 snapshot 생성. 표시 안 함이면 nil.
+    static func snapshot(for item: Item, now: Date, today: Date) -> ItemSnapshot? {
+        guard let cls = classify(item: item, now: now, today: today) else { return nil }
+        let progress = computeProgress(for: item, today: today, now: now, bucket: cls.bucket)
         return ItemSnapshot(
-            kind: .notTodo,
-            isRoutine: item.recurrenceRule != nil,
+            id: snapshotID(for: item, occurrenceKey: cls.anchor),
+            kind: item.itemKind,
             title: item.title ?? "",
-            priority: item.itemPriority,
-            state: display,
-            startInstant: start,
-            endInstant: end,
-            categoryIconName: item.category?.iconName,
-            categoryColorHex: item.category?.colorHex
+            bucket: cls.bucket,
+            progress: progress,
+            sortAnchor: cls.anchor,
+            iconName: resolveIcon(for: item),
+            iconColorHex: resolveColorHex(for: item)
         )
     }
 
-    /// 1회성 Todo. todoSection 매칭(오늘 표시 대상) 항목만 snapshot으로.
-    /// 시작일이 오늘보다 미래(예: 3일 뒤 시작)면 위젯에서 제외 — "오늘 일정" 범위 한정.
-    private static func todoSnapshot(item: Item, now: Date, today: Date) -> ItemSnapshot? {
+    private static func snapshotID(for item: Item, occurrenceKey: Date) -> String {
+        "\(item.objectID.uriRepresentation().absoluteString)#\(Int(occurrenceKey.timeIntervalSince1970))"
+    }
+
+    // MARK: - 분류 (bucket + sortAnchor)
+
+    /// item별 status bucket과 정렬 anchor instant 결정.
+    /// `nil` = 위젯 노출 대상 아님 (예: 미래 일정, 오늘 occurrence 없음).
+    private static func classify(item: Item, now: Date, today: Date) -> (bucket: StatusBucket, anchor: Date)? {
+        switch item.itemKind {
+        case .notTodo:    return classifyNTD(item, now: now, today: today)
+        case .activity:   return classifyActivity(item, now: now, today: today)
+        case .focus:      return classifyFocus(item, now: now, today: today)
+        case .habit:      return classifyHabit(item, now: now, today: today)
+        case .todo:       return classifyTodo(item, now: now, today: today)
+        }
+    }
+
+    private static func classifyNTD(_ item: Item, now: Date, today: Date) -> (StatusBucket, Date)? {
+        let isRoutine = item.recurrenceRule != nil
+        if isRoutine {
+            // 반복 NTD: today RC 기반으로 past 판정. RC date == today에 done/failed면 past.
+            // 다른 날 RC(과거 occurrence 결과)는 영향 X — routineRecord(on: today)는 today 기준 lookup.
+            if let rec = item.routineRecord(on: today) {
+                if rec.failed { return (.past, rec.completedAt ?? now) }
+                if rec.done { return (.past, rec.completedAt ?? now) }
+            }
+        } else {
+            // 1회성 NTD: Item.status 기반. completedAt이 오늘일 때만 past 노출, 다른 날 종료된 건 위젯 범위 밖.
+            // (이전: ntdRelevantOccurrenceDate가 과거 startDate를 반환 + ntdState=.ended로 past 분류되어
+            //  과거에 포기/완료된 1회성 NTD가 위젯에 잔존하는 버그.)
+            if item.itemStatus == .failed || item.itemStatus == .done {
+                if let completed = item.completedAt,
+                   Calendar.gmt.isDate(completed.calendarDateAnchor, inSameDayAs: today) {
+                    return (.past, completed)
+                }
+                return nil
+            }
+        }
+
+        // 진행중/예정 — ntdState 기반.
+        guard let occ = item.ntdRelevantOccurrenceDate(at: now) else { return nil }
+        let occDay = Calendar.gmt.startOfDay(for: occ)
+        // 오늘보다 미래 occurrence는 노출 안 함 — "오늘" 범위.
+        if occDay > today { return nil }
+        guard let state = item.ntdState(on: occ, now: now),
+              let start = item.ntdStartInstant(on: occ) else { return nil }
+        switch state {
+        case .scheduled:
+            return (.scheduled, start)
+        case .inProgress:
+            return (.ongoing, item.ntdEndInstant(on: occ) ?? start.addingTimeInterval(24 * 3600))
+        case .ended:
+            // 반복 NTD가 ended state인데 RC 없음 = 위젯 노출 가치 낮음 (자동 완성 트리거 대기 등 비정상 상태).
+            // 1회성은 위쪽 status 가드에서 이미 처리됐으므로 여기 도달 X.
+            return nil
+        }
+    }
+
+    private static func classifyActivity(_ item: Item, now: Date, today: Date) -> (StatusBucket, Date)? {
+        guard isActiveToday(item, today: today) else {
+            // 오늘 occurrence 아닌데 status=done이면 past로 노출 X — 오늘 일정 범위로 한정.
+            return nil
+        }
+        let rec = item.routineRecord(on: today)
+        if rec?.done == true {
+            return (.past, rec?.completedAt ?? now)
+        }
+        // 진행중 — 종일 (start/end 없음). anchor는 오늘 자정으로 (같은 bucket 안에서 startDate 빠른 항목 먼저).
+        return (.ongoing, today.addingTimeInterval(24 * 3600))
+    }
+
+    private static func classifyFocus(_ item: Item, now: Date, today: Date) -> (StatusBucket, Date)? {
+        guard isActiveToday(item, today: today) else { return nil }
+        let rec = item.routineRecord(on: today)
+        if rec?.done == true {
+            return (.past, rec?.completedAt ?? now)
+        }
+        return (.ongoing, today.addingTimeInterval(24 * 3600))
+    }
+
+    private static func classifyHabit(_ item: Item, now: Date, today: Date) -> (StatusBucket, Date)? {
+        guard isActiveToday(item, today: today) else { return nil }
+        let rec = item.routineRecord(on: today)
+        if rec?.done == true {
+            return (.past, rec?.completedAt ?? now)
+        }
+        return (.ongoing, today.addingTimeInterval(24 * 3600))
+    }
+
+    private static func classifyTodo(_ item: Item, now: Date, today: Date) -> (StatusBucket, Date)? {
+        if let rule = item.recurrenceRule {
+            // 반복 Todo — 오늘 occurrence가 있어야 노출.
+            guard rule.occurs(on: today, startDate: item.startDate, endDate: item.recurrenceEndDate)
+            else { return nil }
+            if let rec = item.routineRecord(on: today), rec.done {
+                return (.past, rec.completedAt ?? now)
+            }
+            guard let start = Item.localInstant(fromCalendarDate: today, hour: item.startHourInt)
+            else { return nil }
+            let span = item.spanDays
+            let endDay = Calendar.gmt.date(byAdding: .day, value: span, to: today) ?? today
+            let end = Item.localInstant(fromCalendarDate: endDay, hour: item.dueHourInt)
+            return classifyTodoTime(start: start, end: end, hasExplicitTime: item.hasExplicitTime, now: now)
+        }
+        // 1회성 Todo
+        // status=.done(완료) 또는 .failed(사용자 취소 — CancelTodoSheet에서 Item.status=.failed 설정).
+        // 오늘 종료된 것만 past로 노출, 다른 날 종료는 위젯 "오늘" 범위 밖.
+        if item.itemStatus == .done || item.itemStatus == .failed {
+            if let completed = item.completedAt,
+               Calendar.gmt.isDate(completed.calendarDateAnchor, inSameDayAs: today) {
+                return (.past, completed)
+            }
+            return nil
+        }
         guard item.todoSection(on: today, now: now) != nil else { return nil }
         guard let start = item.effectiveStartInstant else { return nil }
         let end = item.effectiveDueInstant
         let startDay = Calendar.gmt.startOfDay(for: item.startDate ?? today)
+        // 오늘 이후 시작은 노출 안 함.
         if startDay > today { return nil }
-        let display = todoDisplayState(start: start, end: end, hasExplicitTime: item.hasExplicitTime, now: now)
-        return ItemSnapshot(
-            kind: .todo,
-            isRoutine: false,
-            title: item.title ?? "",
-            priority: item.itemPriority,
-            state: display,
-            startInstant: start,
-            endInstant: end,
-            categoryIconName: item.category?.iconName,
-            categoryColorHex: item.category?.colorHex
-        )
+        return classifyTodoTime(start: start, end: end, hasExplicitTime: item.hasExplicitTime, now: now)
     }
 
-    /// 반복 Todo (루틴). 오늘 occurrence + 미체크인 경우 snapshot 생성.
-    private static func routineSnapshot(item: Item, now: Date, today: Date) -> ItemSnapshot? {
-        guard let rule = item.recurrenceRule,
-              rule.occurs(on: today, startDate: item.startDate, endDate: item.recurrenceEndDate),
-              !item.hasRoutineRecord(on: today)
-        else { return nil }
-        guard let start = Item.localInstant(fromCalendarDate: today, hour: item.startHourInt) else { return nil }
-        let span = item.spanDays
-        let endDay = Calendar.gmt.date(byAdding: .day, value: span, to: today) ?? today
-        let end = Item.localInstant(fromCalendarDate: endDay, hour: item.dueHourInt)
-        let display = todoDisplayState(start: start, end: end, hasExplicitTime: item.hasExplicitTime, now: now)
-        return ItemSnapshot(
-            kind: .todo,
-            isRoutine: true,
-            title: item.title ?? "",
-            priority: item.itemPriority,
-            state: display,
-            startInstant: start,
-            endInstant: end,
-            categoryIconName: item.category?.iconName,
-            categoryColorHex: item.category?.colorHex
-        )
+    private static func classifyTodoTime(start: Date, end: Date?, hasExplicitTime: Bool, now: Date)
+        -> (StatusBucket, Date)
+    {
+        if !hasExplicitTime {
+            // 시간 미설정 — 항상 진행중. anchor는 종료 instant or start+24h.
+            return (.ongoing, end ?? start.addingTimeInterval(24 * 3600))
+        }
+        if now < start { return (.scheduled, start) }
+        // 단일 일정 (start == end) — 시각 지나도 ongoing 유지. 사용자가 체크해야 사라지는 정책 (오늘탭과 통일).
+        // 기간 (end > start) — 종료 시각 지나면 past.
+        if let end = end, end > start, now > end { return (.past, end) }
+        return (.ongoing, end ?? start.addingTimeInterval(24 * 3600))
     }
 
-    /// Todo/Routine 공통 display state 결정 — 시간 미설정이면 .untimed, 그 외 instant 비교.
-    private static func todoDisplayState(start: Date, end: Date?, hasExplicitTime: Bool, now: Date) -> ItemSnapshot.DisplayState {
-        if !hasExplicitTime { return .untimed }
-        if now < start { return .scheduled }
-        if let end = end, now >= end { return .overdue }
-        return .inProgress
+    /// 활동/집중/습관 공통 — 오늘이 active occurrence인지 판정.
+    private static func isActiveToday(_ item: Item, today: Date) -> Bool {
+        if let rule = item.recurrenceRule {
+            return rule.occurs(on: today, startDate: item.startDate, endDate: item.recurrenceEndDate)
+        }
+        guard let start = item.startDate else { return false }
+        return Calendar.gmt.isDate(start, inSameDayAs: today)
     }
 
-    /// 오늘 활동 종류별 카운트 — snapshot 가능한 항목과 일관 (포기 NTD 제외 등 동일 필터).
-    private static func computeSummary(items: [Item], now: Date) -> ActivitySummary {
+    // MARK: - Progress 계산
+
+    /// 목표 type 진행률 0~1. 할일은 0 (사용 안 함).
+    static func computeProgress(for item: Item, today: Date, now: Date, bucket: StatusBucket) -> Double {
+        switch item.itemKind {
+        case .notTodo:
+            if bucket == .scheduled { return 0 }
+            if bucket == .past { return 1 }
+            guard let occ = item.ntdRelevantOccurrenceDate(at: now),
+                  let start = item.ntdStartInstant(on: occ) else { return 0 }
+            let elapsed = now.timeIntervalSince(start)
+            if let end = item.ntdEndInstant(on: occ) {
+                let total = max(end.timeIntervalSince(start), 1)
+                return max(0, min(elapsed / total, 1))
+            }
+            // 한계 미설정 — 30일 cap (락 위젯과 동일 정책).
+            return max(0, min(elapsed / (30 * 24 * 3600), 1))
+        case .activity:
+            let current = Double(item.activityCurrentValue(on: today))
+            let target = item.activityTargetValueDouble ?? 0
+            return target > 0 ? max(0, min(current / target, 1)) : 0
+        case .focus:
+            // focusCurrentMinutes(on:)은 Services/Item+FocusSession.swift에 있으나 widget target 멤버십 X.
+            // 같은 로직 inline — RC.valueRecorded 직접 read.
+            let current = item.routineRecord(on: today)?.valueRecorded?.doubleValue ?? 0
+            let target = item.activityTargetValueDouble ?? 0
+            return target > 0 ? max(0, min(current / target, 1)) : 0
+        case .habit:
+            return bucket == .past ? 1 : 0
+        case .todo:
+            return 0
+        }
+    }
+
+    // MARK: - 아이콘/색 resolve
+
+    /// 목표: GoalIcon.symbolName (item.iconName이 rawValue) / 할일: 카테고리 아이콘 / 없으면 fallback.
+    private static func resolveIcon(for item: Item) -> String {
+        if item.itemKind.isGoal {
+            if let raw = item.iconName, let g = GoalIcon(rawValue: raw) {
+                return g.symbolName
+            }
+            // 목표인데 iconName 없음 (legacy NTD) → kind별 기본.
+            return item.itemKind.goalTypeSymbolName
+        }
+        // 할일: 카테고리 아이콘 → 미설정 시 circle.
+        if let cat = item.category, let name = cat.iconName, !name.isEmpty {
+            return name
+        }
+        return "circle"
+    }
+
+    /// 색 rawValue (CategoryColor: "red", "blue"...). 위젯에서 Color로 매핑.
+    /// 목표=item.iconColorHex / 할일=category.colorHex.
+    private static func resolveColorHex(for item: Item) -> String? {
+        if item.itemKind.isGoal { return item.iconColorHex }
+        return item.category?.colorHex
+    }
+
+    // MARK: - Counts
+
+    static func computeCounts(items: [Item], now: Date) -> ItemCounts {
         let today: Date = .todayCalendarAnchor
-        let snapshots = items.compactMap { Self.snapshot(for: $0, now: now, today: today) }
-        let ntd = snapshots.filter { $0.kind == .notTodo }.count
-        let todo = snapshots.filter { $0.kind == .todo && !$0.isRoutine }.count
-        let routine = snapshots.filter { $0.kind == .todo && $0.isRoutine }.count
-        return ActivitySummary(ntdCount: ntd, todoCount: todo, routineCount: routine)
+        var goalActive = 0, goalTotal = 0, todoActive = 0, todoTotal = 0
+        for item in items {
+            guard let cls = classify(item: item, now: now, today: today) else { continue }
+            let isGoal = item.itemKind != .todo
+            let isActiveBucket = cls.bucket != .past
+            if isGoal {
+                goalTotal += 1
+                if isActiveBucket { goalActive += 1 }
+            } else {
+                todoTotal += 1
+                if isActiveBucket { todoActive += 1 }
+            }
+        }
+        return ItemCounts(goalActive: goalActive, goalTotal: goalTotal,
+                          todoActive: todoActive, todoTotal: todoTotal)
     }
 
-    /// items 전체에서 `now` 이후의 모든 transition instant (시작·종료) 수집해 시간 ascending으로 반환.
-    /// 표시 우선순위가 낮아 limit에서 빠진 NTD의 transition도 포함 — 그 시점에 후보 reshuffle 가능.
-    /// items 전체에서 `now` 이후 모든 transition instant (시작/종료 + 그 5분 전) 수집.
-    /// NTD/Todo/Routine 모두 동일 패턴 — 각 항목의 적용 occurrence start/end instant.
+    // MARK: - Transition instant 수집 (timeline tier용)
+
     private static func transitionInstants(items: [Item], after now: Date) -> [Date] {
         let today: Date = .todayCalendarAnchor
         var set = Set<TimeInterval>()
         for item in items {
             for instant in instantsForTransition(item: item, now: now, today: today) {
                 if instant > now { set.insert(instant.timeIntervalSince1970) }
-                let pre = instant.addingTimeInterval(-Self.fineGrainedThreshold)
-                if pre > now { set.insert(pre.timeIntervalSince1970) }
             }
         }
         return set.sorted().map { Date(timeIntervalSince1970: $0) }
@@ -322,7 +436,8 @@ struct NTDProvider: TimelineProvider {
             return [item.ntdStartInstant(on: occ), item.ntdEndInstant(on: occ)].compactMap { $0 }
         case .todo:
             if let rule = item.recurrenceRule {
-                guard rule.occurs(on: today, startDate: item.startDate, endDate: item.recurrenceEndDate) else { return [] }
+                guard rule.occurs(on: today, startDate: item.startDate, endDate: item.recurrenceEndDate)
+                else { return [] }
                 let start = Item.localInstant(fromCalendarDate: today, hour: item.startHourInt)
                 let span = item.spanDays
                 let endDay = Calendar.gmt.date(byAdding: .day, value: span, to: today) ?? today
@@ -331,44 +446,21 @@ struct NTDProvider: TimelineProvider {
             }
             return [item.effectiveStartInstant, item.effectiveDueInstant].compactMap { $0 }
         case .activity, .focus, .habit:
-            // Phase A 위젯 미노출 — 향후 단계에서 추가.
+            // 종일 의미 — transition 없음. progress는 사용자 액션/HK sync로 변하며 reload는 별도 trigger.
             return []
         }
     }
-
-    /// 카운트다운이 초 단위로 표시되는 임계 (초). 이 이내면 1초 schedule + mm:ss 포맷.
-    static let fineGrainedThreshold: TimeInterval = 300  // 5분
 }
 
-// internal — lock screen widget(MyDaysNTDLockWidget) 등 같은 target의 다른 파일에서 정렬 helper 재사용.
+// MARK: - Color resolve helper (View에서 사용)
+
 extension ItemSnapshot {
-    /// 1순위: kind 그룹 — NTD(0) → Todo(1).
-    var kindOrder: Int { kind == .notTodo ? 0 : 1 }
-
-    /// 2순위: priority — high(0) → medium(1) → low(2) → none(3).
-    var priorityOrder: Int {
-        switch priority {
-        case .high:   return 0
-        case .medium: return 1
-        case .low:    return 2
-        case .none:   return 3
+    /// 위젯에서 표시할 색. iconColorHex가 CategoryColor rawValue면 그 색, 없으면 app tint.
+    func resolvedColor() -> Color {
+        if let raw = iconColorHex, let cc = CategoryColor(rawValue: raw) {
+            return cc.color
         }
-    }
-
-    /// 3순위: 기준시간 ascending (가장 가까운 시간 먼저).
-    /// - 진행 중 / 마감 지남: 종료일의 종료시각 (없으면 시작일+24h, NTD 한계까지)
-    /// - 예정: 시작일의 시작시각
-    /// - 시간 없음: 시작일+24h (시간 있는 항목 다음으로)
-    var sortAnchor: TimeInterval {
-        switch state {
-        case .scheduled:
-            return startInstant.timeIntervalSince1970
-        case .inProgress, .overdue:
-            if let end = endInstant { return end.timeIntervalSince1970 }
-            return startInstant.addingTimeInterval(24 * 3600).timeIntervalSince1970
-        case .untimed:
-            return startInstant.addingTimeInterval(24 * 3600).timeIntervalSince1970
-        }
+        return TintPreset.currentColor
     }
 }
 
@@ -377,95 +469,104 @@ extension ItemSnapshot {
 struct MyDaysWidgetEntryView: View {
 
     @Environment(\.widgetFamily) private var family
-    let entry: NTDEntry
+    @Environment(\.colorScheme) private var colorScheme
+    let entry: MyDaysHomeEntry
 
     var body: some View {
         Group {
             switch family {
             case .systemMedium:
-                mediumLayout(snapshots: entry.snapshots)
+                mediumLayout
             default:
-                smallLayout(snapshots: entry.snapshots)
+                smallLayout
             }
         }
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
-    // MARK: 항목 fit 계산 — 항목 종류별 높이가 다르므로 budget(pt) 안에 들어가는 prefix만 렌더.
-    // ViewThatFits는 variant마다 SwiftUI layout pass가 돌아 부담 크고, 위젯 process 메모리 한계에
-    // 민감하므로 deterministic 높이 추정으로 처리.
+    // MARK: - 공간 추정 / fit
     //
-    // 추정 근거:
-    //   - widget content 영역(containerBackground 내부)은 iPhone small/medium에서 ~142pt
-    //   - dateLine(font 34) + summaryLine(caption) + 내부 spacing 합산 ≈ 64pt → headerHeight
-    //   - itemBox 내부: VStack spacing 2 + vertical padding 6 + caption 라인.
-    //     Todo는 1줄 (caption ~16pt) → 22pt. NTD는 2줄 (caption + caption2) → 36pt.
-    //   - VStack(spacing: 6)에서 항목 간 6pt.
+    // ViewThatFits는 widget process 메모리 부담 + variant pass 비용 — deterministic 추정으로 처리.
+    // - 위젯 content 영역 ~142pt (small/medium 동일 높이).
+    // - 헤더 영역(date + counts) ~50pt.
+    // - row 1줄(progress capsule or text + icon) ~22pt, row 간 spacing 4pt.
+    //   item 1개당 effective ~26pt. budget 92pt면 약 3~4개.
 
     private static let widgetContentHeight: CGFloat = 142
-    private static let headerHeight: CGFloat = 64
-    private static let itemSpacing: CGFloat = 6
-    private static let todoItemHeight: CGFloat = 22
-    private static let ntdItemHeight: CGFloat = 36
+    private static let headerHeight: CGFloat = 44  // 일자 큰 글자 + 우측 2줄(요일/카운트) 기준.
+    private static let rowHeight: CGFloat = 28
+    private static let rowSpacing: CGFloat = 5
 
-    private static func itemHeight(_ snap: ItemSnapshot) -> CGFloat {
-        snap.kind == .notTodo ? ntdItemHeight : todoItemHeight
+    private static func fitCount(in budget: CGFloat) -> Int {
+        guard budget > 0 else { return 0 }
+        // 첫 row는 spacing 없음 → effective = rowHeight, 그 다음부터 spacing 포함.
+        let extra = max(0, budget - rowHeight)
+        return 1 + Int(extra / (rowHeight + rowSpacing))
     }
 
-    /// items 시작점부터 누적 높이가 budget 이하인 prefix 개수 반환.
-    private static func fitCount(in budget: CGFloat, items: ArraySlice<ItemSnapshot>) -> Int {
-        var used: CGFloat = 0
-        var count = 0
-        for snap in items {
-            let h = itemHeight(snap)
-            let need = count == 0 ? h : (used + itemSpacing + h)
-            if need > budget { break }
-            used = need
-            count += 1
-        }
-        return count
+    private static func smallFitCount() -> Int {
+        fitCount(in: widgetContentHeight - headerHeight)
     }
 
-    /// Medium: 왼쪽(header 포함) 먼저 채우고 남은 항목은 오른쪽으로. 우측 budget 초과분은 잘림.
-    private static func splitForMedium(snapshots: [ItemSnapshot]) -> (left: [ItemSnapshot], right: [ItemSnapshot]) {
-        let leftBudget = widgetContentHeight - headerHeight
-        let leftCount = fitCount(in: leftBudget, items: snapshots[...])
-        let rightStart = leftCount
-        let rightCount = fitCount(in: widgetContentHeight, items: snapshots[rightStart...])
-        return (
-            left: Array(snapshots[0..<leftCount]),
-            right: Array(snapshots[rightStart..<(rightStart + rightCount)])
-        )
+    private static func mediumLeftFitCount() -> Int {
+        fitCount(in: widgetContentHeight - headerHeight)
     }
 
-    /// Small: header 아래에 들어가는 항목 수.
-    private static func smallFitCount(snapshots: [ItemSnapshot]) -> Int {
-        fitCount(in: widgetContentHeight - headerHeight, items: snapshots[...])
+    private static func mediumRightFitCount() -> Int {
+        fitCount(in: widgetContentHeight)
     }
 
-    /// 캘린더 풍 header: 큰 날짜 숫자 + 요일.
-    /// 예: "26" + "화요일" / "Tuesday". Apple 캘린더 위젯의 가벼운 weight 패턴.
-    private var dateLine: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 6) {
+    // MARK: - Header (날짜 + 카운트 박스)
+
+    /// 좌측: 큰 일자 / 우측 stack: 요일(상, 좌측 정렬) + 카운트(하, 우측 정렬).
+    /// small widget에서 한 줄에 모두 넣으면 카운트 숫자 잘림 → 우측 영역을 2줄로 분리해 공간 확보.
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 6) {
             Text(verbatim: Self.formatDay(entry.date))
-                .font(.system(size: 34))
+                .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.primary)
-            Text(verbatim: Self.formatWeekdayFull(entry.date))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            VStack(spacing: 3) {
+                Text(verbatim: Self.formatWeekday(entry.date))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                countsBox
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 우상단 1줄 카운트 박스. (scope) n/m  (checkmark.circle) n/m.
+    private var countsBox: some View {
+        HStack(spacing: 6) {
+            countItem(symbol: "scope",
+                      active: entry.counts.goalActive,
+                      total: entry.counts.goalTotal)
+            countItem(symbol: "checkmark.circle",
+                      active: entry.counts.todoActive,
+                      total: entry.counts.todoTotal)
         }
         .lineLimit(1)
     }
 
-    /// "절제 N · 할일 M · 루틴 X" 한 줄 요약.
-    private var summaryLine: some View {
-        Text(verbatim: Self.summaryText(entry.summary))
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+    private func countItem(symbol: String, active: Int, total: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(verbatim: "\(active)/\(total)")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
     }
 
-    /// `d` 형식: "26".
+    // MARK: - Date formatters
+
     private static func formatDay(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale.current
@@ -473,195 +574,131 @@ struct MyDaysWidgetEntryView: View {
         return f.string(from: date)
     }
 
-    /// "EEEE" template: ko "화요일", en "Tuesday".
-    private static func formatWeekdayFull(_ date: Date) -> String {
+    private static func formatWeekday(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale.current
         f.setLocalizedDateFormatFromTemplate("EEEE")
         return f.string(from: date)
     }
 
-    private static func summaryText(_ s: ActivitySummary) -> String {
-        String.localizedStringWithFormat(
-            NSLocalizedString("widget.summary.format", comment: ""),
-            s.ntdCount,
-            s.todoCount,
-            s.routineCount
-        )
-    }
+    // MARK: - Row (목표 = progress capsule + 타이틀, 할일 = 아이콘 + 타이틀)
 
-    // MARK: 항목 캡슐 — 전체 항목(icon + title + state + countdown)이 하나의 box.
-    // Apple 캘린더 위젯 패턴 — 각 일정이 highlight 박스로 묶임.
-
-    private func itemBox(snap: ItemSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: iconName(for: snap))
-                    .font(.caption)
-                    .foregroundStyle(iconColor(for: snap))
+    @ViewBuilder
+    private func itemRow(_ snap: ItemSnapshot) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: snap.iconName)
+                .font(.subheadline)
+                .foregroundStyle(snap.resolvedColor())
+                .frame(width: 18, alignment: .center)
+            if snap.isGoal {
+                progressCapsule(snap)
+            } else {
                 Text(verbatim: snap.title)
-                    .font(.caption.weight(.medium))
+                    .font(.subheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-            }
-            // 시간 표시는 NTD만 (할일은 아이콘 + 제목으로 충분).
-            if snap.kind == .notTodo {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Spacer(minLength: 0)
-                    stateLabel(for: snap)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    countdownText(for: snap)
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                        // Text(date, style: .relative)는 최대 폭으로 reserve해 좌측 정렬처럼 보일 수 있음.
-                        // multilineTextAlignment(.trailing) + frame trailing alignment로 강제 우측 정렬.
-                        .multilineTextAlignment(.trailing)
-                        .frame(alignment: .trailing)
-                }
-                .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.secondary.opacity(0.18))
-        )
+        // row는 고정 크기. 항목 갯수가 fit max보다 적으면 아래는 자연 빈 공간으로 둠.
+        .frame(height: Self.rowHeight)
+        // past bucket은 dim — 완료/포기/만료 시각화.
+        .opacity(snap.bucket == .past ? 0.55 : 1.0)
     }
 
-    // MARK: Small — 캘린더 header + budget 안에 들어가는 만큼 항목 캡슐 (Todo·NTD 혼합 가능)
-
-    private func smallLayout(snapshots: [ItemSnapshot]) -> some View {
-        let count = Self.smallFitCount(snapshots: snapshots)
-        return VStack(alignment: .leading, spacing: Self.itemSpacing) {
-            dateLine
-            summaryLine
-            ForEach(Array(snapshots.prefix(count).enumerated()), id: \.offset) { _, snap in
-                itemBox(snap: snap)
+    /// 목표 row의 progress capsule + 타이틀 overlay.
+    /// 배경 capsule + 진행률 fill capsule + 타이틀 (leading, 좌측 padding).
+    @ViewBuilder
+    private func progressCapsule(_ snap: ItemSnapshot) -> some View {
+        let progress = max(0, min(snap.progress, 1))
+        let fill = snap.resolvedColor()
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.22))
+                Capsule()
+                    .fill(fill.opacity(0.35))
+                    .frame(width: max(0, proxy.size.width * progress))
+                Text(verbatim: snap.title)
+                    .font(.caption.weight(.semibold))
+                    // NTDRow와 동일 패턴 — 라이트: goalColor(fill 위 또렷), 다크: .primary(white).
+                    .foregroundStyle(colorScheme == .dark ? Color.primary : fill)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
+        }
+        .frame(height: 24)
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Layout 전략
+    //
+    // - row 박스 높이를 fit count × rowHeight + (fitCount-1) × rowSpacing 로 미리 계산.
+    // - 이 박스를 widget 바닥에 정렬 → device별 widget 높이 차이는 박스 위쪽 여백이 흡수.
+    // - 박스 안 row는 위부터 채움 (top 정렬). 항목 < fitCount면 박스 아래는 빈 공간이지만
+    //   박스 자체가 바닥에 붙어 있어 widget 아래 여백 0.
+
+    private static func boxHeight(for count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * rowHeight + CGFloat(max(0, count - 1)) * rowSpacing
+    }
+
+    /// 박스 안 row 위 정렬 layout. 항목이 박스 fit보다 적으면 박스 아래는 빈 공간.
+    @ViewBuilder
+    private func rowBox(snaps: [ItemSnapshot], height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            ForEach(snaps) { snap in
+                itemRow(snap)
+            }
+            Spacer(minLength: 0)  // 박스 안 빈 자리를 아래로 밀어 row를 위 정렬.
+        }
+        .frame(height: height, alignment: .topLeading)
+    }
+
+    // MARK: - Small
+
+    private var smallLayout: some View {
+        let count = Self.smallFitCount()
+        let snaps = Array(entry.snapshots.prefix(count))
+        let box = Self.boxHeight(for: count)
+        return VStack(spacing: 0) {
+            headerRow
+            Spacer(minLength: 0)  // 헤더와 박스 사이 flex — device별 widget 높이 차이 흡수.
+            rowBox(snaps: snaps, height: box)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: Medium — 좌측(header 포함) 먼저 채우고 남은 항목은 우측. budget 초과분은 잘림.
+    // MARK: - Medium
 
-    private func mediumLayout(snapshots: [ItemSnapshot]) -> some View {
-        let split = Self.splitForMedium(snapshots: snapshots)
+    private var mediumLayout: some View {
+        let leftMax = Self.mediumLeftFitCount()
+        let rightMax = Self.mediumRightFitCount()
+        let snaps = entry.snapshots
+        let leftCount = min(snaps.count, leftMax)
+        let leftSlice = Array(snaps.prefix(leftCount))
+        let rest = Array(snaps.dropFirst(leftCount))
+        let rightSlice = Array(rest.prefix(rightMax))
+        let leftBox = Self.boxHeight(for: leftMax)
+        let rightBox = Self.boxHeight(for: rightMax)
         return HStack(alignment: .top, spacing: 12) {
-            leftHalf(snapshots: split.left)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            rightHalf(snapshots: split.right)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+            VStack(spacing: 0) {
+                headerRow
+                Spacer(minLength: 0)
+                rowBox(snaps: leftSlice, height: leftBox)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                rowBox(snaps: rightSlice, height: rightBox)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-
-    private func leftHalf(snapshots: [ItemSnapshot]) -> some View {
-        VStack(alignment: .leading, spacing: Self.itemSpacing) {
-            dateLine
-            summaryLine
-            ForEach(Array(snapshots.enumerated()), id: \.offset) { _, snap in
-                itemBox(snap: snap)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func rightHalf(snapshots: [ItemSnapshot]) -> some View {
-        VStack(alignment: .leading, spacing: Self.itemSpacing) {
-            ForEach(Array(snapshots.enumerated()), id: \.offset) { _, snap in
-                itemBox(snap: snap)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: empty state
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "clock")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text("widget.ntd.empty")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            summaryLine
-        }
-    }
-
-    // MARK: helpers
-
-    /// 카운트다운 / 경과 / 마감지남 / 시간 미설정 텍스트.
-    /// - 1분 이상: 미리 계산된 단위 명시 포맷 ("20분" / "16시간 30분" / "5일 3시간"). Provider tiered entries로 매분 갱신.
-    /// - 1분 이내 + target 있음: `Text(timerInterval:countsDown:showsHours:false)` — 시스템 timer로 매초 tick ("0:45" → "0:44"...). Widget budget 소비 X.
-    /// - inProgress + 종료 없음(한계까지 count up): 분 단위 (target 없어 timer 사용 불가).
-    @ViewBuilder
-    private func countdownText(for snap: ItemSnapshot) -> some View {
-        switch snap.state {
-        case .scheduled:
-            countdownInner(target: snap.startInstant, snap: snap)
-        case .inProgress:
-            if let end = snap.endInstant {
-                countdownInner(target: end, snap: snap)
-            } else {
-                // 한계까지 count up — timer 사용 불가, 분 단위 표시.
-                Text(verbatim: MyDaysNTDLockWidgetEntryView.formatDuration(for: snap, now: entry.date))
-            }
-        case .overdue, .untimed:
-            EmptyView()
-        }
-    }
-
-    /// target까지 남은 시간에 따라 표시 분기.
-    /// 1분 이내 → 시스템 timer (초 단위 live), 그 외 → 분 단위 pre-computed.
-    @ViewBuilder
-    private func countdownInner(target: Date, snap: ItemSnapshot) -> some View {
-        let remaining = target.timeIntervalSince(entry.date)
-        if remaining > 0 && remaining <= 60 {
-            Text(timerInterval: entry.date...target, countsDown: true, showsHours: false)
-        } else {
-            Text(verbatim: MyDaysNTDLockWidgetEntryView.formatDuration(for: snap, now: entry.date))
-        }
-    }
-
-    private func stateLabel(for snap: ItemSnapshot) -> Text {
-        switch snap.state {
-        case .scheduled:  return Text("widget.state.scheduled")  // 시작까지
-        case .inProgress:
-            return snap.endInstant != nil
-                ? Text("widget.state.remaining")  // 종료까지
-                : Text("widget.state.elapsed")    // 경과 — NTD 한계까지
-        case .overdue:    return Text("widget.state.overdue")    // 지남
-        case .untimed:    return Text("widget.state.today")      // 오늘 (시간 미설정)
-        }
-    }
-
-    /// 아이콘 symbol 이름.
-    /// 카테고리 설정 시: 카테고리 아이콘 (CategoryIcon symbol 그대로).
-    /// 미설정 시: kind 별 fallback — NTD=clock / Todo=circle.
-    private func iconName(for snap: ItemSnapshot) -> String {
-        if let name = snap.categoryIconName, !name.isEmpty { return name }
-        return snap.kind == .notTodo ? "clock" : "circle"
-    }
-
-    /// 아이콘 색상 — 모든 항목 통일 앱 tint.
-    /// 카테고리별 색상을 쓰면 여러 항목이 무지개처럼 보여 시각 균형 깨짐 → 색은 앱 tint로 통일,
-    /// 카테고리 구분은 symbol 자체로만 표현 (iconName).
-    /// 위젯 process는 main app의 `.tint()` 환경을 못 받아 `Color.accentColor`가 시스템 default(blue)로
-    /// fallback되므로 App Group 공유 UserDefaults에서 직접 lookup.
-    private func iconColor(for snap: ItemSnapshot) -> Color {
-        TintPreset.currentColor
-    }
-
-    /// row 카운트다운 색 — state 무관 .primary 통일.
-    private func rowAccentColor(for snap: ItemSnapshot) -> Color { .primary }
 }
 
 // MARK: - Widget Configuration
@@ -670,7 +707,7 @@ struct MyDaysWidget: Widget {
     let kind: String = "MyDaysWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: NTDProvider()) { entry in
+        StaticConfiguration(kind: kind, provider: MyDaysHomeProvider()) { entry in
             MyDaysWidgetEntryView(entry: entry)
         }
         .configurationDisplayName(Text("widget.ntd.display_name"))
@@ -681,59 +718,55 @@ struct MyDaysWidget: Widget {
 
 // MARK: - Preview
 
-private let previewSummary = ActivitySummary(ntdCount: 4, todoCount: 5, routineCount: 2)
+private let previewCounts = ItemCounts(goalActive: 2, goalTotal: 4, todoActive: 3, todoTotal: 5)
 
 private let previewSnapshots: [ItemSnapshot] = [
     ItemSnapshot(
-        kind: .notTodo, isRoutine: false,
-        title: "16시간 단식",
-        priority: .high, state: .inProgress,
-        startInstant: .now.addingTimeInterval(-3600),
-        endInstant: .now.addingTimeInterval(13 * 3600),
-        categoryIconName: nil, categoryColorHex: nil
+        id: "p1", kind: .notTodo, title: "16시간 단식",
+        bucket: .ongoing, progress: 0.62,
+        sortAnchor: .now.addingTimeInterval(3600),
+        iconName: "fork.knife", iconColorHex: "blue"
     ),
     ItemSnapshot(
-        kind: .notTodo, isRoutine: true,
-        title: "디저트 끊기",
-        priority: .medium, state: .scheduled,
-        startInstant: .now.addingTimeInterval(2 * 3600),
-        endInstant: .now.addingTimeInterval(26 * 3600),
-        categoryIconName: nil, categoryColorHex: nil
+        id: "p2", kind: .activity, title: "걷기 10000보",
+        bucket: .ongoing, progress: 0.3,
+        sortAnchor: .now.addingTimeInterval(7200),
+        iconName: "figure.walk", iconColorHex: "green"
     ),
     ItemSnapshot(
-        kind: .todo, isRoutine: false,
-        title: "보일러 점검",
-        priority: .high, state: .scheduled,
-        startInstant: .now.addingTimeInterval(3 * 3600),
-        endInstant: .now.addingTimeInterval(4 * 3600),
-        categoryIconName: nil, categoryColorHex: nil
+        id: "p3", kind: .focus, title: "공부 2시간",
+        bucket: .scheduled, progress: 0,
+        sortAnchor: .now.addingTimeInterval(10800),
+        iconName: "hourglass.bottomhalf.filled", iconColorHex: "purple"
     ),
     ItemSnapshot(
-        kind: .todo, isRoutine: true,
-        title: "물 마시기",
-        priority: .none, state: .untimed,
-        startInstant: .now,
-        endInstant: nil,
-        categoryIconName: nil, categoryColorHex: nil
+        id: "p4", kind: .habit, title: "비타민",
+        bucket: .ongoing, progress: 0,
+        sortAnchor: .now.addingTimeInterval(14400),
+        iconName: "pill.fill", iconColorHex: "orange"
     ),
     ItemSnapshot(
-        kind: .todo, isRoutine: false,
-        title: "리포트 마감",
-        priority: .medium, state: .overdue,
-        startInstant: .now.addingTimeInterval(-7200),
-        endInstant: .now.addingTimeInterval(-1800),
-        categoryIconName: nil, categoryColorHex: nil
+        id: "p5", kind: .todo, title: "보일러 점검",
+        bucket: .ongoing, progress: 0,
+        sortAnchor: .now.addingTimeInterval(7200),
+        iconName: "wrench.adjustable.fill", iconColorHex: "red"
+    ),
+    ItemSnapshot(
+        id: "p6", kind: .todo, title: "리포트 마감",
+        bucket: .past, progress: 0,
+        sortAnchor: .now.addingTimeInterval(-1800),
+        iconName: "doc.text.fill", iconColorHex: nil
     )
 ]
 
 #Preview(as: .systemSmall) {
     MyDaysWidget()
 } timeline: {
-    NTDEntry(date: .now, snapshots: previewSnapshots, summary: previewSummary)
+    MyDaysHomeEntry(date: .now, snapshots: previewSnapshots, counts: previewCounts)
 }
 
 #Preview(as: .systemMedium) {
     MyDaysWidget()
 } timeline: {
-    NTDEntry(date: .now, snapshots: previewSnapshots, summary: previewSummary)
+    MyDaysHomeEntry(date: .now, snapshots: previewSnapshots, counts: previewCounts)
 }

@@ -42,6 +42,9 @@ struct AddItemView: View {
     @State private var activitySource: ActivitySourceType = .manual
     /// 건강 앱 이동 alert — auto source hint의 link 탭 시 안내 dialog 표시.
     @State private var showHealthAppPathAlert: Bool = false
+    /// 활동/집중 목표 달성 시 알림 fire 여부. 신규 default ON.
+    /// HK BG handler가 target 도달 감지 시 이 값을 보고 fire 결정.
+    @State private var notifyOnGoalReached: Bool = true
     // legacy: 시간대 chip은 UI에서 제거됨. Core Data 호환 위해 state는 유지 (save 시 .none 고정).
     @State private var startTimeOfDay: TimeOfDay = .none
     @State private var dueTimeOfDay: TimeOfDay = .none
@@ -81,6 +84,10 @@ struct AddItemView: View {
     @State private var showCategoryPicker: Bool = false
     /// 목표(절제/활동) 전용 — 사용자 지정 아이콘. nil=미선택(저장 불가).
     @State private var goalIcon: GoalIcon?
+    /// 사용자가 picker grid에서 GoalIcon을 직접 골랐는지 — type 변경 시 자동 갱신 가드.
+    /// false면 type 변경할 때마다 `newKind.defaultGoalIcon`으로 자동 갱신. true면 보존.
+    /// 편집 모드 진입 시엔 true(이미 사용자 선택 상태로 간주). 신규는 false 시작.
+    @State private var userPickedGoalIcon: Bool = false
     /// 목표 전용 — 사용자 지정 색. nil=미선택(저장 불가).
     @State private var goalColor: CategoryColor?
     /// 체크리스트 draft 배열 — 저장 시 reconcile.
@@ -150,6 +157,8 @@ struct AddItemView: View {
             _ntdDurationHour = State(initialValue: item.ntdDurationHourInt)
             _activityTarget = State(initialValue: item.activityTargetValueInt ?? 0)
             _activitySource = State(initialValue: item.activitySource)
+            // 편집 모드 — nil이면 ON으로 해석 (legacy 데이터 default ON).
+            _notifyOnGoalReached = State(initialValue: item.notifyOnGoalReached?.boolValue ?? true)
             // 기존 Reminder 레코드에서 알림 offset 복원 (anchor별 1개 가정).
             let reminders = (item.reminders as? Set<Reminder>) ?? []
             let startReminder = reminders.first { ReminderAnchor(rawValue: $0.anchor) == .start }
@@ -173,6 +182,8 @@ struct AddItemView: View {
             _selectedCategoryID = State(initialValue: item.category?.id)
             // 목표 아이콘·색 — 기존 값 있으면 복원, 없으면 nil.
             _goalIcon = State(initialValue: GoalIcon.from(item.iconName))
+            // 편집 진입은 사용자가 이미 선택한 상태로 간주 — type 바꿔도 보존.
+            _userPickedGoalIcon = State(initialValue: item.iconName != nil)
             _goalColor = State(initialValue: item.iconColorHex.flatMap { CategoryColor(rawValue: $0) })
             // 체크리스트 — active만 load, sortOrder asc.
             let allChecklist = (item.checklistItems as? Set<ChecklistItem>) ?? []
@@ -210,6 +221,7 @@ struct AddItemView: View {
             _ntdDurationHour = State(initialValue: nil)  // 미설정 = 한계까지
             _activityTarget = State(initialValue: 0)     // 신규 활동: 사용자 명시 입력 필요
             _activitySource = State(initialValue: .manual)  // 신규는 수동 default
+            _notifyOnGoalReached = State(initialValue: true)  // 신규 default ON
             // 새 항목 알림 default:
             //  - NTD: 시작/종료 모두 정시(0) ON
             //  - Todo: OFF (사용자 명시 ON)
@@ -225,6 +237,7 @@ struct AddItemView: View {
             // - 색: 신규는 랜덤 preset (아이콘 grid의 background가 색에 의존하므로 색 미설정 상태에서
             //   아이콘 미리보기가 회색이 되어 시각 약함 → 색은 자동 선택, 사용자가 원하면 변경).
             _goalIcon = State(initialValue: nil)
+            _userPickedGoalIcon = State(initialValue: false)
             _goalColor = State(initialValue: CategoryColor.allCases.randomElement())
             // 체크리스트 — 신규는 빈 배열로 시작.
             _checklistDrafts = State(initialValue: [])
@@ -390,6 +403,18 @@ struct AddItemView: View {
                 alertOffsetPicker(label: "alert.label.start", selection: $ntdStartAlertOffset)
                 if ntdDurationHour != nil {
                     alertOffsetPicker(label: "alert.label.end", selection: $ntdEndAlertOffset)
+                }
+            }
+        } else if isActivity {
+            // 활동: 시작 알림(시작일 0시 기준) + 목표 달성 알림 toggle (HK BG handler가 target 도달 시 fire).
+            // 종일 의미라 마감 알림은 없음.
+            Section("add.section.alert") {
+                if notificationAuthStatus == .denied {
+                    notificationPermissionWarning
+                }
+                alertOffsetPicker(label: "alert.label.start", selection: $todoStartAlertOffset)
+                Toggle(isOn: $notifyOnGoalReached) {
+                    Text("add.field.goal_alert")
                 }
             }
         } else if hasStart || hasDue {
@@ -1285,6 +1310,12 @@ struct AddItemView: View {
         if !isEditing, newKind.isGoal {
             selectedCategoryID = nil
         }
+
+        // 신규 + 사용자가 picker에서 직접 안 골랐을 때 — type 변경할 때마다 type 대표 아이콘으로 자동 갱신.
+        // 편집 모드는 항상 보존. 사용자가 grid에서 명시 선택한 경우도 보존 (type 바꿔도 유지).
+        if !isEditing, !userPickedGoalIcon, let def = newKind.defaultGoalIcon {
+            goalIcon = def
+        }
     }
 
     /// 카테고리의 알림 default를 현재 UI state에 적용 (Todo 전용 — 목표는 카테고리 미사용).
@@ -1961,7 +1992,8 @@ struct AddItemView: View {
         .padding(.vertical, 4)
     }
 
-    /// 아이콘 grid — 6열 LazyVGrid, GoalIcon 12개 (2행).
+    /// 아이콘 grid — 6열 LazyVGrid, GoalIcon 18개 (3행).
+    /// 1행: type 대표(절제/활동/집중/습관) → 2행: 절제·운동 → 3행: 활동·개인.
     @ViewBuilder
     private var goalIconGrid: some View {
         LazyVGrid(
@@ -2003,6 +2035,8 @@ struct AddItemView: View {
         let color = goalColor?.color ?? .accentColor
         Button {
             goalIcon = icon
+            // 사용자 명시 선택 — 이후 type 변경에도 자동 갱신 안 됨.
+            userPickedGoalIcon = true
         } label: {
             Image(systemName: icon.symbolName)
                 .font(.body)
@@ -2443,6 +2477,7 @@ struct AddItemView: View {
             item.ntdDurationHourInt = nil
             item.activityTargetValueInt = activityTarget
             item.activitySource = activitySource  // Phase C: 사용자 선택 source 저장
+            item.notifyOnGoalReached = NSNumber(value: notifyOnGoalReached)
             item.itemPriority = .none
             item.itemStartTimeOfDay = .none
             item.itemDueTimeOfDay = .none
@@ -2452,12 +2487,13 @@ struct AddItemView: View {
             }
         case .focus:
             // 집중: 종일 의미(0/24) + target 분 저장 (activityTargetValue 재활용).
-            // source는 manual 강제 (focus는 자체 timer 시스템). 우선순위 없음. 알림 미사용.
+            // source는 manual 강제 (focus는 자체 timer 시스템). 우선순위 없음.
             item.startHourInt = 0
             item.dueHourInt = 24
             item.ntdDurationHourInt = nil
             item.activityTargetValueInt = activityTarget
             item.activitySource = .manual
+            item.notifyOnGoalReached = NSNumber(value: notifyOnGoalReached)
             item.itemPriority = .none
             item.itemStartTimeOfDay = .none
             item.itemDueTimeOfDay = .none

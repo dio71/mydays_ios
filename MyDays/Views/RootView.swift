@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 struct RootView: View {
 
@@ -69,6 +70,9 @@ struct RootView: View {
             // HealthKit auto source(걸음수/거리) 활동 항목의 오늘 valueRecorded sync.
             // 권한 거부된 source는 fetch nil → skip.
             await Item.syncHealthKitActivities(in: context)
+            // 앱 진입 시 위젯 timeline reload — 메인앱이 수정한 데이터를 위젯 process에 즉시 반영.
+            // HK sync 안 한 경로(앱 끄고 재진입 등)에서도 위젯이 최신 상태를 보장.
+            WidgetCenter.shared.reloadAllTimelines()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -79,6 +83,8 @@ struct RootView: View {
                 todayDay = Calendar.current.component(.day, from: Date())
                 // foreground 복귀 시 HealthKit sync.
                 Task { await Item.syncHealthKitActivities(in: context) }
+                // foreground 복귀 시 위젯 timeline reload.
+                WidgetCenter.shared.reloadAllTimelines()
             }
         }
     }

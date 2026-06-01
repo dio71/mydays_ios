@@ -2,55 +2,53 @@ import CoreData
 import SwiftUI
 import WidgetKit
 
-// MARK: - Lock Screen NTD Circular Widget
+// MARK: - Lock Screen Goal Circular Widget
 //
-// 잠금화면 accessoryCircular widget — 자동으로 가장 임박한 NTD 표시.
-// 보통 사용자는 NTD 1개만 진행하므로 별도 picker 없이 most relevant NTD 자동 선택.
-// 여러 NTD가 동시 진행 중이면 rectangular와 동일한 60초 회전.
+// Redesign (2026-06-01):
+// - 시간 정보 제거 → center에 큰 목표 아이콘 + 두꺼운 원형 progress arc.
+// - 목표 4-type 통합 (절제/활동/집중/습관). 활성 목표만 표시.
+// - 활성 목표가 여러 개면 60초 cycle rotation.
 //
-// 데이터 소스 + 정렬 + 회전 로직은 MyDaysNTDLockWidget(NTDLockProvider)와 동일 패턴 — 공유 helper 재사용.
+// 데이터 소스: MyDaysWidget의 Provider 로직 재활용 — 목표 한정 fetch + bucket 분류.
+// rotation 패턴은 lock rectangular와 동일하지만 entries는 각자 timeline 발급.
 
-struct NTDLockCircleEntry: TimelineEntry {
+struct GoalLockCircleEntry: TimelineEntry {
     let date: Date
+    /// nil = 표시할 활성 목표 없음.
     let snapshot: ItemSnapshot?
 }
 
-struct NTDLockCircleProvider: TimelineProvider {
+struct GoalLockCircleProvider: TimelineProvider {
 
-    func placeholder(in context: Context) -> NTDLockCircleEntry {
+    func placeholder(in context: Context) -> GoalLockCircleEntry {
         let now = Date()
-        let snaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: now)
-        return NTDLockCircleEntry(date: now, snapshot: snaps.first)
+        let snaps = Self.fetchActiveGoalSnapshots(now: now)
+        return GoalLockCircleEntry(date: now, snapshot: snaps.first)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (NTDLockCircleEntry) -> Void) {
+    func getSnapshot(in context: Context, completion: @escaping (GoalLockCircleEntry) -> Void) {
         let now = Date()
-        let snaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: now)
-        completion(NTDLockCircleEntry(date: now, snapshot: snaps.first))
+        let snaps = Self.fetchActiveGoalSnapshots(now: now)
+        completion(GoalLockCircleEntry(date: now, snapshot: snaps.first))
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<NTDLockCircleEntry>) -> Void) {
+    func getTimeline(in context: Context, completion: @escaping (Timeline<GoalLockCircleEntry>) -> Void) {
         let now = Date()
-        // Rectangular와 동일 tiered granularity:
-        //   >3h 30m step / 3h~1h 10m step / 1h~20m 5m step / <20m 1m step / 미설정 1h.
-        let activeSnaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: now)
-        var transitions: [Date] = []
-        for snap in activeSnaps {
-            if snap.startInstant > now { transitions.append(snap.startInstant) }
-            if let end = snap.endInstant, end > now { transitions.append(end) }
-        }
+        let items = MyDaysHomeProvider.fetchActiveItems()
+        // Adaptive tier — home widget과 동일.
+        //   >1h 60min / 20m~1h 10min / 5m~20m 5min / <5m 1min / 미설정 60min.
+        let transitions = Self.transitionInstants(items: items, after: now)
         let horizon = now.addingTimeInterval(6 * 60 * 60)
-        var dates: Set<Date> = []
+        var dates: Set<Date> = [now]
         var t = now
         while t <= horizon {
-            dates.insert(t)
-            let nextT = transitions.filter { $0 > t }.min()
+            let nextT = transitions.first { $0 > t }
             let step: TimeInterval
             if let nt = nextT {
                 let ttt = nt.timeIntervalSince(t)
-                if ttt > 3 * 60 * 60 { step = 30 * 60 }
-                else if ttt > 60 * 60 { step = 10 * 60 }
-                else if ttt > 20 * 60 { step = 5 * 60 }
+                if ttt > 60 * 60 { step = 60 * 60 }
+                else if ttt > 20 * 60 { step = 10 * 60 }
+                else if ttt > 5 * 60 { step = 5 * 60 }
                 else { step = 60 }
             } else {
                 step = 60 * 60
@@ -60,34 +58,72 @@ struct NTDLockCircleProvider: TimelineProvider {
                 dates.insert(nt)
             }
             t = next
+            dates.insert(t)
         }
         let sortedDates = dates.sorted()
-        let entries: [NTDLockCircleEntry] = sortedDates.enumerated().map { i, entryDate in
-            let snaps = NTDLockProvider.fetchRelevantNTDSnapshots(now: entryDate)
-            let snapshot: ItemSnapshot? = snaps.isEmpty ? nil : snaps[i % snaps.count]
-            return NTDLockCircleEntry(date: entryDate, snapshot: snapshot)
+        // LockCircle: index 2부터 회전. LockRect가 top 2를 고정 표시하므로 중복 회피.
+        // 활성 목표 ≤ 2개면 빈 상태(rest empty). 3개면 G3 고정, 4개+면 G3, G4, ... 순환.
+        let entries: [GoalLockCircleEntry] = sortedDates.enumerated().map { i, entryDate in
+            let snaps = Self.fetchActiveGoalSnapshots(now: entryDate)
+            let rest = Array(snaps.dropFirst(2))
+            let snapshot: ItemSnapshot? = rest.isEmpty ? nil : rest[i % rest.count]
+            return GoalLockCircleEntry(date: entryDate, snapshot: snapshot)
         }
         let reloadAt = (entries.last?.date ?? now).addingTimeInterval(60)
         completion(Timeline(entries: entries, policy: .after(reloadAt)))
+    }
+
+    // MARK: - 활성 목표 fetch (4-type, past 제외)
+
+    /// 진행중/진행예정 bucket 목표만 — 락 위젯은 "지금 신경 써야 할 것" UX.
+    /// past(완료/포기/만료)는 락 위젯 노출 가치 낮음 → 제외.
+    /// internal — rectangular lock widget이 같은 fetch 재사용.
+    static func fetchActiveGoalSnapshots(now: Date) -> [ItemSnapshot] {
+        let items = MyDaysHomeProvider.fetchActiveItems()
+        let today: Date = .todayCalendarAnchor
+        var snaps: [ItemSnapshot] = []
+        for item in items where item.itemKind.isGoal {
+            if let s = MyDaysHomeProvider.snapshot(for: item, now: now, today: today),
+               s.bucket != .past {
+                snaps.append(s)
+            }
+        }
+        // 동일 정렬 (bucket → sortAnchor). type 무관 통합 cycle.
+        snaps.sort { a, b in
+            if a.bucket != b.bucket { return a.bucket < b.bucket }
+            return a.sortAnchor < b.sortAnchor
+        }
+        return snaps
+    }
+
+    private static func transitionInstants(items: [Item], after now: Date) -> [Date] {
+        var set = Set<TimeInterval>()
+        for item in items where item.itemKind == .notTodo {
+            guard let occ = item.ntdRelevantOccurrenceDate(at: now) else { continue }
+            if let start = item.ntdStartInstant(on: occ), start > now {
+                set.insert(start.timeIntervalSince1970)
+            }
+            if let end = item.ntdEndInstant(on: occ), end > now {
+                set.insert(end.timeIntervalSince1970)
+            }
+        }
+        return set.sorted().map { Date(timeIntervalSince1970: $0) }
     }
 }
 
 // MARK: - View
 
 struct MyDaysNTDLockCircleWidgetEntryView: View {
-    let entry: NTDLockCircleEntry
+    let entry: GoalLockCircleEntry
 
     var body: some View {
-        // ZStack에 AccessoryWidgetBackground를 깔아 캘린더 위젯과 같은 원형 배경 효과.
-        // 시스템이 잠금화면 tint를 자동 적용 — 배경 원은 secondary, widgetAccentable() 영역은 강조.
-        // 진행 중일 때만 테두리에 progress arc (Circle.trim) 오버레이.
+        // ZStack에 AccessoryWidgetBackground — 캘린더 위젯과 동일한 원형 배경.
+        // 시스템이 잠금화면 tint를 자동 적용 → background는 secondary, widgetAccentable 영역은 강조.
         ZStack {
             AccessoryWidgetBackground()
             if let snap = entry.snapshot {
                 content(for: snap)
-                if snap.state == .inProgress {
-                    progressArc(for: snap)
-                }
+                progressArc(for: snap)
             } else {
                 emptyContent
             }
@@ -95,85 +131,34 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
-    /// 진행 중 NTD의 progress arc — 위젯 테두리에 원형 호로 진행도 표시.
-    /// 0시 방향(12시) 시작, 시계 방향으로 fill.
-    /// - 목표 시간 설정: elapsed / total
-    /// - 목표 시간 미설정: elapsed / 30일, cap 1.0
-    /// 대기(scheduled)/완료/포기 상태에서는 본 view 자체가 호출되지 않음.
-    /// entry.date 기준 1회 render — Lock Screen TimelineView 갱신 제약 회피, transition entry로 라이프사이클 처리.
+    /// 원형 progress arc — 락 위젯 테두리에 호 표시.
+    /// 0시(12시 방향) 시작, 시계 방향 fill. 두께 4pt (이전 2pt에서 증가).
+    /// scheduled(0%) / past(불노출)도 invisible — fill 0이면 0 호.
     @ViewBuilder
     private func progressArc(for snap: ItemSnapshot) -> some View {
+        let progress = max(0, min(snap.progress, 1))
         Circle()
-            .trim(from: 0, to: Self.progressValue(for: snap, now: entry.date))
-            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .trim(from: 0, to: progress)
+            .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round))
             .rotationEffect(.degrees(-90))
-            .padding(1)
+            .padding(2)
             .widgetAccentable()
     }
 
-    /// 진행도 0.0~1.0. 목표 시간 있으면 elapsed/total, 없으면 30일 기준 cap.
-    static func progressValue(for snap: ItemSnapshot, now: Date) -> Double {
-        guard snap.state == .inProgress else { return 0 }
-        let elapsed = now.timeIntervalSince(snap.startInstant)
-        if let end = snap.endInstant {
-            let total = max(end.timeIntervalSince(snap.startInstant), 1)
-            return max(0, min(elapsed / total, 1.0))
-        }
-        // 목표 시간 미설정 — 30일 기준 (이후로는 100%로 cap).
-        let thirtyDays: TimeInterval = 30 * 24 * 3600
-        return max(0, min(elapsed / thirtyDays, 1.0))
-    }
-
-    /// 3단 stack — icon / HH:mm 카운트다운(크게) / 상태 라벨(작게).
-    /// countdown은 widgetAccentable로 강조, 아이콘/라벨은 secondary 톤.
+    /// 중앙 큰 아이콘 — 시간 정보 제거 → 글랜스용 시각 단순화.
+    /// 아이콘 = snap.iconName (GoalIcon symbol 또는 fallback).
     @ViewBuilder
     private func content(for snap: ItemSnapshot) -> some View {
-        VStack(spacing: 0) {
-            // 카테고리 설정 시 카테고리 아이콘, 미설정 시 clock fallback.
-            // 잠금화면 monochrome — 색은 시스템 tint(widgetAccentable 영역 외 secondary).
-            Image(systemName: snap.categoryIconName ?? "clock")
-                .font(.system(size: 10))
-            countdownTimeline(for: snap)
-                .font(.system(size: 13, weight: .bold))
-                .monospacedDigit()
-                .widgetAccentable()
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .multilineTextAlignment(.center)
-            statusLabel(for: snap)
-                .font(.system(size: 9, weight: .medium))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Image(systemName: snap.iconName)
+            .font(.system(size: 22, weight: .medium))
+            .widgetAccentable()
     }
 
     private var emptyContent: some View {
-        Image(systemName: "clock")
-            .font(.system(size: 20))
-            .widgetAccentable()
+        Image(systemName: "target")
+            .font(.system(size: 18))
+            .foregroundStyle(.secondary)
     }
-
-    /// 카운트다운 — 단위 명시 포맷 (예: "20분" / "16시간" / "5일"). entry.date 기준 미리 계산.
-    /// Provider가 분 granularity 별 entry 발급 → iOS entry swap으로 갱신 (Lock Screen TimelineView 제약 회피).
-    /// 좁은 원형 영역이라 minimumScaleFactor + multilineTextAlignment center가 처리.
-    @ViewBuilder
-    private func countdownTimeline(for snap: ItemSnapshot) -> some View {
-        Text(verbatim: MyDaysNTDLockWidgetEntryView.formatDuration(for: snap, now: entry.date))
-    }
-
-    /// 좁은 공간 위한 짧은 라벨 (남음/진행/대기 / Left/On/Wait).
-    private func statusLabel(for snap: ItemSnapshot) -> Text {
-        switch snap.state {
-        case .scheduled:
-            return Text("widget.ntd_lock_circle.status.scheduled")
-        case .inProgress:
-            return snap.endInstant != nil
-                ? Text("widget.ntd_lock_circle.status.remaining")
-                : Text("widget.ntd_lock_circle.status.elapsed")
-        case .overdue, .untimed:
-            return Text(verbatim: "")
-        }
-    }
-
 }
 
 // MARK: - Widget Configuration
@@ -182,7 +167,7 @@ struct MyDaysNTDLockCircleWidget: Widget {
     let kind: String = "MyDaysNTDLockCircleWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: NTDLockCircleProvider()) { entry in
+        StaticConfiguration(kind: kind, provider: GoalLockCircleProvider()) { entry in
             MyDaysNTDLockCircleWidgetEntryView(entry: entry)
         }
         .configurationDisplayName(Text("widget.ntd_lock_circle.display_name"))
@@ -196,16 +181,23 @@ struct MyDaysNTDLockCircleWidget: Widget {
 #Preview(as: .accessoryCircular) {
     MyDaysNTDLockCircleWidget()
 } timeline: {
-    NTDLockCircleEntry(
+    GoalLockCircleEntry(
         date: .now,
         snapshot: ItemSnapshot(
-            kind: .notTodo, isRoutine: false,
-            title: "16시간 단식",
-            priority: .high, state: .inProgress,
-            startInstant: .now.addingTimeInterval(-3600),
-            endInstant: .now.addingTimeInterval(5 * 3600 + 30 * 60),
-            categoryIconName: nil, categoryColorHex: nil
+            id: "p1", kind: .notTodo, title: "16시간 단식",
+            bucket: .ongoing, progress: 0.55,
+            sortAnchor: .now.addingTimeInterval(7 * 3600),
+            iconName: "fork.knife", iconColorHex: "blue"
         )
     )
-    NTDLockCircleEntry(date: .now, snapshot: nil)
+    GoalLockCircleEntry(
+        date: .now,
+        snapshot: ItemSnapshot(
+            id: "p2", kind: .focus, title: "집중",
+            bucket: .ongoing, progress: 0.4,
+            sortAnchor: .now.addingTimeInterval(3600),
+            iconName: "hourglass.bottomhalf.filled", iconColorHex: "purple"
+        )
+    )
+    GoalLockCircleEntry(date: .now, snapshot: nil)
 }

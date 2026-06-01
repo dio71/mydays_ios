@@ -20,17 +20,19 @@ import HealthKit
 // - HealthKit은 시뮬레이터에서 거리는 0으로 반환할 수 있음 (real device 필요).
 // - 권한 거부 후 사용자가 Settings에서 다시 켜도 앱이 다시 요청해야 함 → 매번 fetch 전 status 확인.
 
-@MainActor
 final class HealthKitService {
 
     static let shared = HealthKitService()
 
-    private let store = HKHealthStore()
+    let store = HKHealthStore()
 
     /// HealthKit 사용 가능 여부 (Mac에서는 false).
     var isAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
     }
+
+    /// 활성 observer 추적 — 중복 등록 방지. source별 1개.
+    private var activeObservers: [ActivitySourceType: HKObserverQuery] = [:]
 
     // MARK: - 권한
 
@@ -74,6 +76,55 @@ final class HealthKitService {
                 continuation.resume(returning: sum)
             }
             store.execute(query)
+        }
+    }
+
+    // MARK: - Background Observer
+
+    /// HKObserverQuery 등록 + enableBackgroundDelivery(.immediate).
+    /// 같은 source 중복 등록은 skip (1 source = 1 observer, 그 안에서 모든 active 항목 일괄 처리).
+    /// - handler: observer fire 시 호출. completion()을 반드시 호출해야 system이 다음 fire 보장.
+    /// 호출 측에서 source별 활성 항목 fetch + RC update + 알림 + 위젯 reload + completion() 처리.
+    func startBackgroundObservation(
+        for source: ActivitySourceType,
+        handler: @escaping (@escaping () -> Void) -> Void
+    ) {
+        guard isAvailable,
+              source != .manual,
+              activeObservers[source] == nil,
+              let type = quantityType(for: source) else { return }
+
+        let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
+            if let error {
+                // 에러는 로그만 — observer 자체는 살아있음.
+                print("[HK Observer] \(source) fire error: \(error.localizedDescription)")
+                completion()
+                return
+            }
+            handler(completion)
+        }
+        store.execute(query)
+        activeObservers[source] = query
+
+        // immediate frequency — 데이터 변화 즉시 시스템이 main app process 깨움.
+        // Apple Watch 사용자에겐 실시간 fire, 그렇지 않으면 timestamp 도착에 따라 fire.
+        store.enableBackgroundDelivery(for: type, frequency: .immediate) { success, error in
+            if let error {
+                print("[HK BG Delivery] \(source) enable error: \(error.localizedDescription)")
+            } else if !success {
+                print("[HK BG Delivery] \(source) enable failed (unknown)")
+            }
+        }
+    }
+
+    /// observer 해제 — 활성 활동 목표가 그 source에 없을 때 호출 (불필요한 wake 회피).
+    /// 현 구현은 호출하지 않음 (한 번 등록 후 유지). 향후 source 빈 채로 launch 시 사용.
+    func stopBackgroundObservation(for source: ActivitySourceType) {
+        guard let query = activeObservers[source] else { return }
+        store.stop(query)
+        activeObservers[source] = nil
+        if let type = quantityType(for: source) {
+            store.disableBackgroundDelivery(for: type) { _, _ in }
         }
     }
 

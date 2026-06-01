@@ -32,10 +32,11 @@
 - **목표 공통(절제/활동/집중/습관) — 사용자 지정 아이콘·색** (카테고리 미사용):
   - **iconName** (String?) — semantic identifier (예: "run", "fast", "water"). Android 호환 — SF Symbol 이름 직접 저장 아님. iOS는 `GoalIcon.symbolName`으로 매핑.
   - **iconColorHex** (String?) — `CategoryColor` rawValue ("red", "blue" 등) 재활용.
-- **활동(activity) 전용** — Phase B/C 활성화 예정:
+- **활동(activity) 전용**:
   - **activityTargetValue** (Double?) — 목표 수치 (예: 100, 10000)
   - **activityUnit** (String?) — "회", "L", "km", "보"
-  - **activitySourceType** (Int16?) — 0=manual, 1=steps(HealthKit), 2=distance(HealthKit)
+  - **activitySourceType** (Int16?) — 0=manual, 1=steps, 2=distance, 3=calories, 4=flights (1~4=HealthKit)
+- **집중(focus) 전용** — 활동 모델 재활용. `activityTargetValueDouble`=target 분, `RC.valueRecorded`=누적 분, `activityUnit="분"`. 별도 필드 없음.
 - 포기 사유는 `RoutineCompletion.comment` + `ItemEvent.note`에 저장. Item 차원의 comment 필드는 제거됨.
 - self-relation: parent/children (3단계 계층은 앱 로직에서 강제)
 - 관계: category(Todo 전용), recurrenceRule, reminders, completions, events, checklistItems
@@ -70,14 +71,14 @@
 ### Enum 매핑 (`Models/ModelEnums.swift`)
 - **ItemKind**: 0=todo, 1=notTodo(절제), **2=activity(활동)**, **3=focus(집중)**, **4=habit(습관)**
   - `displayName` localized. `isGoal` = `self != .todo` (절제+활동+집중+습관 통합 그룹).
-  - `goalTypeSymbolName` — sub-picker용 SF Symbol (절제=nosign, 활동=figure.run, 집중=timer, 습관=checkmark.circle.fill)
-  - `isAvailableForInput` — Phase A: 절제·습관만 true. 활동/집중은 false (UI placeholder).
+  - `goalTypeSymbolName` — sub-picker용 SF Symbol (절제=hand.raised.fill, 활동=figure.run, 집중=timer, 습관=checkmark.square.fill)
+  - `isAvailableForInput` — 모든 case true (4-type 모두 입력 가능).
 - **Priority**: 0=none, 1=medium, 2=high, 3=low. `displayName` localized
 - **Status**: 0=pending, 1=done, **2=deleted (legacy/soft-delete 예약)**, **3=failed (NTD 포기 또는 1회성 NTD 사용자 종료)**
 - **Frequency**: 0=daily, 1=weekly, 2=monthly (3=weekdays, 4=weekend, 5=weeklyCount는 legacy, 미사용)
 - **TimeOfDay**: 0=none, 1=morning, 2=afternoon, 3=evening
 - **ItemAction**: 0~7 (created/updated/completed/uncompleted/cancelled[legacy]/restored/deleted/**failed**). 모두 localized
-- **ActivitySourceType**: 0=manual, 1=steps(HealthKit), 2=distance(HealthKit) — Phase B/C에서 활성화
+- **ActivitySourceType**: 0=manual, 1=steps, 2=distance, 3=calories, 4=flights (1~4 모두 HealthKit). `displayName` localized.
 - **GoalIcon** (`Models/GoalIcon.swift`): 12 case enum + `symbolName` accessor. **rawValue("run", "fast", ...)가 DB에 저장** (cross-platform 호환). iOS는 symbolName으로 SF Symbol 매핑.
 
 ## Timezone 정책 (중요)
@@ -126,17 +127,22 @@ MyDays/MyDays/
 ├── Services/
 │   ├── PersistenceController.swift  shared singleton, CloudKit 스택, deleteAllData (개발용)
 │   ├── NotificationService.swift    UNUserNotificationCenter wrapper (delegate, schedule, cancel)
-│   └── SpeechRecognizer.swift       SFSpeechRecognizer + AVAudioEngine wrapper (ko-KR, on-device)
+│   ├── SpeechRecognizer.swift       SFSpeechRecognizer + AVAudioEngine wrapper (ko-KR, on-device)
+│   ├── HealthKitService.swift       HKHealthStore wrapper. fetchTodayValue / requestAuthorization (steps/distance/calories/flights)
+│   ├── Item+HealthKitSync.swift     scenePhase=.active 시 auto-source activity 항목 RC.valueRecorded sync (main target only)
+│   ├── FocusSessionManager.swift    singleton ObservableObject. single-active 세션, elapsed 누적 (10분 미만 폐기)
+│   └── Item+FocusSession.swift      addFocusMinutes / focusCurrentMinutes — RC.valueRecorded에 분 단위 누적 (main target only)
 └── Views/
-    ├── RootView.swift               TabView + .task/scenePhase에서 completeExpiredRoutines + completeFinishedNTDs 호출
+    ├── RootView.swift               TabView + .task/scenePhase에서 completeExpiredRoutines + completeFinishedNTDs + syncHealthKitActivities 호출
     ├── TodayView.swift              부모(displayedDate UTC anchor) + TodayList(섹션 fetch + NTD 필터)
     ├── ListView.swift               전체 + 완료 토글. 완료 섹션 = status 1 OR 3 (NTD failed 포함)
     ├── ArchiveView.swift            isSomeday=YES 항목 + 하단 QuickEntryBar
     ├── SettingsView.swift           동기화/활동/정보 + Dev: 모든 데이터 삭제 + App Icon export
     ├── ActivityLogView.swift        시계열 ItemEvent 표시 (note 포함)
-    ├── AddItemView.swift            입력/편집/삭제 통합. kind picker, NTD 입력 분기, 활동 기록 표시
-    ├── ItemRow.swift                Todo/Routine/NTD 통합 row (D-day, status icons, AdaptiveCountdownSchedule)
+    ├── AddItemView.swift            입력/편집/삭제 통합. kind picker (4-type 목표) + 활동/집중 target·source 입력 + 활동 기록 표시
+    ├── ItemRow.swift                Todo/Routine/NTD/habit/activity/focus 통합 row. type별 trailing 분기 (habit=체크, activity=progress+(+N), focus=progress+▶)
     ├── NTDRow.swift                 TodayView NTD 전용 row (Adaptive schedule, statusIcons, (x) 포기 버튼)
+    ├── FocusSessionView.swift       집중 fullScreen UI. CoreMotion 흔들림 감지 + scenePhase=.background 자동 종료 + idleTimer disable
     ├── AdaptiveCountdownSchedule.swift  target instant 기반 가변 갱신 (1s/30s/60s)
     ├── QuickEntryBar.swift          보관함 하단 floating 입력 바 (TextField + mic + (+))
     ├── AppIconBuilder.swift         앱 아이콘 시안 SwiftUI 렌더 + PNG export (dev)
@@ -885,89 +891,152 @@ MyDays/MyDays/
 - AddItemView `applyCategoryAlertDefaults`의 NTD 분기 제거 (목표는 카테고리 미사용).
 
 ### Phase B 이후 후보 (이번 phase 미구현)
-- 활동 type 활성화 (manual count input + (+1) 버튼)
-- 활동 HealthKit 연동 (steps/distance)
-- 집중 type (timer + pause + 누적 시간 기록)
+- 활동 type 활성화 (manual count input + (+1) 버튼) — **완료 (2026-06-01 세션)**
+- 활동 HealthKit 연동 (steps/distance/calories/flights) — **완료 (2026-06-01 세션)**
+- 집중 type (timer + pause + 누적 시간 기록) — **완료 (2026-06-01 세션, single-session 모델)**
 - 1회성 NTD/Todo 위젯 추가 (현재 ItemSnapshot의 routine만 지원)
 - 활동 기록 화면(ActivityHistoryView)의 type별 그룹핑·통계 강화
 
+## 최근 완료 (2026-06-01 세션 — Phase B+C+D 활동/집중 일괄 활성화)
+
+Phase A에서 placeholder였던 활동·집중 type을 실제 동작하도록 구현. 4-type 목표가 모두 입력·렌더링·완료 처리 가능 상태.
+
+### 활동(activity) — Phase B + C 통합
+- **AddItemView 입력 UI**:
+  - Source chip row: manual / steps / distance / calories / flights — 신규 항목만 변경 가능, 편집 모드에선 잠금(`locked`).
+  - Manual 선택 시 quick-add chip row 노출 (`activityQuickStep` — target 기준 [1/2/5/10/20/50/100/200/500/1000/2000/5000/10000] 중 nice step 자동 선택).
+  - Target input: 숫자 키패드, source별 단위 hint ("보"/"m"/"kcal"/"층"/사용자 입력).
+  - Auto source 선택 시 save 시점에 `HealthKitService.requestAuthorization` 비동기 호출.
+- **HealthKitService** (`Services/HealthKitService.swift`):
+  - `HKHealthStore` wrapper, `@MainActor`. read-only(`toShare:[]`).
+  - `fetchTodayValue(for:)` — 오늘(local startOfDay~다음 startOfDay) cumulativeSum.
+  - `quantityType` 매핑: stepCount / distanceWalkingRunning / activeEnergyBurned / flightsClimbed.
+  - 권한 status 직접 노출 안 함(privacy) — fetch nil → skip 패턴.
+  - `isAvailable` 가드(Mac Catalyst·시뮬레이터에서 false 가능).
+- **foreground sync** (`Services/Item+HealthKitSync.swift`):
+  - RootView `.task` + `scenePhase==.active` 시 `Item.syncHealthKitActivities` 호출.
+  - 오늘이 occurrence인 auto-source activity만 fetch → RC.valueRecorded **absolute set** (increment 아님 — HK는 day total).
+  - 0.5 단위 미만 차이는 write skip (Core Data churn 회피).
+  - target 도달 시 `done=true` flip. 1회성은 `item.status=done` + `completedAt` sync.
+  - 별도 파일 분리 이유: HealthKit import가 widget target에 들어가면 빌드 실패. main app target 전용 멤버십.
+- **manual increment** (`Item.incrementActivityValue`): (+N) 버튼 탭 시 RC.valueRecorded += step. target 도달 시 done flip + 1회성 status sync.
+- **ItemRow `activityTrailingProgress`**:
+  - 140pt progress capsule (NTD 진행바와 동일 시각) + 현재/target 텍스트 ("7500 / 10000").
+  - Manual source: (+N) 버튼 (quick step). Auto source: heart(파동) 아이콘 (auto-sync 표시, 액션 없음).
+  - 과거 일자: trailing 아이콘 숨김, progress bar만 (그날 결과 조회).
+  - 미래 일자: trailing 액션 숨김 (`canInputTrailingAction` 가드).
+
+### 집중(focus) — Phase D
+- **데이터 모델**: 별도 필드 추가 안 함. 활동 모델 재활용 (`activityTargetValueDouble`=target 분, `RC.valueRecorded`=누적 분, `activityUnit="분"`).
+- **FocusSessionManager** (`Services/FocusSessionManager.swift`):
+  - Singleton ObservableObject. `@Published activeItem`, `sessionStartedAt`.
+  - **Single-active**: 새 세션 시작 시 기존 active 자동 stop.
+  - **wall-clock 기반**: 시작 instant만 RAM에 보존, 종료 시 `elapsed = now - start`.
+  - **최소 10분 누적 조건**: elapsed < 10분이면 폐기. **예외**: 이 세션으로 target 도달 시 인정 (final stretch).
+  - `focusOccurrenceDate` — 반복은 active/reference occurrence, 1회성은 item.startDate.
+- **Item+FocusSession** (`Services/Item+FocusSession.swift`):
+  - `addFocusMinutes(_:for:occurrenceDate:)` — RC.valueRecorded에 Double 누적 add (target 도달 시 done flip, 1회성은 status sync).
+  - `focusCurrentMinutes(on:)` — 현재 누적 분 조회.
+- **FocusSessionView** (`Views/FocusSessionView.swift`):
+  - fullScreenCover Zen UI: 검은 배경 + 흐린 아이콘 + 제목 + "지금 집중하고 있어요" caption + 작은 종료 버튼.
+  - **시간 표시 X** — zen 정책. target 도달 시 capsule(goalColor + 흰 글자) 강조 + haptic success.
+  - **자동 종료 조건**:
+    - `scenePhase==.background`: 잠금/홈/앱 전환/전화 받음 (inactive는 무시 — transient overlay).
+    - CoreMotion 흔들림: `MotionObserver`가 device motion `userAcceleration` 3초 sliding window 평균 > 0.5g면 trigger.
+  - `UIApplication.isIdleTimerDisabled = true` — 화면 자동 잠금 차단.
+  - target 도달 자동 트리거: `(target - 누적)분` 후 single delayed Task(폐기 가능). 이전 5초 polling 대신 결정적 schedule.
+- **ItemRow `focusTrailingProgress`**:
+  - Activity와 동일 시각의 progress capsule (분 단위 "45/60").
+  - ▶ 버튼 — 탭 시 `presentFocusSession = true` → fullScreenCover로 FocusSessionView.
+  - 미래/과거 일자 ▶ 숨김.
+
+### Enum / 타입 확장
+- `ActivitySourceType`: 3종(manual/steps/distance) → 5종 (+ calories=`activeEnergyBurned`, flights=`flightsClimbed`).
+- `ItemKind.isAvailableForInput`: 4-type 모두 true (Phase A 가드 제거).
+- `ItemKind.goalTypeSymbolName`: 절제=`hand.raised.fill` (이전 `nosign`에서 변경), 습관=`checkmark.square.fill` (이전 `checkmark.circle.fill`에서 변경).
+- `Item` accessor: `activityTargetValueDouble`, `activityTargetValueInt`, `activitySource`, `activityQuickStep(target:)`.
+
+### Info.plist + entitlements
+- `NSHealthShareUsageDescription` 추가 — "걸음수와 거리 데이터를 읽어와서 활동 목표 진행도를 자동으로 측정합니다."
+- `com.apple.developer.healthkit = true`, `com.apple.developer.healthkit.access = []` (read-only).
+
+### TodayView 통합
+- `goalKindFilterOrder`: [notTodo, activity, focus, habit] — 사용자가 type별로 toggle 가능한 sub-filter.
+- 목표 섹션 fetch: kind IN (1, 2, 3, 4) AND status != deleted.
+- `goalRow` dispatch: NTD → NTDRow, habit/activity/focus → ItemRow (각 trailing UI는 ItemRow 내부 분기).
+- `goalSortPriority`: NTD inProgress → NTD scheduled → habit/activity/focus pending → 완료/포기.
+
+### 알려진 한계 (이번 phase 미구현)
+- Activity HealthKit **background delivery 없음** — foreground sync만. 사용자가 앱 열어야 진행률 갱신. `HKObserverQuery + enableBackgroundDelivery`는 후속.
+- Focus motion 임계치(0.5g, 3초 window)는 실측 미보정 — 실 사용자 피드백 후 조정.
+- FocusSessionManager session start 시각이 RAM only — 앱 강제 종료/크래시 시 손실. foreground 종료가 곧 세션 종료라 일반 시나리오에선 무관.
+- Mac Catalyst에선 HealthKit unavailable → activity HK source 입력 막혀야 함 (현재 chip 노출은 됨, fetch만 nil). UI 가드 추가 검토.
+- ActivityHistoryView에 type별 그룹핑·통계 강화는 미진행.
+
+## 최근 완료 (2026-06-01 회사 세션 — 위젯 재설계 + HK BG + 검색)
+
+### 위젯 전면 재설계 — 시간 정보 제거, 4-type 통합
+- **공통 표시 방식**:
+  - 목표: 사용자 지정 아이콘 + progress capsule(타이틀 overlay) — 절제/활동/집중/습관 통일.
+  - 할일: 카테고리 아이콘 + 타이틀 plain.
+  - 모두 1줄, 시간 정보 없음.
+- **새 ItemSnapshot 모델**: `bucket`(ongoing/scheduled/past), `progress`(0~1), `iconName`, `iconColorHex`.
+  - 정렬: groupOrder(목표→할일) → bucket(진행중→예정→지남) → sortAnchor.
+  - past 항목은 row 표시 X, 카운트에는 포함.
+  - fetch: `isSomeday=NO + status != deleted` — boolean optional NULL semantics 회피 위해 메모리 필터.
+- **classifyNTD**: 1회성/반복 분기 명확화. 1회성은 `Item.status` 기반(completedAt 오늘일 때만 past), 반복은 today RC 기반.
+- **classifyTodo**: 1회성 `.done` / `.failed` 둘 다 가드, `completedAt` 오늘일 때만 past. 단일 일정 시간 지정 미완료는 시각 지나도 ongoing 유지(오늘탭 정책 통일).
+- **Home Small / Medium**:
+  - 헤더: 좌측 큰 일자(34pt) + 우측 vstack(요일 leading + 카운트 trailing). 카운트는 (scope) n/m + (checkmark.circle) n/m 1줄.
+  - row 박스 height 미리 계산(`fitCount × rowHeight + ...`) → widget 바닥 정렬, 박스 안 row는 위 정렬. device별 widget 높이 차이는 헤더와 박스 사이 flex spacer가 흡수.
+  - 진행바 fill opacity 0.35 + 타이틀 색 colorScheme 분기(라이트=fill color, 다크=primary) — ItemRow NTD capsule과 통일.
+- **Lock Circular**: 큰 아이콘 + 두꺼운 원형 progress arc(4pt). 활성 목표 회전. `dropFirst(2)`로 LockRect와 중복 회피.
+- **Lock Rectangular**: 원형 슬롯 2개 가로 배치(AccessoryWidgetBackground 대신 명시 Circle). top 2 고정(회전 없음) — LockCircle이 G3+ 회전이라 통합 시 G1·G2 + G3 (+G4 순환) 3~4개 분산 노출.
+- **Adaptive timeline tier 재정의**: `>1h: 60min / 20m~1h: 10min / 5m~20m: 5min / <5m: 1min / 미설정: 60min` — 시간 라벨 없어 budget spare. horizon 6h.
+- **WidgetCenter reload hook**: RootView `.task` + `.onChange(scenePhase=.active)`에서 호출. HK BG handler 끝에도 호출.
+
+### HealthKit Background Delivery (`.immediate`) + 목표 달성 알림
+- **HealthKitService.startBackgroundObservation(for:handler:)** — HKObserverQuery + enableBackgroundDelivery(.immediate). source별 1 observer(activeObservers dict 중복 방지). MyDaysApp.init()에서 4 source 일괄 등록.
+- **Item.handleHealthKitBackgroundFire(for:completion:)** — `.immediate` event 시:
+  - HK fetch → 활성 활동 항목 loop
+  - **5% threshold**: `abs(current - prev) >= target × 0.05` 일 때만 reload + RC update.
+  - 신규 target 달성(`!wasDone`): 무조건 reload + RC.done=true + 알림 fire (cap 제외).
+  - 미세 변화: RC update 안 함 — 다음 누적 비교 정확도 유지(매번 갱신하면 비교 기준이 stale 갱신되어 5% 영영 안 도달).
+- **알림 정책**: AddItemView 활동 type 알림 section에 toggle ("목표 달성 알림", default ON). focus는 알림 section 자체 없음(자체 timer 화면).
+- **알림 fire**: `UNMutableNotificationContent` + immediate trigger. ID `activity_goal_reached:{itemID}:{epoch}` — 중복 회피.
+- **데이터 모델**: `Item.notifyOnGoalReached: Bool?` 추가 (default ON 해석, nil도 ON).
+- **entitlements**: `com.apple.developer.healthkit.access` (빈 array), `com.apple.developer.healthkit.background-delivery` 추가. Xcode capabilities UI에서 "HealthKit Background Delivery" 옵션 체크.
+
+### 검색 모드 (목록탭) + `#태그` chip
+- **진입**: 목록탭 toolbar 돋보기 버튼 → `searchPresented = true`.
+- **Banner 패턴**: TodayView cancel/picker 모드와 통일. `safeAreaInset(edge: .top)` accent.opacity 0.12 배경 + 검색 입력 capsule(systemBackground 흰/검 자동 적응).
+- **모드 종료**: toolbar 우상단 prominent checkmark 버튼 (banner cancel X). TodayView cancelMode 패턴 통일.
+- **navigationTitle**: 일반 "전체 활동" .large / 검색 "활동 검색" .inline.
+- **검색 범위**: title + notes CONTAINS[c]. predicate: `isSomeday=NO AND status != deleted AND (title CONTAINS[c] OR notes CONTAINS[c])`.
+- **결과 list**: `SearchResultsList` inner struct — init에서 동적 predicate. 항상 List 컨테이너 유지(첫 char 입력 시 view tree 재구성으로 키보드 dismiss되는 문제 회피).
+- **태그 chip section**: notes의 `#[\\p{L}\\p{N}_]+` regex 추출(Unicode-aware, 한국어/영문 통합). 검색어 유무 무관 항상 노출. chip 탭 시 `searchText = tag` replace 동작 → 즉시 검색.
+- **스크롤 시 키보드 dismiss**: `.scrollDismissesKeyboard(.immediately)`.
+- **listStyle**: normalList 그대로 `.insetGrouped`, SearchResultsList도 `.insetGrouped`. 태그 chip 위 약간 padding은 insetGrouped 자체 동작이라 수용.
+- **결과는 별도 Section으로 묶음** — 태그 chip(no section)과 시각 분리.
+
+### 기타 폴리시
+- 카테고리 편집 화면: "할일 알림 기본값" 1개 section → "시작 알림 기본값" + "마감 알림 기본값" 2 section 분리.
+  - row label: "시간 설정시" / "시간 미설정 시" (timed/untimed 공통).
+- CategoryIcon: `pawprint.fill` → `pawprint` (outline).
+- GoalIcon: 12 → 18로 확장. 목표 type 대표 4(맨 앞: abstain/run/focus/habit) + 절제 3 + 운동 4 + 활동/개인 7. AddItemView 입력 폼에 type 변경 시 자동 GoalIcon 선택 (`ItemKind.defaultGoalIcon`) — `userPickedGoalIcon` flag로 사용자 명시 선택 시는 보존.
+- ItemKind.goalTypeSymbolName: 절제 `nosign`→`hand.raised.fill`, 집중 `timer`→`hourglass.bottomhalf.filled`.
+
 ## 미구현 (다음 후보, 우선순위 순)
 
-### 1. 활동 목표 (Activity Goal) — 3번째 핵심 기능 (다음 진행 예정)
+### 1. 활동 목표 (Activity Goal) — 완료 (2026-06-01 세션)
+- 4-type taxonomy 안에 통합 완료. HealthKit 4종(steps/distance/calories/flights) + manual 자동 측정 + foreground sync + .immediate background delivery + 목표 달성 알림.
+- 자세한 구현은 "최근 완료 (2026-06-01 회사 세션)" 섹션 참조.
+- **남은 후속**: ScreenTime / 수면 시각 type, ActivityHistoryView 통계 강화.
 
-**개념**: 기기 센서 데이터로 자동 판정되는 목표. Todo(사용자 체크)·NTD(사용자 포기)와 구분되는 자동 평가가 정체성.
-
-**예시 (full scope)**:
-- HealthKit: 매일 N보 걷기 / N km 뛰기 / N시 이전 자기 / N시간 이상 자기
-- Screen Time: 특정 시간 window에 폰 N분 이상 사용 안 함
-
-**MVP 범위 (Phase 1 — 합의)**:
-- HealthKit 3종만: 걸음수, 거리, 수면 시간 (취침 시각·ScreenTime 보류)
-- ScreenTime API는 entitlement·App Store 승인 복잡 + family/parental 시나리오 최적화라 self-tracking에 제약 큼 → 1차 출시 보류
-- 취침 시각은 데이터 정확도 편차(Apple Watch 의존) + "잤다" 정의 모호 → 후순위
-
-**데이터 모델 — 기존 Item entity 확장 (새 entity 추가 X, CloudKit 스키마 영향 최소화)**:
-```
-Item:
-  kind: 0=todo, 1=ntd, 2=activity  ← 추가
-  activityType: Int16?              ← 추가 (enum: steps/distance/sleep/...)
-  activityTargetValue: Double?      ← 추가 (10000, 5.0, 8.0 etc.)
-  activityComparison: Int16?        ← 추가 (gte=0, lte=1, between=2)
-```
-- `startDate`/`dueDate`/`recurrenceRule`/`startHour`/`dueHour` 재활용:
-  - 일자: 기존 그대로
-  - 시간 window: `startHour`~`dueHour` 재활용 (예: 22~23시 = "10pm~11pm 평가 window"). 별도 필드 추가 X.
-- `RoutineCompletion` 재활용: 자동 평가 결과를 `done=true`로 기록. 사용자 수동 체크 없음 (시스템 평가).
-
-**평가 방식 — iOS 백그라운드 제약 고려**:
-- 일별 목표: `scenePhase==.active` / app launch에서 활성 활동 목표 fetch + 평가 → RC 생성/업데이트.
-- 시간 window 목표: window 종료 시점에 로컬 알림 trigger → 사용자가 앱 열면 평가 (HKObserverQuery로 일부 백그라운드 가능하지만 모든 항목 지원 X).
-- 진행 중 표시: 가능한 한 최근 fetch 값으로 ("7,500 / 10,000 보" 식 progress).
-
-**크로스 플랫폼 추상화**:
-```swift
-protocol ActivityDataProvider {
-    func dailyValue(for type: ActivityType, on date: Date) async -> Double?
-    func requestPermission(for type: ActivityType) async -> Bool
-}
-```
-- iOS: `HealthKitProvider` (HKHealthStore + HKQuery).
-- Android (이후): `HealthConnectProvider`.
-- 모델 자체는 OS-independent.
-- **합의**: iOS 먼저 구현 + 안정화 후 Android port. 동시 설계 시 lowest-common-denominator로 가서 OS 강점 사라짐.
-
-**UI**:
-- AddItemView: kind picker에 "활동 목표" 추가. type 선택 시 unit/comparison 동적 라벨 (예: steps → "이상", "보"; sleep → "이상", "시간").
-- TodayView: NTD 섹션 옆 또는 별도 섹션. 진행률 bar 또는 "7,500 / 10,000 보" 텍스트. 자동 완료 시 체크 표시 (회색 + 라벨 dim).
-- ItemRow: leadingControl을 활동 목표 전용 아이콘(달성 X = outline / 달성 O = fill)으로 분기.
-
-**구현 순서 (Phase 1)**:
-1. `Item` 모델 확장 — activityType / activityTargetValue / activityComparison + ItemKind enum 확장. CloudKit migration 1회.
-2. `ActivityDataProvider` 프로토콜 + `HealthKitProvider` 구현 (걸음수·거리·수면 3종). 권한 요청 흐름.
-3. AddItemView 활동 목표 입력 UI.
-4. TodayView 활동 목표 노출 (4번째 섹션 또는 NTD에 통합 검토).
-5. `MyDaysApp` launch / `scenePhase==.active`에서 활동 목표 평가 실행 → RC 생성.
-6. window 목표 시 로컬 알림 trigger.
-7. ItemRow leadingControl 분기.
-8. (이후) Android port + Health Connect.
-
-**결정 필요 (시작 전)**:
-- MVP type 범위 — 위 3종 확정?
-- 직접 완료 마킹 허용? (백업 경로 — 데이터 fetch 실패 케이스). 권장: 허용 (NTD처럼 사용자 override 가능)
-- 데이터 부족(Apple Watch 없음 등) 사용자 안내 정책.
-- HealthKit 권한 거부 사용자 처리 — 활동 목표 생성 비활성화 vs 생성은 허용하되 평가 불가 표시.
-
-**참고**:
-- HealthKit: `NSHealthShareUsageDescription` + entitlement 필요.
-- HKObserverQuery + `enableBackgroundDelivery`로 백그라운드 wake-up 가능 (Steps·Sleep 지원). 단 빈도 제한.
-- 권한 prompt UX 신중히 — 한 번에 여러 type 요청보다 type별 lazy 요청 권장.
-
-### 2. 검색 기능 + `#태그` (notes 내)
-- Tag entity는 2026-05-29 drop. 향후 일정 검색 화면 구현 시 notes의 `#xxx` 패턴을 인식해 태그 필터로 사용.
-- regex `#[가-힣A-Za-z0-9_]+` 정도로 파싱. Tag 데이터 모델 없음 — text 기반만.
-- (선택) Phase 3 — 태그 overview 화면: 모든 notes에서 unique `#xxx` 추출 + 카운트 + 탭하면 그 태그 항목 필터.
-- (선택) Phase 4 — TextField 자동완성: 사용자가 `#` 입력 시 기존 태그 suggestion.
-- 사용자 결정: 일반 사용자에게 2단계(카테고리 + 하위 분류)는 과함 → 3단계 계층 구조는 진행 안 함.
+### 2. 검색 기능 + `#태그` (notes 내) — 완료 (2026-06-01 세션)
+- 목록탭에 검색 모드 + 태그 chip section 구현.
+- 자세한 구현은 "최근 완료 (2026-06-01 회사 세션)" 섹션 참조.
+- **선택 후속** (v2+): 태그 overview 화면 (unique 태그 + 카운트), TextField `#` 입력 시 자동완성.
 
 ### 3. iPad 최적화 (Stage 1+2 완료, Mac Catalyst 활성화 완료, Stage 3 진행 예정)
 - Stage 1 완료 (2026-05-28): NavigationSplitView 분기, 사이드바 selection 동작.
@@ -975,9 +1044,9 @@ protocol ActivityDataProvider {
 - Mac Catalyst 활성화 완료 (2026-05-29): pbxproj 설정 + Today 아이콘 fallback. 빌드/실행 OK.
 - **Stage 3 (남음)**: 3-column NavigationSplitView (sidebar + content list + detail), AddItemView를 sheet 대신 detail pane에 inline 호스트, Mac-native 폴리시. 큰 작업 — 1.5~2주. 출시 v2 후보.
 
-### 4. 알림 후속 개선 (대부분 완료)
+### 4. 알림 후속 개선 (완료)
 - **완료 (2026-05-29)**: 알림 탭 → 오늘 탭 routing. 알림 권한 거부 안내 (AddItemView 저장 시 dialog + Settings 열기).
-- **남음**: 알림 탭 → 항목 편집 화면 deep link (현재는 오늘탭 routing만, 항목 highlight 없음). 우선순위 낮음.
+- **결정 (2026-06-01)**: 항목 highlight deep link는 진행 안 함 — 오늘탭 routing이 의도된 최종 동작. 사용자가 알림 탭 후 오늘탭에서 해당 항목을 직접 확인하는 흐름.
 - **남음**: pending 한계(64) 초과 시 graceful 처리. 사용자 8개 미만 routine이면 무리 X — 실 사용자 데이터 보고 결정 (보류).
 
 ### 5. 활동 기록 화면 (완료, 2026-05-29)
@@ -1027,8 +1096,56 @@ protocol ActivityDataProvider {
 - Settings "모든 데이터 삭제" 버튼 — 일반 사용자에게도 필요 (사용자 의견). UX 방식 별도 고민 중.
 - `completeExpiredRoutines` 호출 위치(현재 4곳) 성능 측정 후 최적화 후보 — 현재 보류.
 - Settings 활동 로그 화면 — 표시 문구 / UI 개선 필요 (사용자 의견). 별도 진행.
-- pending 알림 64 한계 처리 — 사용자 8개 미만이면 무리 X. 실 사용자 데이터 보고 처리 (보류).
+- pending 알림 64 한계 — **출시 후 모니터링 항목**으로 이동. 사용자 routine 8개 미만이면 무관. 실 사용자 데이터에서 알림 누락 보고 시 graceful degradation 추가.
 - 알림 권한 거부 재안내 — 입력 폼 저장 시 dialog로 처리 완료 (2026-05-29). 추가 onboarding 안내는 우선순위 낮음.
+
+## 다음 작업 분류 (2026-06-01 회사 세션 결정)
+
+### 출시 1.0 우선 (소형 폴리시 + 유료 unlock 흐름 결정)
+**작은 작업** (병행 가능):
+- **빈 화면 디자인** — 항목 0개일 때 first-launch placeholder + 가이드. 현재 단순 텍스트 → 일러스트/CTA 강화. **우선 작업**.
+- 활동 로그 화면 (Settings) UI 개선 + **로그 데이터 보관 기간 정책** 정의 (예: 90일/1년 자동 cleanup).
+- 홈 위젯 large 사이즈 추가 검토 — small/medium 패턴 확장.
+- tint 풀림 이슈 — 재현 시 그때 대응.
+
+**큰 작업 — 유료 unlock UI 흐름** (집에서 진행 예정):
+- 유료 cap 기준 확정 (NTD/활동/반복/카테고리 갯수, Premium 기능 set).
+- Paywall 진입점 3종 (Settings 상시 entry / cap 도달 inline / 기능 진입 시도) UI 설계.
+- 코드 가드 헬퍼 시그니처 정리 (`canAddRecurrence(in:)`, `canUsePremiumFeature(...)`).
+- **DEV unlock 버튼** Settings의 Dev section에 추가 — 테스트용.
+- StoreKit 2 통합은 다음 단계.
+
+**보류 작업** (이번 phase 안 함):
+- monthview 기능 정리 — 데이터 더 쌓인 후 다시 검토.
+- 입력폼 활동 기록 "전체 보기"에 monthview — monthview 정리 완료 후 진행.
+
+### 출시 1.0 직전 (출시 준비)
+- **첫 진입 onboarding** — 권한 요청 흐름(Notification / HealthKit / Microphone / Speech) + 기능 소개.
+- **App Store 자료** — 스크린샷 5종(ko/en), description, 키워드, **Privacy Nutrition Labels** (HealthKit / CloudKit 데이터 처리 명시 필수).
+- **출시 전 QA 체크리스트**:
+  - 권한 거부 케이스 (Notification / HealthKit / Microphone / Speech).
+  - CloudKit 충돌 케이스 (멀티 기기).
+  - 위젯 stale (사용자 앱 안 열어도 정상 동작).
+  - iCloud 미로그인 사용자 fallback.
+
+### 다음 단계 작업 (출시 1.0 후 / v1.1+)
+- 활동 보고서 (Premium) — Charts framework. 통계 항목 확정 필요 ("5-b. 활동 보고서" 섹션 참조).
+- ActivityHistoryView 통계 강화 — type별 그룹핑, completion rate, streak.
+- monthview 정리 완료 후 입력폼 활동 기록 monthview.
+- HK BG type 확장 (수면 / 취침 시각).
+- HK BG 운영 모니터링 — `.immediate` 배터리·메모리 영향 실측.
+
+### v2 작업
+- **무료/유료 cap 활성화** — StoreKit 2 통합 + paywall 동작.
+- **구글 애널리틱스** — 사용자 패턴 분석. 코드 위치 정리 필요 (App init / 주요 화면 진입 / 액션 시점).
+- **Firebase 동기화** — CloudKit ↔ Firebase 양방향 토글 + last-writer-wins. 로그인 화면 추가.
+- **세팅탭 기능 정리** — 권한 / 데이터 / 동기화 / 보고서 / 백업 등 재구성.
+- **데이터 export/import** — JSON 백업. Freemium 데이터 안전망 + 동기화 변경 사이 fallback.
+
+### v3+ 작업 (먼 미래)
+- iPad Stage 3 — 3-column NavigationSplitView + AddItemView inline pane + Mac-native 폴리시. 1.5~2주.
+- 검색 확장 — 태그 overview 화면 (unique 태그 + 카운트) + TextField `#` 입력 시 자동완성.
+- Apple Watch 앱 — 활동 목표 빠른 view + 체크. iOS 위젯/HK 인프라 재활용 가능.
 
 ## Freemium 계획 (출시 시점 결정 보류)
 

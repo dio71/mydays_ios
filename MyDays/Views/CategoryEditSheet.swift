@@ -77,24 +77,27 @@ struct CategoryEditSheet: View {
                     .padding(.vertical, 4)
                 }
 
-                Section("category.section.alert_default.todo") {
+                Section("category.section.alert_default.todo_start") {
                     alertOffsetPicker(
-                        label: "category.alert.todo_timed_start",
+                        label: "category.alert.todo_timed",
                         selection: $todoTimedStartAlert,
                         options: AlertOffset.withTimeOptions
                     )
                     alertOffsetPicker(
-                        label: "category.alert.todo_untimed_start",
+                        label: "category.alert.todo_untimed",
                         selection: $todoUntimedStartAlert,
                         options: AlertOffset.noTimeOptions
                     )
+                }
+
+                Section("category.section.alert_default.todo_due") {
                     alertOffsetPicker(
-                        label: "category.alert.todo_timed_due",
+                        label: "category.alert.todo_timed",
                         selection: $todoTimedDueAlert,
                         options: AlertOffset.withTimeOptions
                     )
                     alertOffsetPicker(
-                        label: "category.alert.todo_untimed_due",
+                        label: "category.alert.todo_untimed",
                         selection: $todoUntimedDueAlert,
                         options: AlertOffset.noTimeOptions
                     )

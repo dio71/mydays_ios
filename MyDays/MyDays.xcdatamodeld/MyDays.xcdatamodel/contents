@@ -14,6 +14,7 @@
         <attribute name="isSomeday" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="kind" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="notifyOnGoalReached" optional="YES" attributeType="Boolean" usesScalarValueType="NO"/>
         <attribute name="ntdDurationHour" optional="YES" attributeType="Integer 16" usesScalarValueType="NO"/>
         <attribute name="recurrenceEndDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="startHour" optional="YES" attributeType="Integer 16" usesScalarValueType="NO"/>

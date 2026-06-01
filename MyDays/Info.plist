@@ -8,11 +8,5 @@
 		<string>processing</string>
 		<string>remote-notification</string>
 	</array>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>음성으로 보관함 항목을 빠르게 입력하기 위해 마이크를 사용합니다.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>음성을 텍스트로 변환해 보관함 항목 제목으로 사용합니다.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>걸음수와 거리 데이터를 읽어와서 활동 목표 진행도를 자동으로 측정합니다.</string>
 </dict>
 </plist>

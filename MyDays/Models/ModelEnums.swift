@@ -23,11 +23,12 @@ enum ItemKind: Int16, CaseIterable {
 
     /// 목표 sub-picker용 SF Symbol — 입력 폼 type 선택 chip 아이콘.
     /// 습관은 trailing 체크 버튼(square)과 동일 스타일 — Todo의 checkmark.circle과 구분.
+    /// 4-type 모두 GoalIcon의 대표 case와 매칭 (defaultGoalIcon).
     var goalTypeSymbolName: String {
         switch self {
         case .notTodo:  return "hand.raised.fill"
         case .activity: return "figure.run"
-        case .focus:    return "timer"
+        case .focus:    return "hourglass.bottomhalf.filled"
         case .habit:    return "checkmark.square.fill"
         case .todo:     return "checkmark.circle"  // unused (목표 sub-picker만 사용)
         }

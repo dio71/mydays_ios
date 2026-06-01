@@ -66,7 +66,7 @@ enum CategoryIcon: String, CaseIterable, Identifiable {
         case .person2:       return "person.2"
         case .sns:           return "at"
         // 동물·자연
-        case .pawprint:      return "pawprint.fill"
+        case .pawprint:      return "pawprint"
         case .leaf:          return "leaf"
         case .star:          return "star"
         // 기타

@@ -1,5 +1,7 @@
 import Foundation
 import CoreData
+import WidgetKit
+import UserNotifications
 
 // MARK: - Item HealthKit foreground sync (Phase C-3)
 //
@@ -61,6 +63,158 @@ extension Item {
         if context.hasChanges {
             do { try context.save() } catch {
                 assertionFailure("syncHealthKitActivities save failed: \(error)")
+            }
+            // HK sync로 RC.valueRecorded가 갱신됐으면 위젯도 즉시 reload — 사용자가 앱 열 때마다 진행률 최신화.
+            // 백그라운드 자동 갱신(HKObserverQuery + enableBackgroundDelivery)은 별도 phase.
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
+    // MARK: - Background fire handler
+    //
+    // HKObserverQuery + enableBackgroundDelivery(.immediate)로 시스템이 main app process를 깨우면 호출.
+    // 정책:
+    //   - HK fetch 1회 (source 단위 cumulative)
+    //   - 해당 source 활성 항목 loop:
+    //     - prev = RC.valueRecorded ?? 0
+    //     - reached = current >= target
+    //     - 새로 도달(!prev done): RC.valueRecorded=current, done=true, 알림 fire, reload
+    //     - 5% 이상 변화: RC.valueRecorded=current, reload
+    //     - 그 외: skip (RC 갱신도 안 함, 다음 fire에서 누적 비교 정확도 유지)
+    //   - reload는 1회만 (마지막에)
+    //   - completion() 반드시 호출 (BG budget 보장)
+    @MainActor
+    static func handleHealthKitBackgroundFire(
+        for source: ActivitySourceType,
+        completion: @escaping () -> Void
+    ) async {
+        let service = HealthKitService.shared
+        guard service.isAvailable, source != .manual else {
+            completion()
+            return
+        }
+        guard let current = await service.fetchTodayValue(for: source) else {
+            completion()
+            return
+        }
+
+        let context = PersistenceController.shared.viewContext
+        let today: Date = .todayCalendarAnchor
+        let now = Date()
+
+        let request: NSFetchRequest<Item> = Item.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "kind == %d AND activitySourceType == %d AND status != %d",
+            ItemKind.activity.rawValue,
+            source.rawValue,
+            Status.deleted.rawValue
+        )
+        guard let items = try? context.fetch(request), !items.isEmpty else {
+            completion()
+            return
+        }
+
+        var shouldReload = false
+
+        for item in items {
+            // 오늘 active occurrence 판정 (foreground sync와 동일 로직).
+            let active: Bool
+            if let rule = item.recurrenceRule {
+                active = rule.occurs(on: today, startDate: item.startDate, endDate: item.recurrenceEndDate)
+            } else if let start = item.startDate,
+                      Calendar.gmt.isDate(start, inSameDayAs: today),
+                      item.itemStatus == .pending {
+                active = true
+            } else {
+                active = false
+            }
+            guard active else { continue }
+
+            // RC lookup
+            let completions = (item.completions as? Set<RoutineCompletion>) ?? []
+            let existing = completions.first { c in
+                guard let d = c.date else { return false }
+                return Calendar.gmt.isDate(d, inSameDayAs: today)
+            }
+            let prev = existing?.valueRecorded?.doubleValue ?? 0
+            let target = item.activityTargetValueDouble ?? 0
+            let wasDone = existing?.done ?? false
+            let reached = target > 0 && current >= target
+            let diff = abs(current - prev)
+            let threshold = max(target * 0.05, 0.5)
+
+            // 갱신 필요 판정.
+            let needsUpdate: Bool
+            if existing == nil {
+                needsUpdate = true                    // 첫 fetch — RC 생성 + reload
+            } else if reached && !wasDone {
+                needsUpdate = true                    // 신규 target 달성
+            } else if diff >= threshold {
+                needsUpdate = true                    // 5% 이상 변화
+            } else {
+                needsUpdate = false                   // 미세 변화 — RC도 갱신 안 함 (다음 누적 비교 정확)
+            }
+            guard needsUpdate else { continue }
+
+            let rc: RoutineCompletion
+            if let existing {
+                rc = existing
+            } else {
+                rc = RoutineCompletion(context: context)
+                rc.id = UUID()
+                rc.date = Calendar.gmt.startOfDay(for: today)
+                rc.item = item
+                rc.failed = false
+            }
+            rc.valueRecorded = NSNumber(value: current)
+            rc.completedAt = now
+
+            if reached && !wasDone {
+                rc.done = true
+                // 1회성 활동 — Item.status도 done sync.
+                if item.recurrenceRule == nil {
+                    item.itemStatus = .done
+                    item.completedAt = now
+                }
+                // 알림 fire — notifyOnGoalReached default ON (nil도 ON 해석).
+                let notifyEnabled = (item.notifyOnGoalReached?.boolValue ?? true)
+                if notifyEnabled {
+                    fireGoalReachedAlert(for: item, occurrenceDate: today)
+                }
+            }
+
+            item.updatedAt = now
+            shouldReload = true
+        }
+
+        if context.hasChanges {
+            do { try context.save() } catch {
+                assertionFailure("[HK BG] save failed: \(error)")
+            }
+        }
+        if shouldReload {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+        completion()
+    }
+
+    /// 활동 목표 달성 알림 — 즉시 fire (trigger nil).
+    /// ID: `activity_goal_reached:{itemID}:{occurrenceDate-epoch}` — 같은 occurrence 중복 fire 회피.
+    /// 권한 거부 시 silent fail (UNUserNotificationCenter 자체 처리).
+    private static func fireGoalReachedAlert(for item: Item, occurrenceDate: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "activity_alert.goal_reached.title")
+        content.body = String.localizedStringWithFormat(
+            NSLocalizedString("activity_alert.goal_reached.body", comment: ""),
+            item.title ?? ""
+        )
+        content.sound = .default
+        let idBase = item.id?.uuidString ?? item.objectID.uriRepresentation().absoluteString
+        let id = "activity_goal_reached:\(idBase):\(Int(occurrenceDate.timeIntervalSince1970))"
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                print("[HK Alert] schedule failed: \(error)")
             }
         }
     }
