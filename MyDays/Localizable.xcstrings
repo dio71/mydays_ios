@@ -1542,6 +1542,54 @@
         }
       }
     },
+    "alert.target_changed.body.activity" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The updated target value will apply from your next activity. Past records keep their original target."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경된 목표 수치는 새로 시작하는 활동부터 적용됩니다. 과거 기록은 기존 목표 수치를 그대로 유지합니다."
+          }
+        }
+      }
+    },
+    "alert.target_changed.body.focus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The updated target time will apply from your next focus session. Past records keep their original target."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경된 목표 시간은 새로 시작하는 집중부터 적용됩니다. 과거 기록은 기존 목표 시간을 그대로 유지합니다."
+          }
+        }
+      }
+    },
+    "alert.target_changed.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Target changed"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "목표 변경 안내"
+          }
+        }
+      }
+    },
     "alert.healthkit_denied.body" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1921,17 +1969,50 @@
       }
     },
     "archive.empty" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No archived items"
+            "value" : "Inbox is empty"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "보관 중인 항목이 없습니다"
+          }
+        }
+      }
+    },
+    "archive.empty.all_done" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to organize. All cleared!"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "정리할 항목이 없어요."
+          }
+        }
+      }
+    },
+    "archive.empty.filtered" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No items match this filter."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 필터와 일치하는 항목이 없어요."
           }
         }
       }
@@ -1973,7 +2054,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Archive"
+            "value" : "Inbox"
           }
         },
         "ko" : {
@@ -2585,6 +2666,22 @@
         }
       }
     },
+    "filter.clear" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear filter"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "필터 해제"
+          }
+        }
+      }
+    },
     "filter.section.category" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3053,6 +3150,23 @@
         }
       }
     },
+    "list.empty.all_done" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All done — nothing left to do."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "남은 할 일이 없어요. 모두 끝냈어요!"
+          }
+        }
+      }
+    },
     "list.empty.completed" : {
       "localizations" : {
         "en" : {
@@ -3069,18 +3183,34 @@
         }
       }
     },
-    "list.empty.first" : {
+    "list.empty.filtered" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tap (+) to add your first todo or mission."
+            "value" : "No items match this filter."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "(+) 를 눌러 당신의 첫 할일 또는 목표를 추가해보세요."
+            "value" : "이 필터와 일치하는 항목이 없어요."
+          }
+        }
+      }
+    },
+    "list.empty.first" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap (+) to add a todo or mission."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(+) 를 눌러 할일이나 목표를 추가해보세요."
           }
         }
       }
@@ -4033,6 +4163,310 @@
         }
       }
     },
+    "onboarding.feature.todo.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage tasks in detail"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할일을 자세히 관리하세요"
+          }
+        }
+      }
+    },
+    "onboarding.feature.todo.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set due dates, recurrence, and checklists. Beyond simple to-dos."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기간, 반복, 체크리스트까지. 단순한 할일을 넘어선 일정 관리."
+          }
+        }
+      }
+    },
+    "onboarding.feature.goal.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Track goals that stick"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "꾸준한 목표 추적"
+          }
+        }
+      }
+    },
+    "onboarding.feature.goal.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fasts, activity, focus, and habits — four ways to measure every day."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "절제, 활동, 집중, 습관. 네 가지 방식으로 매일을 측정해요."
+          }
+        }
+      }
+    },
+    "onboarding.feature.today.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your day at a glance"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한눈에 보는 오늘"
+          }
+        }
+      }
+    },
+    "onboarding.feature.today.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tasks and goals in one screen. Home and lock screen widgets for quick access."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할일과 목표를 한 화면에. 홈·잠금 위젯으로 어디서나 빠르게 확인."
+          }
+        }
+      }
+    },
+    "onboarding.feature.inbox.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture as it comes"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "떠오르면 바로 캡처"
+          }
+        }
+      }
+    },
+    "onboarding.feature.inbox.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to your inbox with text or voice. Sort out the details later."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관함에 텍스트나 음성으로 빠르게. 일정은 나중에 정해도 돼요."
+          }
+        }
+      }
+    },
+    "onboarding.next" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음"
+          }
+        }
+      }
+    },
+    "onboarding.skip" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "건너뛰기"
+          }
+        }
+      }
+    },
+    "onboarding.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MyDays uses the following permissions"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MyDays는 다음 권한을 사용합니다"
+          }
+        }
+      }
+    },
+    "onboarding.notification.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알림"
+          }
+        }
+      }
+    },
+    "onboarding.notification.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminders for due times, goal start/end, and target reached."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할일 마감, 목표 시작·종료, 목표 달성 안내에 사용됩니다."
+          }
+        }
+      }
+    },
+    "onboarding.healthkit.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Health Data"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "건강 데이터"
+          }
+        }
+      }
+    },
+    "onboarding.healthkit.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steps, distance, calories, and stairs are automatically synced to your activity goals."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "걸음수, 거리, 칼로리, 계단을 활동 목표 진행도에 자동으로 반영합니다."
+          }
+        }
+      }
+    },
+    "onboarding.microphone.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Microphone & Speech"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 / 음성 인식"
+          }
+        }
+      }
+    },
+    "onboarding.microphone.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice input in the inbox bar for hands-free entry."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관함 하단 입력 바에서 음성으로 항목을 추가할 때 사용됩니다."
+          }
+        }
+      }
+    },
+    "onboarding.footnote" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each permission is requested the first time you use that feature."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "각 권한은 해당 기능을 처음 사용할 때 요청됩니다."
+          }
+        }
+      }
+    },
+    "onboarding.cta" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Started"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작하기"
+          }
+        }
+      }
+    },
     "permission.health.dialog.confirm" : {
       "localizations" : {
         "en" : {
@@ -4141,6 +4575,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "없음"
+          }
+        }
+      }
+    },
+    "reason.add_to_options" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to options"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택 항목에 추가"
           }
         }
       }
@@ -4730,13 +5180,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld days of every month"
+            "value" : "%lld days per month"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "매월 %lld일"
+            "value" : "매월 %lld개 일자"
           }
         }
       }
@@ -4753,7 +5203,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%2$lld개월마다 %1$lld일"
+            "value" : "%2$lld개월마다 %1$lld개 일자"
           }
         }
       }
@@ -5458,7 +5908,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Archive"
+            "value" : "Inbox"
           }
         },
         "ko" : {
@@ -5597,6 +6047,23 @@
         }
       }
     },
+    "today.empty.all_done" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All done for today. Great job!"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘 할 일을 모두 끝냈어요. 잘 하고 있어요!"
+          }
+        }
+      }
+    },
     "today.empty.due" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -5619,13 +6086,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No todos or missions planned for today.\nTap (+) to add one."
+            "value" : "Nothing left to do today."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "오늘 계획된 할일이나 목표가 없어요.\n(+) 을 눌러 추가해보세요."
+            "value" : "오늘 남은 목표나 할일이 없어요."
           }
         }
       }
@@ -5635,13 +6102,29 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No items planned for this day.\nTap (+) to add one."
+            "value" : "Nothing left to do on this day."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 날짜에 계획된 할일이나 목표가 없어요.\n(+) 을 눌러 추가해보세요."
+            "value" : "이 날짜에 남은 목표나 할일이 없어요."
+          }
+        }
+      }
+    },
+    "today.empty.add_hint" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap (+) to add a new plan."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(+) 를 눌러 새로운 계획을 추가할 수 있어요."
           }
         }
       }
@@ -6468,6 +6951,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d분"
+          }
+        }
+      }
+    },
+    "widget.empty.today" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing Today"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘 일정 없음"
           }
         }
       }

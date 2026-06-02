@@ -599,6 +599,8 @@ struct TodayList: View {
     @Environment(\.cancelMode) private var cancelMode
     @Environment(\.itemPickerMode) private var itemPickerMode
     @Environment(\.onPickItem) private var onPickItem
+    /// 상단 영역 모드 — TodayView의 @AppStorage와 동일 key/store sync. Empty 메시지의 top padding 분기에 사용.
+    @AppStorage(UIStateKey.todayViewMode) private var viewMode: TodayViewMode = .day
 
     /// 할일(1회성+루틴) 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
     /// 같은 date 내에서 체크/취소 토글 시 즉시 reorder되지 않게 cache. 다음 navigation 시 재계산.
@@ -1104,22 +1106,41 @@ struct TodayList: View {
         let activitiesSorted = displayActivities()
         let showGoalSection = categoryFilter == nil  // 카테고리 필터엔 목표 hide
         let showTodoSection = goalKindFilter == nil  // 목표 유형 필터엔 할일 hide
-        // 진짜 empty (Case A) — 필터 없음 + 양 섹션 다 비어있을 때.
-        // first-launch 또는 오늘 일자 정말 항목 0개 케이스. 필터/토글 적용 empty는 별개 (작은 emptyRow).
+        // isGenuineEmpty는 **활성 기준** — finished(체크된 항목)는 0으로 카운트.
+        // 활성 0이면 토글 ON/OFF·finished 유무 무관 큰 메시지 노출 (ArchiveView/ListView와 동일 패턴).
+        // 토글 ON + finished 1+이면 큰 메시지 + 그 아래 섹션에 finished row 동시 노출.
+        let activeNtds = ntdsForDate.filter { !isFinishedOccurrence(item: $0.item, occurrenceDate: $0.occurrenceDate) }
+        let activeActivities = activitiesSorted.filter { !isFinishedOccurrence(item: $0.item, occurrenceDate: $0.occurrenceDate) }
         let isGenuineEmpty = categoryFilter == nil
             && goalKindFilter == nil
-            && ntdsForDate.isEmpty
-            && activitiesSorted.isEmpty
-        if isGenuineEmpty {
-            // 오늘 일자면 "오늘" 명시 메시지, 그 외 일자는 generic ("이 날짜에 ...").
-            let isViewingToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
-            EmptyStateView(
-                iconName: todayEmptyIconName,
-                message: isViewingToday ? "today.empty.first" : "today.empty.first.other"
-            )
-        } else {
+            && activeNtds.isEmpty
+            && activeActivities.isEmpty
+        let isViewingToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
         List {
+            // 큰 메시지 Section — 첫 자리. 스크롤 시 같이 올라가 finished row가 더 보이게.
+            if isGenuineEmpty {
+                // 과거 일자(완료된 일자)는 (+) hint 숨김 — 추가 의미 약함.
+                let isPast = date < .todayCalendarAnchor
+                Section {
+                    EmptyStateView(
+                        iconName: todayEmptyIconName,
+                        message: isViewingToday ? "today.empty.first" : "today.empty.first.other",
+                        hint: isPast ? nil : "today.empty.add_hint",
+                        alignment: .top,
+                        // monthview는 상단 그리드가 커 padding 0, day(weekstrip)은 40.
+                        topPadding: viewMode == .month ? 0 : 40
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+                }
+            }
             if showGoalSection {
+                // 큰 메시지 노출 + ntdsForDate 빈 → mission 섹션 hide (메시지·emptyRow 중복 방지).
+                // 활성 1+(메시지 X) + ntdsForDate 빈 → 기존 emptyRow 유지.
+                if ntdsForDate.isEmpty && isGenuineEmpty {
+                    EmptyView()
+                } else {
                 Section {
                     if ntdsForDate.isEmpty {
                         emptyRow("today.empty.not_todo")
@@ -1148,9 +1169,14 @@ struct TodayList: View {
                 } header: {
                     sectionHeader("today.section.not_todo", scope: .goal)
                 }
+                }  // else 닫기 (isGenuineEmpty + ntdsForDate 빈 분기)
             }
 
             if showTodoSection {
+                // 큰 메시지 노출 + activitiesSorted 빈 → todo 섹션 hide (중복 회피).
+                if activitiesSorted.isEmpty && isGenuineEmpty {
+                    EmptyView()
+                } else {
                 Section {
                     if activitiesSorted.isEmpty {
                         emptyRow("today.empty.todo")
@@ -1172,6 +1198,7 @@ struct TodayList: View {
                 } header: {
                     sectionHeader("today.section.todo", scope: .todo)
                 }
+                }  // else 닫기 (isGenuineEmpty + activitiesSorted 빈 분기)
             }
         }
         .listStyle(.insetGrouped)
@@ -1186,12 +1213,12 @@ struct TodayList: View {
                 stableActivityOrder = sortedActivities().map { $0.id }
             }
         }
-        }
     }
 
-    /// TodayView empty state 아이콘 — 탭 아이콘과 동일 동적 calendar 사용 (Mac Catalyst는 static).
+    /// TodayView empty state 아이콘 — viewed date의 day-of-month 동적 calendar. Mac Catalyst는 static.
+    /// `date`는 UTC anchor라 `Calendar.gmt`로 day 추출 (local Calendar 쓰면 timezone shift로 잘못된 일자 가능).
     private var todayEmptyIconName: String {
-        let day = Calendar.current.component(.day, from: Date())
+        let day = Calendar.gmt.component(.day, from: date)
         #if targetEnvironment(macCatalyst)
         return "calendar"
         #else

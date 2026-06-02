@@ -102,6 +102,10 @@ struct AddItemView: View {
     @State private var showMissingFieldsAlert: Bool = false
     /// 목표 저장 시 반복 미설정 confirmation alert — 사용자가 의도적으로 1회성인지 확인.
     @State private var showOneOffGoalAlert: Bool = false
+    /// 편집 모드 활동/집중에서 target 값이 바뀐 경우 안내 alert — 변경값이 신규 occurrence부터 적용된다는 안내.
+    @State private var showTargetChangedAlert: Bool = false
+    /// 편집 시작 시점의 activityTarget. 저장 시 변경 감지에 사용 (활동·집중 공통, focus는 분 단위).
+    @State private var originalActivityTarget: Int = 0
     @Environment(\.scenePhase) private var addItemScenePhase
     @Environment(\.openURL) private var openURL
     /// 새로 추가한 draft 자동 focus.
@@ -155,7 +159,9 @@ struct AddItemView: View {
             }
             _recurrenceEndDate = State(initialValue: item.recurrenceEndDate)
             _ntdDurationHour = State(initialValue: item.ntdDurationHourInt)
-            _activityTarget = State(initialValue: item.activityTargetValueInt ?? 0)
+            let originalT = item.activityTargetValueInt ?? 0
+            _activityTarget = State(initialValue: originalT)
+            _originalActivityTarget = State(initialValue: originalT)
             _activitySource = State(initialValue: item.activitySource)
             // 편집 모드 — nil이면 ON으로 해석 (legacy 데이터 default ON).
             _notifyOnGoalReached = State(initialValue: item.notifyOnGoalReached?.boolValue ?? true)
@@ -304,19 +310,20 @@ struct AddItemView: View {
     }
 
     /// 저장 버튼 탭 핸들러 — 검증 alerts 순차 처리.
-    /// 1. canSave=false → 누락 필드 안내
-    /// 2. 목표 + 반복 미설정 (신규 항목만) → 1회성 confirmation
-    /// 3. 활동 + auto source → HealthKit 권한 요청 (이미 결정된 경우 즉시 반환)
-    /// 4. 알림 권한 거부 → permission warning
-    /// 5. 정상 → save()
+    /// 순서 원칙: **외부 이동(시스템 prompt / 설정 앱 / sheet)** 가능 단계 먼저, **정보성 확인** 단계 뒤.
+    /// 사용자가 외부 이동 후 돌아오면 저장 다시 누름 → chain 처음부터 다시 타게 됨 → 정보성 dialog 중복 노출 회피.
+    /// 1. canSave=false → 누락 필드 안내 (terminate)
+    /// 2. 활동 + auto source → HealthKit 권한 요청 (시스템 prompt, 미결정시만)
+    /// 3. 알림 권한 거부 → permission warning (설정 앱 이동 가능)
+    /// 4. 신규 목표 + 반복 미설정 → 1회성 confirmation (반복 sheet 이동 가능)
+    /// 5. 편집 + 활동/집중 + target 변경 → 변경값 적용 범위 안내 (정보성 확인)
+    /// 6. save()
+    ///
+    /// 다이얼로그 중첩 회피: 모든 alert는 state-flag 기반이라 동시에 두 개가 뜨지 않음.
+    /// 각 alert의 confirm 버튼이 다음 step의 helper를 호출 — 순차 chain 보장.
     private func attemptSave() {
         if !canSave {
             showMissingFieldsAlert = true
-            return
-        }
-        // 신규 목표 + 반복 미설정 → 1회성 confirmation. 편집 모드는 skip (사용자 의도 존중).
-        if !isEditing, isGoal, recurrenceConfig == nil {
-            showOneOffGoalAlert = true
             return
         }
         // HK auto source → 권한 요청 후 저장 흐름 이어감. 이미 결정된 경우 prompt 없이 즉시 반환.
@@ -324,20 +331,45 @@ struct AddItemView: View {
         if isActivity, activitySource != .manual {
             Task {
                 _ = await HealthKitService.shared.requestAuthorization(for: activitySource)
-                await MainActor.run { continueSaveFlow() }
+                await MainActor.run { checkNotificationPermission() }
             }
             return
         }
-        continueSaveFlow()
+        checkNotificationPermission()
     }
 
-    /// HK 권한 요청 이후 / 비-활동 항목의 저장 흐름. 알림 권한 거부 분기 + save().
-    private func continueSaveFlow() {
+    /// HK 단계 이후 — 알림 권한 거부 경고 분기.
+    private func checkNotificationPermission() {
         if hasAlertConfigured && notificationAuthStatus == .denied {
             showPermissionSaveAlert = true
-        } else {
-            save()
+            return
         }
+        checkOneOffGoal()
+    }
+
+    /// 알림 권한 단계 이후 — 신규 목표가 반복 미설정이면 1회성 confirmation.
+    private func checkOneOffGoal() {
+        if !isEditing, isGoal, recurrenceConfig == nil {
+            showOneOffGoalAlert = true
+            return
+        }
+        checkTargetChange()
+    }
+
+    /// 마지막 정보성 단계 — 편집 모드 활동/집중 target 변경 안내. 이후 save.
+    private func checkTargetChange() {
+        if hasActivityTargetChanged {
+            showTargetChangedAlert = true
+            return
+        }
+        save()
+    }
+
+    /// 편집 모드 활동/집중에서 target 값이 바뀌었는지.
+    /// 신규 항목은 항상 false. focus는 분 단위 target.
+    private var hasActivityTargetChanged: Bool {
+        guard isEditing, (isActivity || isFocus) else { return false }
+        return activityTarget != originalActivityTarget
     }
 
     /// canSave=false 시 alert에 표시할 누락 항목 안내 문구.
@@ -380,6 +412,13 @@ struct AddItemView: View {
         if isNTD {
             if ntdStartAlertOffset != nil { return true }
             if ntdDurationHour != nil, ntdEndAlertOffset != nil { return true }
+            return false
+        }
+        // 활동: 목표 달성 알림 toggle도 alert 의도로 카운트 (default ON이라 사용자가 안 만져도 활성).
+        // 시작 알림 offset과 별개로 HK BG handler가 target 도달 시 fire하므로 권한 필요.
+        if isActivity {
+            if notifyOnGoalReached { return true }
+            if todoStartAlertOffset != nil { return true }
             return false
         }
         if !(hasStart || hasDue) { return false }
@@ -567,14 +606,22 @@ struct AddItemView: View {
     }
 
     /// 활동 기록 row — 날짜 + (시간) + 상태 라벨 + 코멘트(있을 때, 포기엔 "사유: " prefix).
+    /// effective target — RC.targetSnapshot 우선 (그 시점의 target 보존), fallback item.target.
+    private func activityRowTarget(_ record: RoutineCompletion) -> Int {
+        if let snap = record.targetSnapshot?.doubleValue, snap > 0 { return Int(snap) }
+        return record.item?.activityTargetValueInt ?? 0
+    }
+
     /// 날짜·시간은 모두 RoutineCompletion.completedAt 기준 (= 사용자가 체크/포기한 실제 시점).
     /// 활동 type이면 상태 자리에 누적값/목표 ("75/100") 표시.
     @ViewBuilder
     private func activityRow(_ record: RoutineCompletion) -> some View {
         let isDone = record.done
-        let isActivity = record.item?.itemKind == .activity
+        let isFailed = record.failed
+        let kind = record.item?.itemKind
+        let showProgress = (kind == .activity || kind == .focus)
         let valueRecorded = Int(record.valueRecorded?.doubleValue ?? 0)
-        let target = record.item?.activityTargetValueInt ?? 0
+        let target = activityRowTarget(record)
         // 표시 날짜는 completedAt 기준. 누락된 legacy record는 record.date로 fallback.
         let displayDay: Date? = record.completedAt?.calendarDateAnchor ?? record.date
         HStack(spacing: 8) {
@@ -586,22 +633,24 @@ struct AddItemView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            // 활동: 누적값/목표. 그 외: 상태 라벨.
-            if isActivity, target > 0 {
-                Text(verbatim: "\(valueRecorded)/\(target)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(isDone ? Color.accentColor : .secondary)
-            } else if isDone {
+            // 모든 type 공통 라벨 — done=달성, failed=포기. pending(활동·집중 진행 중)은 라벨 없음.
+            if isDone {
                 Text("activity.status.done")
                     .font(.subheadline)
                     .foregroundStyle(Color.accentColor)
-            } else {
+            } else if isFailed {
                 Text("activity.status.failed")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let comment = record.comment, !comment.isEmpty {
+            // 오른쪽 끝: 활동·집중은 진행도(누적/목표), 그 외는 comment(있으면).
+            // 활동·집중 + comment 동시 있는 케이스는 드물지만 발생하면 진행도 우선.
+            if showProgress, target > 0 {
+                Text(verbatim: "\(valueRecorded)/\(target)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(isDone ? Color.accentColor : .secondary)
+            } else if let comment = record.comment, !comment.isEmpty {
                 Text(verbatim: commentText(comment: comment, isDone: isDone))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -1125,7 +1174,7 @@ struct AddItemView: View {
                             }
                         }
                         Button("alert.permission.save_anyway") {
-                            save()
+                            checkOneOffGoal()
                         }
                         Button("common.cancel", role: .cancel) {}
                     } message: {
@@ -1147,12 +1196,8 @@ struct AddItemView: View {
                             showRecurrenceSheet = true
                         }
                         Button("alert.goal_no_recurrence.save_anyway") {
-                            // 권한 dialog 거쳐서 저장 진행.
-                            if hasAlertConfigured && notificationAuthStatus == .denied {
-                                showPermissionSaveAlert = true
-                            } else {
-                                save()
-                            }
+                            // 다음 step (target 변경 안내 → save) 으로 진행.
+                            checkTargetChange()
                         }
                         Button("common.cancel", role: .cancel) {}
                     } message: {
@@ -1170,6 +1215,17 @@ struct AddItemView: View {
                         }
                     } message: {
                         Text("permission.health.dialog.message")
+                    }
+                    .alert(
+                        "alert.target_changed.title",
+                        isPresented: $showTargetChangedAlert
+                    ) {
+                        Button("common.cancel", role: .cancel) {}
+                        Button("common.ok") {
+                            save()
+                        }
+                    } message: {
+                        Text(isFocus ? "alert.target_changed.body.focus" : "alert.target_changed.body.activity")
                     }
                 }
             }
@@ -1995,8 +2051,8 @@ struct AddItemView: View {
         .padding(.vertical, 4)
     }
 
-    /// 아이콘 grid — 6열 LazyVGrid, GoalIcon 18개 (3행).
-    /// 1행: type 대표(절제/활동/집중/습관) → 2행: 절제·운동 → 3행: 활동·개인.
+    /// 아이콘 grid — 6열 LazyVGrid, GoalIcon 24개 (4행).
+    /// 1행: type 대표(절제/활동/집중/습관) → 2~3행: 절제·운동 → 3~4행: 활동·개인.
     @ViewBuilder
     private var goalIconGrid: some View {
         LazyVGrid(

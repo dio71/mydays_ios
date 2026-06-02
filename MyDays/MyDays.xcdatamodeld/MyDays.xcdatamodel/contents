@@ -88,6 +88,7 @@
         <attribute name="done" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="failed" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="targetSnapshot" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="valueRecorded" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <relationship name="item" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Item" inverseName="completions" inverseEntity="Item"/>
     </entity>

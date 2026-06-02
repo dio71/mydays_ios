@@ -241,10 +241,14 @@ struct ListView: View {
 
     @ViewBuilder
     private func normalList(hasFilter: Bool) -> some View {
-        // 진짜 empty (Case A) — 필터 없음 + 활성 0개 + 완료 섹션 0개(또는 토글 OFF).
-        // first-launch 또는 완전 비어있는 상태. 필터/토글 적용 empty는 기존 emptyRow 유지.
-        if !hasFilter && sortedActiveItems.isEmpty && (!showCompleted || filteredCompletedItems.isEmpty) {
-            EmptyStateView(iconName: "note.text", message: "list.empty.first")
+        // 빈 화면 분기 (ArchiveView 패턴과 통일):
+        //   !hasFilter + 활성 0 → emptyLayout: List 안 Section 첫 row로 EmptyStateView(top) + 완료 섹션(토글 ON + 완료 1+).
+        //     - first-launch 메시지 통일 (활성 0이면 완료 유무 무관 같은 메시지/아이콘).
+        //     - List 안 row라 스크롤 시 같이 올라감 → 완료 섹션 공간 확보.
+        //   hasFilter + 매치 0 → filteredEmptyRow (필터 해제 링크).
+        //   활성 1+ → 기존 List 본문.
+        if !hasFilter && sortedActiveItems.isEmpty {
+            emptyLayout
         } else {
         List {
             if hasFilter {
@@ -252,7 +256,7 @@ struct ListView: View {
                 let items = sortedActiveItems
                 Section {
                     if items.isEmpty {
-                        emptyRow("list.empty.active")
+                        filteredEmptyRow("list.empty.filtered")
                     } else {
                         ForEach(items, id: \.objectID) { rowButton(for: $0) }
                     }
@@ -261,6 +265,7 @@ struct ListView: View {
                 }
             } else if groupByCategory {
                 // 그룹 모드 — 목표 그룹 최상단 + 카테고리별 + 미분류.
+                // (활성 0 + 모든 그룹 빈 케이스는 emptyLayout 분기에서 처리되어 도달 X — 안전망으로 emptyRow.)
                 let goals = goalItemsForGroup
                 let groups = groupedActiveItems
                 let uncat = uncategorizedActiveItems
@@ -514,6 +519,7 @@ struct ListView: View {
     }
 
     /// 평소(non-group) 모드 active section 내용 — section header 분기 위한 추출.
+    /// 활성 0 + 필터 없음은 emptyLayout으로 분기 → 이 경로 도달 X. 안전망으로 emptyRow.
     @ViewBuilder
     private var flatActiveContent: some View {
         if sortedActiveItems.isEmpty {
@@ -638,6 +644,59 @@ struct ListView: View {
         Text(key)
             .foregroundStyle(.secondary)
             .font(.subheadline)
+    }
+
+    /// 필터 결과 0건 (Case B) — 작은 아이콘 + 메시지 + "필터 해제" 링크 inline row.
+    /// 필터 해제: filterCategoryID/filterGoalKind 둘 다 nil로 → 전체 보기 복귀.
+    @ViewBuilder
+    private func filteredEmptyRow(_ messageKey: LocalizedStringKey) -> some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 10) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.title2)
+                    .foregroundStyle(.tertiary)
+                Text(messageKey)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("filter.clear") {
+                    filterCategoryID = nil
+                    filterGoalKind = nil
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+            }
+            .padding(.vertical, 24)
+            Spacer()
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// 활성 0 + 필터 없음 layout — ArchiveView 패턴과 통일.
+    /// List 안 Section 첫 row로 EmptyStateView(top) 배치 → 스크롤 시 같이 올라가 완료 섹션 공간 확보.
+    /// 토글 ON/OFF 차이는 완료 섹션 표시 여부만 — 상단 메시지는 first-launch 톤 동일.
+    @ViewBuilder
+    private var emptyLayout: some View {
+        List {
+            Section {
+                EmptyStateView(
+                    iconName: "note.text",
+                    message: "list.empty.first",
+                    alignment: .top
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
+            }
+            if showCompleted && !filteredCompletedItems.isEmpty {
+                Section("list.section.completed") {
+                    ForEach(filteredCompletedItems, id: \.objectID) { rowButton(for: $0) }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 }
 

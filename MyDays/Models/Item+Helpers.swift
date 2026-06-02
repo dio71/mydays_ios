@@ -1240,6 +1240,23 @@ extension Item {
         return Int(rc.valueRecorded?.doubleValue ?? 0)
     }
 
+    /// 그 occurrence에 적용된 실제 target — RC.targetSnapshot 우선, 없으면 item의 현재 target.
+    /// 사용자가 target 변경 시 RC의 snapshot은 보존(done/failed 시) 또는 동기화(미완료)되어 과거 진행률
+    /// 일관성 유지. 진행률 계산/완료 판정 모두 이 함수 결과로.
+    func effectiveTargetValue(on occurrenceDate: Date) -> Double? {
+        if let snap = routineRecord(on: occurrenceDate)?.targetSnapshot?.doubleValue, snap > 0 {
+            return snap
+        }
+        return activityTargetValueDouble
+    }
+
+    /// RC의 targetSnapshot을 item의 현재 target으로 sync — RC가 미완료(done=false && failed=false)일 때만.
+    /// 완료/포기 후 target 변경은 RC snapshot 보존.
+    fileprivate static func syncTargetSnapshot(_ rc: RoutineCompletion, item: Item) {
+        if rc.done || rc.failed { return }  // 완료/포기 RC는 보존
+        rc.targetSnapshot = item.activityTargetValue
+    }
+
     /// 활동 occurrence에 N만큼 증가. RC 없으면 생성. target 도달 시 done=true 자동 flip.
     /// 1회성 활동(recurrenceRule=nil)도 같은 RC 패턴 — 활동 기록·일관성 위해.
     /// 호출 측에서 context.save() 책임.
@@ -1269,8 +1286,12 @@ extension Item {
         let prev = Int(rc.valueRecorded?.doubleValue ?? 0)
         let next = max(prev + amount, 0)
         rc.valueRecorded = NSNumber(value: Double(next))
+        // RC의 target snapshot 동기화 — 미완료 RC만. done/failed RC는 보존.
+        syncTargetSnapshot(rc, item: item)
         // target 도달 — done=true 자동. 이미 done이면 그대로 (초과 누적 허용).
-        if let target = item.activityTargetValueInt, next >= target, !rc.done {
+        // 판정은 RC.targetSnapshot 기준 (사용자가 target 변경해도 그 시점의 평가 보존).
+        let effectiveTarget = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+        if effectiveTarget > 0, Double(next) >= effectiveTarget, !rc.done {
             rc.done = true
         }
         // completedAt은 활동 record에서 "마지막 업데이트 시각" 의미로 사용 — 정렬에서 최신 활동이 위로.
@@ -1287,5 +1308,26 @@ extension Item {
             }
         }
         item.updatedAt = now
+    }
+
+    // MARK: - Migration (출시 후 제거 예정)
+    //
+    // 기존 RC들에 targetSnapshot이 nil인 경우 item의 현재 target 값으로 채움.
+    // 앱 launch 시 1회 실행 (UserDefaults `migrated.rc_target_snapshot` 플래그).
+    // 출시 후엔 nil RC가 더 이상 발생 안 함 → 이 함수 + 호출 + 플래그 삭제 예정.
+
+    static func backfillRCTargetSnapshots(in context: NSManagedObjectContext) {
+        let request: NSFetchRequest<RoutineCompletion> = RoutineCompletion.fetchRequest()
+        request.predicate = NSPredicate(format: "targetSnapshot == nil")
+        guard let rcs = try? context.fetch(request), !rcs.isEmpty else { return }
+        for rc in rcs {
+            guard let item = rc.item, let target = item.activityTargetValue else { continue }
+            rc.targetSnapshot = target
+        }
+        if context.hasChanges {
+            do { try context.save() } catch {
+                assertionFailure("backfillRCTargetSnapshots save failed: \(error)")
+            }
+        }
     }
 }

@@ -11,6 +11,9 @@ struct MyDaysApp: App {
     private var tintPresetRaw: String = TintPreset.blue.rawValue
     @AppStorage(AppThemeKey.appearanceMode, store: .appShared)
     private var appearanceModeRaw: String = AppearanceMode.system.rawValue
+    /// 첫 진입 onboarding 완료 여부. false면 권한 안내 페이지 노출.
+    @AppStorage(UIStateKey.onboardingShown)
+    private var onboardingShown: Bool = false
 
     private var tintColor: Color {
         (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
@@ -48,10 +51,16 @@ struct MyDaysApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(\.managedObjectContext, persistence.viewContext)
-                .tint(tintColor)
-                .preferredColorScheme(colorScheme)
+            Group {
+                if onboardingShown {
+                    RootView()
+                        .environment(\.managedObjectContext, persistence.viewContext)
+                } else {
+                    OnboardingView { onboardingShown = true }
+                }
+            }
+            .tint(tintColor)
+            .preferredColorScheme(colorScheme)
         }
     }
 }

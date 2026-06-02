@@ -355,13 +355,14 @@ struct MyDaysHomeProvider: TimelineProvider {
             return max(0, min(elapsed / (30 * 24 * 3600), 1))
         case .activity:
             let current = Double(item.activityCurrentValue(on: today))
-            let target = item.activityTargetValueDouble ?? 0
+            // effective target — RC.targetSnapshot 우선, fallback item.target.
+            let target = item.effectiveTargetValue(on: today) ?? 0
             return target > 0 ? max(0, min(current / target, 1)) : 0
         case .focus:
             // focusCurrentMinutes(on:)은 Services/Item+FocusSession.swift에 있으나 widget target 멤버십 X.
             // 같은 로직 inline — RC.valueRecorded 직접 read.
             let current = item.routineRecord(on: today)?.valueRecorded?.doubleValue ?? 0
-            let target = item.activityTargetValueDouble ?? 0
+            let target = item.effectiveTargetValue(on: today) ?? 0
             return target > 0 ? max(0, min(current / target, 1)) : 0
         case .habit:
             return bucket == .past ? 1 : 0
@@ -667,7 +668,11 @@ struct MyDaysWidgetEntryView: View {
         return VStack(spacing: 0) {
             headerRow
             Spacer(minLength: 0)  // 헤더와 박스 사이 flex — device별 widget 높이 차이 흡수.
-            rowBox(snaps: snaps, height: box)
+            if snaps.isEmpty {
+                emptyContent
+            } else {
+                rowBox(snaps: snaps, height: box)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -684,7 +689,18 @@ struct MyDaysWidgetEntryView: View {
         let rightSlice = Array(rest.prefix(rightMax))
         let leftBox = Self.boxHeight(for: leftMax)
         let rightBox = Self.boxHeight(for: rightMax)
-        return HStack(alignment: .top, spacing: 12) {
+        // 빈 상태 — 양쪽 모두 비어있으면 headerRow만 두고 본문 가운데에 emptyContent.
+        if snaps.isEmpty {
+            return AnyView(
+                VStack(spacing: 0) {
+                    headerRow
+                    Spacer(minLength: 0)
+                    emptyContent
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            )
+        }
+        return AnyView(HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 0) {
                 headerRow
                 Spacer(minLength: 0)
@@ -697,7 +713,23 @@ struct MyDaysWidgetEntryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+    }
+
+    /// 빈 상태 — 작은 아이콘 + "Nothing Today" / "오늘 일정 없음". 본문 영역 가운데 정렬.
+    /// headerRow는 호출 측에서 함께 노출 (헤더 자체는 빈 상태에서도 보임).
+    @ViewBuilder
+    private var emptyContent: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "tray")
+                .font(.system(size: 26))
+                .foregroundStyle(.secondary)
+            Text("widget.empty.today")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.bottom, 8)
     }
 }
 

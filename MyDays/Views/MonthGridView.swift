@@ -35,6 +35,9 @@ struct MonthGridView: View {
     /// nil이면 무관 (전체 종합). non-nil이면 그 item만 캘린더 표시 (Todo면 dot/bar / 목표면 achievement fill).
     var pickedItemID: UUID? = nil
 
+    /// Dev toggle — 달성률 큰 원 표시 여부. Settings Dev section에서 변경.
+    @AppStorage(UIStateKey.devShowAchievementCircle) private var showAchievementCircle: Bool = true
+
     /// 모든 active 항목 — Someday 제외, 삭제(status=2) 제외. cell 인디케이터(dot) 계산용.
     /// 일자별로 어떤 항목이 cover하는지 매 render마다 계산. 100여개 항목 × 42 cells 정도면 무시 가능 비용.
     @FetchRequest(
@@ -44,19 +47,23 @@ struct MonthGridView: View {
     )
     private var allItems: FetchedResults<Item>
 
-    /// dot/bar 인디케이터용 Todo items — 목표(절제/활동/집중/습관)는 별도 achievement fill로 표시되므로 제외.
-    /// 카테고리 필터 적용. goalKindFilter는 Todo 인디케이터에 의미 없음 (목표 한정 필터라 Todo 0개) → 빈 배열.
-    /// pickedItemID 활성 시 그 Todo 항목 1개만. 목표가 picked면 Todo 0개 (목표는 achievement fill로 별도 표시).
-    private var todoIndicatorItems: [Item] {
+    /// dot 인디케이터용 items — **목표 + Todo 모두 포함**. 목표는 큰 원(achievement fill)과 dot 둘 다 노출 (사용자 결정).
+    /// 필터 정책:
+    /// - pickedItemID: 그 1개 항목만
+    /// - categoryFilter: 그 카테고리 Todo만 (목표는 카테고리 미사용)
+    /// - goalKindFilter: 그 목표 type만
+    /// - 기본: 전체
+    private var indicatorItems: [Item] {
         if let id = pickedItemID {
-            let match = allItems.filter { $0.id == id && $0.itemKind == .todo }
-            return match
+            return allItems.filter { $0.id == id }
         }
-        if goalKindFilter != nil { return [] }
         if let id = categoryFilter {
             return allItems.filter { $0.itemKind == .todo && $0.category?.id == id }
         }
-        return allItems.filter { $0.itemKind == .todo }
+        if let kind = goalKindFilter {
+            return allItems.filter { $0.itemKind == kind }
+        }
+        return Array(allItems)
     }
 
     var body: some View {
@@ -64,10 +71,9 @@ struct MonthGridView: View {
         let insertionEdge: Edge = forward ? .trailing : .leading
         let removalEdge: Edge = forward ? .leading : .trailing
         // **퍼포먼스 critical**: 모든 caches는 body 진입 1회만 계산해 cell에 inject.
-        // - layouts/dotsCache: Todo 인디케이터 (dot/bar) — 목표 제외 (todoIndicatorItems)
+        // - dotsCache: 단일/다일 통합 dot 인디케이터 (목표 + Todo). 정렬 적용.
         // - rates: 목표 4-type 종합 달성률 — achievement fill circle용
-        let layouts = weekLayouts
-        let dotsCache: [Date: DotsByDay] = days.reduce(into: [:]) { dict, day in
+        let dotsCache: [Date: [DotIndicator]] = days.reduce(into: [:]) { dict, day in
             dict[day] = dotIndicators(day: day)
         }
         let rates: [Date: Double?] = days.reduce(into: [:]) { dict, day in
@@ -104,8 +110,7 @@ struct MonthGridView: View {
                                 let day = days[weekIdx * 7 + dayIdx]
                                 cell(
                                     for: day,
-                                    layouts: layouts,
-                                    dots: dotsCache[day] ?? (noTime: [], am: [], pm: []),
+                                    dots: dotsCache[day] ?? [],
                                     achievementRate: rates[day] ?? nil
                                 )
                                 .frame(maxWidth: .infinity)
@@ -142,9 +147,6 @@ struct MonthGridView: View {
                 }
         )
     }
-
-    /// dotIndicators 반환 타입 — body의 dotsCache 타입과 cell parameter에서 공유.
-    fileprivate typealias DotsByDay = (noTime: [DotIndicator], am: [DotIndicator], pm: [DotIndicator])
 
     // MARK: - 날짜 계산
 
@@ -205,14 +207,10 @@ struct MonthGridView: View {
     // MARK: - Cell
 
     @ViewBuilder
-    private func cell(for date: Date, layouts: [Date: [BarSegment]], dots: DotsByDay, achievementRate: Double?) -> some View {
+    private func cell(for date: Date, dots: [DotIndicator], achievementRate: Double?) -> some View {
         let isSelected = Calendar.gmt.isDate(date, inSameDayAs: selectedDate)
         let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
         let inCurrentMonth = sameMonth(date, selectedDate)
-        let weekStart = weekStartFor(date)
-        let weekBars = layouts[weekStart] ?? []
-        let maxSlots = (weekBars.map { $0.slot }.max() ?? -1) + 1
-        let cellBars = weekBars.filter { date >= $0.startDay && date <= $0.endDay }
         VStack(spacing: 2) {
             // 일자 숫자 + 목표 achievement circle.
             // 3 단계 시각:
@@ -221,13 +219,15 @@ struct MonthGridView: View {
             //   0% / 활성 없음: 시각 없음 (그냥 숫자)
             // Fill 색상: aggregate(전체 종합)는 accent, pickedItem(단일 목표 선택) 시 그 목표의 iconColorHex.
             // Today: 우상단 작은 red dot. Selected: 굵은 accent stroke 2.5pt.
-            let achievementFull: Bool = (achievementRate ?? 0) >= 1.0
+            // Dev toggle OFF면 큰 원 미노출 — 숫자 색만 일반 처리.
+            let displayRate: Double? = showAchievementCircle ? achievementRate : nil
+            let achievementFull: Bool = (displayRate ?? 0) >= 1.0
             let fillColor: Color = pickedGoalColor ?? Color.accentColor
             ZStack(alignment: .topTrailing) {
                 ZStack {
-                    if let rate = achievementRate, rate >= 1.0 {
+                    if let rate = displayRate, rate >= 1.0 {
                         Circle().fill(fillColor)
-                    } else if let rate = achievementRate, rate > 0 {
+                    } else if let rate = displayRate, rate > 0 {
                         Circle().fill(fillColor.opacity(0.3))
                     }
                     Text(verbatim: Self.dayNumber(date))
@@ -248,17 +248,8 @@ struct MonthGridView: View {
             }
             .frame(width: 28, height: 28)
 
-            // Bar zone — Todo 다일 항목 (week 단위 slot, 인접 cell 연속).
-            if maxSlots > 0 {
-                VStack(spacing: 1) {
-                    ForEach(0..<maxSlots, id: \.self) { slot in
-                        barSlotView(slot: slot, cellBars: cellBars, cellDate: date)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
-            // Dot zone — Todo 단일일자 항목 (시간 미설정 사각 / 시간 있는 AM·PM 분할 원).
-            dotsZone(noTime: dots.noTime, am: dots.am, pm: dots.pm)
+            // Dot zone — 단일/다일 통합. 목표(원) + 할일(사각). 최대 18개 + "+N".
+            dotsZone(indicators: dots)
                 .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
@@ -396,169 +387,74 @@ struct MonthGridView: View {
         return isDone ? 1.0 : 0
     }
 
-    /// 한 slot 위치에 bar 있으면 state별 시각으로 렌더, 없으면 clear spacer.
-    /// `maxWidth: .infinity` — VStack 안에서 다른 child에 맞춰 줄어들지 않고 cell 전체 너비 차지.
-    ///
-    /// **시간 기반 fractional offset**:
-    /// cellDate가 bar.startDay이면 leading = (startHour/24) * cellWidth, bar.endDay이면 trailing = (24-endHour)/24 * cellWidth.
-    /// Week 경계로 clip된 segment의 시작/끝은 hour 0/24이므로 자동 0 padding (연속 line).
-    ///
-    /// **State별 시각**:
-    ///   - pending: 3pt solid (정상 두께)
-    ///   - completed: 3pt solid + opacity 0.25 (희미)
-    ///   - cancelled: 1.5pt solid (얇은 두께로 약화, 슬롯 가운데 정렬)
+    /// Dot zone — 단일 행 max 6, 최대 3행 (18 dot), 18+ 시 마지막 자리에 "+N".
+    /// 모양: 목표 = 원, 할일 = 사각. 상태: pending=stroke, completed=filled solid, cancelled=filled opacity 0.4.
     @ViewBuilder
-    private func barSlotView(slot: Int, cellBars: [BarSegment], cellDate: Date) -> some View {
-        if let bar = cellBars.first(where: { $0.slot == slot }) {
-            let color = Self.indicatorColor(colorHex: bar.colorHex)
-            GeometryReader { proxy in
-                let w = proxy.size.width
-                let edges = barEdgeOffsets(bar: bar, cellDate: cellDate, cellWidth: w)
-                // 모든 state 동일 두께(1pt) — 가는 라인으로 통일. 시각 차이는 opacity로만 표현.
-                // 3pt 슬롯 안 vertical center.
-                switch bar.state {
-                case .pending:
-                    Rectangle()
-                        .fill(color)
-                        .frame(height: 1)
-                        .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.leading, edges.leading)
-                        .padding(.trailing, edges.trailing)
-                case .completed:
-                    Rectangle()
-                        .fill(color)
-                        .opacity(0.25)
-                        .frame(height: 1)
-                        .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.leading, edges.leading)
-                        .padding(.trailing, edges.trailing)
-                case .cancelled:
-                    Rectangle()
-                        .fill(color)
-                        .opacity(0.25)
-                        .frame(height: 1)
-                        .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.leading, edges.leading)
-                        .padding(.trailing, edges.trailing)
+    private func dotsZone(indicators: [DotIndicator]) -> some View {
+        guard !indicators.isEmpty else { return AnyView(EmptyView()) }
+        // 최대 노출 18 (3행 × 6). 그 이상이면 17개 + "+N" 슬롯.
+        let total = indicators.count
+        let showOverflow = total > 18
+        let visibleCount = showOverflow ? 17 : min(total, 18)
+        let visible = Array(indicators.prefix(visibleCount))
+        // 6개씩 행 분할.
+        let rows = stride(from: 0, to: visible.count, by: 6).map { idx in
+            Array(visible[idx..<min(idx + 6, visible.count)])
+        }
+        return AnyView(
+            VStack(spacing: 2) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                    HStack(spacing: 3) {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, ind in
+                            indicatorView(ind)
+                        }
+                        // overflow "+N"은 마지막 행 끝에 추가.
+                        if showOverflow && rowIdx == rows.count - 1 {
+                            Text(verbatim: "+\(total - visibleCount)")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(height: 6)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        )
+    }
+
+    /// dot view 분기 — 목표=원, 할일=사각.
+    @ViewBuilder
+    private func indicatorView(_ ind: DotIndicator) -> some View {
+        let color = Self.indicatorColor(colorHex: ind.colorHex)
+        if ind.kind == .todo {
+            todoDotView(color: color, state: ind.state)
         } else {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: 3)
+            goalDotView(color: color, state: ind.state)
         }
     }
 
-    /// Bar의 leading/trailing 오프셋(px). 시간 기반 fractional + 보이는 edge만 min padding 보장.
-    /// - 위치 계산: cell 양 끝 기준 (패딩 없이) startHour/endHour fraction.
-    /// - Min padding: bar의 visible edge일 때만 1pt 최소 보장 (week boundary 연속 구간은 0 유지).
-    private func barEdgeOffsets(bar: BarSegment, cellDate: Date, cellWidth: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
-        let isStart = Calendar.gmt.isDate(cellDate, inSameDayAs: bar.startDay)
-        let isEnd = Calendar.gmt.isDate(cellDate, inSameDayAs: bar.endDay)
-        let minPad: CGFloat = 1
-        var leading: CGFloat = 0
-        var trailing: CGFloat = 0
-        if isStart && bar.startHour > 0 {
-            leading = max(CGFloat(bar.startHour) / 24.0 * cellWidth, minPad)
-        }
-        if isEnd && bar.endHour < 24 {
-            trailing = max(CGFloat(24 - bar.endHour) / 24.0 * cellWidth, minPad)
-        }
-        return (leading, trailing)
-    }
-
-    /// Dot zone — 시간 없는 사각 dot row + 시간 있는 AM/PM 분할 원 dot rows.
-    /// 둘 다 비어있으면 zone 자체가 비어 공간 차지 X.
+    /// 목표 dot (원) — pending=stroke / completed·cancelled=filled opacity 0.2 (통일).
+    /// stroke은 5pt path + 1pt lineWidth → outer 6pt. filled도 6pt로 맞춰 시각 크기 통일.
     @ViewBuilder
-    private func dotsZone(noTime: [DotIndicator], am: [DotIndicator], pm: [DotIndicator]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if !noTime.isEmpty {
-                squareDotsRow(indicators: noTime)
-            }
-            if !am.isEmpty || !pm.isEmpty {
-                timeDotsRows(am: am, pm: pm)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 시간 미설정 항목 사각 dot — 한 줄, max 6 + "+N". 가운데 정렬.
-    @ViewBuilder
-    private func squareDotsRow(indicators: [DotIndicator]) -> some View {
-        let count = indicators.count
-        let showOverflow = count > 6
-        let visible = showOverflow ? Array(indicators.prefix(5)) : Array(indicators.prefix(6))
-        HStack(spacing: 3) {
-            ForEach(Array(visible.enumerated()), id: \.offset) { _, ind in
-                squareDotView(colorHex: ind.colorHex, state: ind.state)
-            }
-            if showOverflow {
-                Text(verbatim: "+\(count - 5)")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        // stroke spill 포함 높이 (5pt + lineWidth 1pt).
-        .frame(height: 6)
-    }
-
-    /// 시간 설정 항목 원 dot — cell 좌(AM, hour<13) / 우(PM, hour>=13) 분할, 각 행 최대 3.
-    /// 두 그룹 행 수가 다르면 max 행수만큼 row 생성, 모자란 쪽은 빈 자리.
-    @ViewBuilder
-    private func timeDotsRows(am: [DotIndicator], pm: [DotIndicator]) -> some View {
-        let amRows = stride(from: 0, to: am.count, by: 3).map { Array(am[$0..<min($0 + 3, am.count)]) }
-        let pmRows = stride(from: 0, to: pm.count, by: 3).map { Array(pm[$0..<min($0 + 3, pm.count)]) }
-        let maxRows = max(amRows.count, pmRows.count)
-        VStack(spacing: 2) {
-            ForEach(0..<maxRows, id: \.self) { row in
-                HStack(spacing: 0) {
-                    halfDotsRow(items: row < amRows.count ? amRows[row] : [])
-                    halfDotsRow(items: row < pmRows.count ? pmRows[row] : [])
-                }
-            }
-        }
-    }
-
-    /// AM 또는 PM 한 행 (cell 절반 너비), 가운데 정렬.
-    @ViewBuilder
-    private func halfDotsRow(items: [DotIndicator]) -> some View {
-        HStack(spacing: 3) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, ind in
-                dotView(colorHex: ind.colorHex, state: ind.state)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .frame(height: 6)
-    }
-
-    /// 원 dot — 시간 설정 항목용.
-    /// - pending: hollow circle (stroke only)
-    /// - completed/cancelled: filled + opacity 0.25
-    /// stroke lineWidth=1pt → path 바깥으로 0.5pt spill. 부모 row가 leading padding 0.5pt 부담.
-    @ViewBuilder
-    private func dotView(colorHex: String?, state: IndicatorState) -> some View {
-        let color = Self.indicatorColor(colorHex: colorHex)
+    private func goalDotView(color: Color, state: IndicatorState) -> some View {
         switch state {
         case .pending:
             Circle().stroke(color, lineWidth: 1).frame(width: 5, height: 5)
         case .completed, .cancelled:
-            Circle().fill(color).opacity(0.25).frame(width: 5, height: 5)
+            Circle().fill(color).opacity(0.2).frame(width: 6, height: 6)
         }
     }
 
-    /// 사각 dot — 시간 미설정 Todo 전용. 원 dot과 shape로 구분.
-    /// dotView와 동일하게 stroke spill 0.5pt 발생 — 부모 row가 padding으로 보정.
+    /// 할일 dot (사각) — pending=stroke / completed·cancelled=filled opacity 0.2 (통일).
+    /// stroke spill 포함 outer 6pt에 filled도 맞춤.
     @ViewBuilder
-    private func squareDotView(colorHex: String?, state: IndicatorState) -> some View {
-        let color = Self.indicatorColor(colorHex: colorHex)
+    private func todoDotView(color: Color, state: IndicatorState) -> some View {
         switch state {
         case .pending:
             Rectangle().stroke(color, lineWidth: 1).frame(width: 5, height: 5)
         case .completed, .cancelled:
-            Rectangle().fill(color).opacity(0.25).frame(width: 5, height: 5)
+            Rectangle().fill(color).opacity(0.2).frame(width: 6, height: 6)
         }
     }
 
@@ -601,42 +497,44 @@ struct MonthGridView: View {
     private var windowStart: Date { days.first ?? selectedDate }
     private var windowEnd: Date { days.last ?? selectedDate }
 
-    /// 단일일자 항목의 인디케이터 — 3개로 분리:
-    /// - noTime: 시간 미설정 Todo (`hasExplicitTime == false`). 사각 dot.
-    /// - am: 시간 설정 + hour < 13. 좌측 원 dot.
-    /// - pm: 시간 설정 + hour >= 13. 우측 원 dot.
-    /// NTD는 항상 startHour 있어 am/pm 중 하나에 속함.
-    private func dotIndicators(day: Date) -> (noTime: [DotIndicator], am: [DotIndicator], pm: [DotIndicator]) {
-        var noTime: [DotIndicator] = []
-        var am: [DotIndicator] = []
-        var pm: [DotIndicator] = []
-        for item in todoIndicatorItems {
-            let span = Self.occurrenceSpan(of: item)
-            guard span == 1, singleDayItemCovers(item, day: day) else { continue }
-            let state = indicatorState(of: item, occurrenceStart: day)
+    /// 일자별 dot 인디케이터 — 단일/다일 통합. 정렬: 목표 먼저 → 할일 뒤(시작 시간 기준, 시간 미지정/기간 = 0시).
+    /// 다일 처리:
+    /// - 일반 Todo 다일/반복: 모든 cover 일자에 dot 1개씩
+    /// - NTD 다일 (목표시간 24h+): 시작일에만 1 dot (cover 일자 표시 X, 사용자 결정 예외)
+    /// 미래 일자 + 목표: dot 표시 X (활성 의미 약함)
+    private func dotIndicators(day: Date) -> [DotIndicator] {
+        var goals: [DotIndicator] = []
+        var todos: [DotIndicator] = []
+        let isFuture = day > .todayCalendarAnchor
+        for item in indicatorItems {
+            // 그 day가 노출 대상인지 결정.
+            let covers: Bool = {
+                if item.itemKind == .notTodo {
+                    // NTD: 시작일에만 (다일이어도 cover 일자 X).
+                    return startsOnDay(item: item, day: day)
+                }
+                // 그 외: 다일이면 모든 cover 일자, 단일이면 시작일.
+                return itemCoversDay(item, day: day)
+            }()
+            guard covers else { continue }
             let kind = item.itemKind
-            // 색상 — Todo는 category color, 목표는 iconColorHex. nil이면 gray (미분류).
+            let isGoal = kind != .todo
+            // 미래 일자 + 목표는 dot 표시 X.
+            if isFuture && isGoal { continue }
+            let state = indicatorState(of: item, occurrenceStart: day)
             let colorHex = itemIndicatorColorHex(item)
-            // NTD는 항상 시간 있음. Todo는 hasExplicitTime 검사.
-            if kind == .notTodo || item.hasExplicitTime {
-                let hour = Int(item.startHourInt)
-                let dot = DotIndicator(kind: kind, state: state, colorHex: colorHex)
-                if hour < 13 { am.append(dot) }
-                else { pm.append(dot) }
-            } else {
-                noTime.append(DotIndicator(kind: kind, state: state, colorHex: colorHex))
-            }
+            let sortHour = itemSortHour(item)
+            let dot = DotIndicator(kind: kind, state: state, colorHex: colorHex, sortHour: sortHour)
+            if isGoal { goals.append(dot) } else { todos.append(dot) }
         }
-        // 각 그룹 안에서 NTD 먼저 (현재 todoIndicatorItems는 Todo only라 사실상 의미 없음).
-        // colorHex 순 정렬 — 같은 카테고리는 묶이게.
-        let sortFn: (DotIndicator, DotIndicator) -> Bool = { a, b in
-            if a.kind != b.kind { return a.kind == .notTodo }
-            return (a.colorHex ?? "") < (b.colorHex ?? "")
-        }
-        return (noTime.sorted(by: sortFn), am.sorted(by: sortFn), pm.sorted(by: sortFn))
+        // Todo 정렬 — 시작 시간 오름차순. 목표는 등록 순 그대로.
+        todos.sort { $0.sortHour < $1.sortHour }
+        // 합치기 — 목표 먼저 → 할일 뒤.
+        return goals + todos
     }
 
-    private func singleDayItemCovers(_ item: Item, day: Date) -> Bool {
+    /// 그 day가 item의 occurrence start인지.
+    private func startsOnDay(item: Item, day: Date) -> Bool {
         if let rule = item.recurrenceRule {
             return rule.occurs(on: day, startDate: item.startDate, endDate: item.recurrenceEndDate)
         }
@@ -644,116 +542,41 @@ struct MonthGridView: View {
         return Calendar.gmt.isDate(day, inSameDayAs: start)
     }
 
-    // MARK: - 다일 항목 → bar segments
-
-    /// Visible window 안의 다일 항목 occurrence — startDay/endDay + 시작·종료 hour (cell offset 계산용).
-    /// startHour: occurrence 시작 시(0~23). endHour: 마지막 cell 안의 종료 시(0~24, 24=cell 끝).
-    /// 1회성/반복 Todo: item.startHourInt / dueHourInt.
-    /// NTD: startHourInt + 누적 종료를 span으로 보정 — endHour = totalEnd - (span-1)*24.
-    private var multiDayOccurrences: [(item: Item, startDay: Date, endDay: Date, startHour: Int, endHour: Int)] {
-        var result: [(Item, Date, Date, Int, Int)] = []
+    /// item이 그 day를 cover하는지 — 다일이면 [startDay, endDay] 범위 검사.
+    /// 반복 다일은 이전 span 일수만큼 lookback 후 occurrence 시작일 검색.
+    private func itemCoversDay(_ item: Item, day: Date) -> Bool {
+        let span = Self.occurrenceSpan(of: item)
+        if span == 1 {
+            return startsOnDay(item: item, day: day)
+        }
         let cal = Calendar.gmt
-        for item in todoIndicatorItems {
-            let span = Self.occurrenceSpan(of: item)
-            guard span > 1 else { continue }
-            // 시작·종료 hour 계산 — 모든 occurrence가 같은 값 (반복도 동일 시간).
-            let startHour = Int(item.startHourInt)
-            let endHour: Int
-            if item.itemKind == .notTodo, let dur = item.ntdDurationHourInt {
-                let totalEnd = startHour + Int(dur)
-                endHour = totalEnd - (span - 1) * 24
-            } else {
-                endHour = Int(item.dueHourInt)
-            }
-            if let rule = item.recurrenceRule {
-                var cursor = cal.date(byAdding: .day, value: -span, to: windowStart) ?? windowStart
-                while cursor <= windowEnd {
-                    guard let next = rule.nextOccurrence(after: cursor, startDate: item.startDate, endDate: item.recurrenceEndDate) else { break }
-                    let startDay = cal.startOfDay(for: next)
-                    let endDay = cal.date(byAdding: .day, value: span - 1, to: startDay) ?? startDay
-                    if startDay > windowEnd { break }
-                    if endDay >= windowStart {
-                        result.append((item, startDay, endDay, startHour, endHour))
+        if let rule = item.recurrenceRule {
+            // 반복 다일: span만큼 lookback. 각 occurrence start가 [day-span+1, day] 안에 있나.
+            var cursor = cal.date(byAdding: .day, value: -span, to: day) ?? day
+            for _ in 0...(span + 1) {
+                if rule.occurs(on: cursor, startDate: item.startDate, endDate: item.recurrenceEndDate) {
+                    let endDay = cal.date(byAdding: .day, value: span - 1, to: cursor) ?? cursor
+                    if cursor <= day && day <= endDay {
+                        return true
                     }
-                    cursor = cal.date(byAdding: .day, value: 1, to: next) ?? next
                 }
-            } else {
-                guard let start = item.startDate else { continue }
-                let startDay = cal.startOfDay(for: start)
-                let endDay = cal.date(byAdding: .day, value: span - 1, to: startDay) ?? startDay
-                if endDay >= windowStart && startDay <= windowEnd {
-                    result.append((item, startDay, endDay, startHour, endHour))
-                }
+                cursor = cal.date(byAdding: .day, value: 1, to: cursor) ?? cursor
             }
+            return false
         }
-        return result
+        guard let start = item.startDate else { return false }
+        let startDay = cal.startOfDay(for: start)
+        let endDay = cal.date(byAdding: .day, value: span - 1, to: startDay) ?? startDay
+        return day >= startDay && day <= endDay
     }
 
-    /// 각 week(7일 row) 안의 bar layout. visible weeks 각각 별도 slot 할당.
-    /// 같은 week에서 시간 겹치는 bar는 다른 slot으로 stack — interval scheduling greedy.
-    private var weekLayouts: [Date: [BarSegment]] {
-        var result: [Date: [BarSegment]] = [:]
-        let occurrences = multiDayOccurrences
-        let cal = Calendar.gmt
-        for w in 0..<weekCount {
-            let weekStart = days[w * 7]
-            let weekEnd = cal.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
-            // week에 걸치는 occurrence를 week 경계로 clip.
-            let weekBars: [BarSegment] = occurrences.compactMap { occ in
-                let clipStart = max(occ.startDay, weekStart)
-                let clipEnd = min(occ.endDay, weekEnd)
-                if clipStart > clipEnd { return nil }
-                // Week 경계로 clip된 경우 그 끝은 cell 양 끝까지 채움 (hour=0 / 24).
-                let segStartHour = (clipStart == occ.startDay) ? occ.startHour : 0
-                let segEndHour = (clipEnd == occ.endDay) ? occ.endHour : 24
-                return BarSegment(
-                    startDay: clipStart,
-                    endDay: clipEnd,
-                    kind: occ.item.itemKind,
-                    state: indicatorState(of: occ.item, occurrenceStart: occ.startDay),
-                    startHour: segStartHour,
-                    endHour: segEndHour,
-                    colorHex: itemIndicatorColorHex(occ.item),
-                    slot: 0
-                )
-            }
-            result[weekStart] = Self.assignSlots(weekBars)
-        }
-        return result
-    }
-
-    /// Greedy slot 할당. 정렬: startDay 오름 → 길이 내림(긴 게 lower slot).
-    private static func assignSlots(_ bars: [BarSegment]) -> [BarSegment] {
-        let sorted = bars.sorted { a, b in
-            if a.startDay != b.startDay { return a.startDay < b.startDay }
-            return a.endDay > b.endDay
-        }
-        var assigned: [BarSegment] = []
-        for bar in sorted {
-            var slot = 0
-            while assigned.contains(where: { $0.slot == slot && intervalOverlap($0, bar) }) {
-                slot += 1
-            }
-            var copy = bar
-            copy.slot = slot
-            assigned.append(copy)
-        }
-        return assigned
-    }
-
-    private static func intervalOverlap(_ a: BarSegment, _ b: BarSegment) -> Bool {
-        a.startDay <= b.endDay && b.startDay <= a.endDay
-    }
-
-    /// 주어진 date가 속한 week의 시작일. days array에서 일치하는 week 찾음.
-    private func weekStartFor(_ date: Date) -> Date {
-        let cal = Calendar.gmt
-        for w in 0..<weekCount {
-            let ws = days[w * 7]
-            guard let we = cal.date(byAdding: .day, value: 6, to: ws) else { continue }
-            if date >= ws && date <= we { return ws }
-        }
-        return days.first ?? date
+    /// dot 정렬용 시작 시간 — Todo만 의미 있음. 시간 미지정/기간 일정 = 0시.
+    private func itemSortHour(_ item: Item) -> Int {
+        guard item.itemKind == .todo else { return 0 }
+        let span = Self.occurrenceSpan(of: item)
+        if span > 1 { return 0 }            // 기간 일정 = 0시
+        if !item.hasExplicitTime { return 0 } // 시간 미지정 = 0시
+        return Int(item.startHourInt)
     }
 
     private static func priorityOrder(_ p: Priority) -> Int {
@@ -841,38 +664,22 @@ struct MonthGridView: View {
     }
 }
 
-/// 한 week 안에서 다일 항목 occurrence의 segment. week 경계로 clip된 [startDay, endDay] + slot.
-/// kind는 NTD 식별용 — Todo는 priority 깃발 색, NTD는 별도 색(teal).
-/// state는 시각 표현 분기 — pending=솔리드, completed=희미, cancelled=점선.
-/// startHour/endHour — bar의 cell 안 시작/종료 시각(0~24).
-/// week 경계로 clip된 segment에서 실제 occurrence start가 아니면 startHour=0,
-/// 실제 occurrence end가 아니면 endHour=24 (양 끝까지 채움).
-/// 0 → cell 왼쪽 edge부터, 24 → cell 오른쪽 edge까지.
-private struct BarSegment: Hashable {
-    let startDay: Date
-    let endDay: Date
-    let kind: ItemKind
-    let state: IndicatorState
-    let startHour: Int
-    let endHour: Int
-    /// 인디케이터 색상 — Todo는 category color, 목표는 iconColorHex. nil이면 gray (미분류).
-    let colorHex: String?
-    var slot: Int
-}
-
-/// 인디케이터(dot/bar) 상태별 시각.
+/// 인디케이터(dot) 상태별 시각.
 enum IndicatorState: Hashable {
     case pending     // 진행 중 — 솔리드
     case completed   // 완료 — opacity 0.4 솔리드
     case cancelled   // 취소(Todo .failed) 또는 포기(NTD .failed) — 점선/hollow
 }
 
-/// 단일일자 dot 정보 — priority/kind/state. hour 정보는 별도 그룹(am/pm/noTime)으로 분리해 보관.
+/// dot 인디케이터 정보 — kind/state/colorHex/정렬 키.
+/// 시각: 목표 = 원, 할일 = 사각. 상태: pending=stroke, completed=filled solid, cancelled=filled opacity.
 private struct DotIndicator: Hashable {
     let kind: ItemKind
     let state: IndicatorState
-    /// Todo는 category color, 목표는 iconColorHex. nil이면 gray (미분류).
+    /// Todo는 category color, 목표는 iconColorHex. nil이면 secondary (미분류).
     let colorHex: String?
+    /// 정렬 키 — Todo만 사용 (시작 시간, 시간 미지정/기간 = 0). 목표는 0 default.
+    let sortHour: Int
 }
 
 #Preview {

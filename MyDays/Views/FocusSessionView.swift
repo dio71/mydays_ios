@@ -148,7 +148,8 @@ struct FocusSessionView: View {
     /// 남은 시간 = target - 현재 누적. 0 이하면 진입 즉시 도달 상태로 마킹.
     /// dismiss / terminate 시 onDisappear에서 cancel — fire 안 됨.
     private func scheduleTargetReachedTrigger() {
-        guard let target = item.activityTargetValueDouble else { return }
+        // effective target — RC.targetSnapshot 우선 (사용자가 target 변경해도 이 세션은 시작 시점 기준).
+        guard let target = item.effectiveTargetValue(on: occurrenceDate) else { return }
         let stored = item.focusCurrentMinutes(on: occurrenceDate)
         let remainingMinutes = target - stored
         if remainingMinutes <= 0 {

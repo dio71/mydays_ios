@@ -135,14 +135,12 @@ struct MyDaysNTDLockWidgetEntryView: View {
         .aspectRatio(1, contentMode: .fit)
     }
 
+    /// 빈 상태 — 중앙 scope 아이콘만 (텍스트 X — circular widget과 통일 시각).
     private var emptyContent: some View {
-        VStack(alignment: .center, spacing: 4) {
-            Image(systemName: "target")
-                .font(.system(size: 16))
-            Text("widget.ntd.empty")
-                .font(.caption2)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Image(systemName: "scope")
+            .font(.system(size: 18))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

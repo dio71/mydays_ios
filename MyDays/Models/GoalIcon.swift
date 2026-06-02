@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - GoalIcon
 //
-// 목표(절제·활동·집중·습관)에 할당 가능한 18개 아이콘 preset.
+// 목표(절제·활동·집중·습관)에 할당 가능한 24개 아이콘 preset.
 // Item.iconName 필드(String?)에 **rawValue**(semantic identifier) 저장.
 // 예: "run", "water", "fast" — SF Symbol 이름이 아닌 추상 식별자.
 //
@@ -14,7 +14,7 @@ import SwiftUI
 // CategoryIcon은 현재 SF Symbol 이름 직접 저장 (iOS 전용). 향후 동일 패턴으로 마이그 필요 (별도 phase).
 //
 // 정렬: 목표 유형 대표 4개(절제/활동/집중/습관) 맨 앞 → 절제 → 운동 → 활동·개인 순.
-// 6열 grid 기준 3행. 같은 그룹은 인접 배치해 사용자가 시각 분류 쉽게.
+// 6열 grid 기준 4행. 같은 그룹은 인접 배치해 사용자가 시각 분류 쉽게.
 
 enum GoalIcon: String, CaseIterable, Identifiable {
     // 목표 유형 대표 (4) — ItemKind.goalTypeSymbolName과 매칭. type 선택 시 default GoalIcon.
@@ -28,18 +28,24 @@ enum GoalIcon: String, CaseIterable, Identifiable {
     case alcohol    // 금주
     case caffeine   // 카페인 절제
 
-    // 운동 (4)
+    // 운동 (7)
     case walk       // 걷기
     case jumprope   // 줄넘기
     case cycle      // 사이클
     case exercise   // 운동(웨이트)
+    case stretch    // 스트레칭
+    case baseball   // 야구
+    case soccer     // 축구
 
-    // 활동·개인 (7)
+    // 활동·개인 (10)
     case move       // 이동하기
     case meditation // 명상
     case read       // 독서
+    case study      // 공부
     case pill       // 약 복용
     case water      // 물 마시기
+    case shower     // 샤워
+    case sleep      // 수면
     case dogwalk    // 강아지 산책
     case cart       // 장보기
 
@@ -55,16 +61,22 @@ enum GoalIcon: String, CaseIterable, Identifiable {
         case .habit:      return "checkmark.square.fill"
         case .fast:       return "fork.knife"
         case .alcohol:    return "wineglass.fill"
-        case .caffeine:   return "cup.and.saucer.fill"
+        case .caffeine:   return "mug.fill"
         case .walk:       return "figure.walk"
         case .jumprope:   return "figure.jumprope"
         case .cycle:      return "figure.outdoor.cycle"
         case .exercise:   return "dumbbell.fill"
-        case .water:      return "drop.fill"
+        case .stretch:    return "figure.cooldown"
+        case .baseball:   return "baseball.fill"
+        case .soccer:     return "soccerball"
+        case .move:       return "point.bottomleft.forward.to.arrow.triangle.scurvepath.fill"
         case .meditation: return "figure.mind.and.body"
         case .read:       return "book.fill"
+        case .study:      return "graduationcap.fill"
         case .pill:       return "pill.fill"
-        case .move:       return "point.bottomleft.forward.to.arrow.triangle.scurvepath.fill"
+        case .water:      return "drop.fill"
+        case .shower:     return "shower.handheld.fill"
+        case .sleep:      return "moon.stars.fill"
         case .dogwalk:    return "dog.fill"
         case .cart:       return "cart.fill"
         }

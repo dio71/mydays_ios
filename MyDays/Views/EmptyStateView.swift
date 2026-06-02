@@ -16,17 +16,30 @@ struct EmptyStateView: View {
     let iconName: String
     /// LocalizedStringKey (catalog 키). 내부에서 String(localized:)로 풀어서 "(+)" 마커 치환.
     let messageKey: String.LocalizationValue
+    /// 보조 메시지 (선택) — main 아래 작은 글자로 노출. nil이면 hide. "(+)" 마커 동일 처리.
+    let hintKey: String.LocalizationValue?
     /// "(+)" 마커를 교체할 inline SF Symbol. 기본 plus.circle.fill.
     let actionIconName: String
+    /// 콘텐츠 정렬 — 기본 center. `.top`이면 상단 정렬 + 위쪽 padding 추가 (Section 위에 메시지 + 그 아래
+    /// 완료 섹션 같이 노출하는 케이스용).
+    let alignment: Alignment
+    /// `.top` 모드 위쪽 padding. 기본 140. 호출 측 상단에 다른 UI(예: WeekStrip)가 있으면 작게 override.
+    let topPadding: CGFloat
 
     init(
         iconName: String,
         message: String.LocalizationValue,
-        actionIconName: String = "plus.circle.fill"
+        hint: String.LocalizationValue? = nil,
+        actionIconName: String = "plus.circle.fill",
+        alignment: Alignment = .center,
+        topPadding: CGFloat = 140
     ) {
         self.iconName = iconName
         self.messageKey = message
+        self.hintKey = hint
         self.actionIconName = actionIconName
+        self.alignment = alignment
+        self.topPadding = topPadding
     }
 
     var body: some View {
@@ -34,20 +47,36 @@ struct EmptyStateView: View {
             Image(systemName: iconName)
                 .font(.system(size: 96, weight: .light))
                 .foregroundStyle(Color.accentColor)
-            messageText
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 10) {
+                renderMessage(messageKey)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let hintKey {
+                    renderMessage(hintKey)
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         .padding(.horizontal, 40)
+        .padding(.top, isTop ? topPadding : 0)
     }
 
-    /// 메시지 안 "(+)" 마커를 SF Symbol Image로 inline 치환.
-    /// 마커 없으면 plain Text. Text concat으로 inline 이미지 렌더 (markdown 의존 X).
-    private var messageText: Text {
-        let raw = String(localized: messageKey)
+    private var isTop: Bool {
+        switch alignment {
+        case .top, .topLeading, .topTrailing: return true
+        default: return false
+        }
+    }
+
+    /// 메시지 안 "(+)" 마커를 SF Symbol Image로 inline 치환. 마커 없으면 plain Text.
+    private func renderMessage(_ key: String.LocalizationValue) -> Text {
+        let raw = String(localized: key)
         let parts = raw.components(separatedBy: "(+)")
         guard parts.count == 2 else { return Text(raw) }
         return Text(parts[0])

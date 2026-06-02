@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
 
@@ -8,8 +9,13 @@ struct SettingsView: View {
     @State private var exportedIconURL: URL?
     // 건강 앱 이동 안내 alert — 권한 확인 row 탭 시 path 안내.
     @State private var showHealthAppPathAlert = false
+    // Dev: 현재 OS pending 알림 갯수 — 모니터링용. .task / refresh로 갱신.
+    @State private var pendingNotificationCount: Int = 0
 
     @Environment(\.openURL) private var openURL
+
+    // Dev: 달력 cell 큰 원 표시 toggle — MonthGridView가 같은 키 sync.
+    @AppStorage(UIStateKey.devShowAchievementCircle) private var devShowAchievementCircle: Bool = true
 
     // 사용자 테마 설정 — MyDaysApp의 @AppStorage와 같은 키 → 즉시 sync.
     // store: .appShared — App Group 공유. 위젯에서도 같은 값 읽음.
@@ -103,6 +109,27 @@ struct SettingsView: View {
             // 임시: 개발/테스트용. CloudKit이 데이터를 보관하므로 재설치해도 복원됨 → 명시적 삭제 필요.
             // 정식 출시 전 제거 또는 debug 빌드에서만 노출하도록 검토.
             Section(header: Text(verbatim: "Dev")) {
+                // 달력 cell 큰 원 (목표 달성률) 표시 toggle — 시각 영향 확인용.
+                Toggle(isOn: $devShowAchievementCircle) {
+                    Text(verbatim: "달력 큰 원 표시")
+                }
+                // OS pending 알림 갯수 — 64개 한계 모니터링용. 탭하면 즉시 refresh.
+                Button {
+                    refreshPendingCount()
+                } label: {
+                    HStack {
+                        Text(verbatim: "Pending 알림")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(verbatim: "\(pendingNotificationCount) / 64")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Image(systemName: "arrow.clockwise")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
                 Button(role: .destructive) {
                     showWipeConfirm = true
                 } label: {
@@ -143,6 +170,9 @@ struct SettingsView: View {
         // iPad/regular size class에서 content 폭 cap — 가독성.
         .iPadContentWidth()
         .navigationTitle("settings.title")
+        .task {
+            refreshPendingCount()
+        }
         .alert(Text(verbatim: "모든 데이터를 삭제할까요?"), isPresented: $showWipeConfirm) {
             Button("common.cancel", role: .cancel) {}
             Button(role: .destructive) {
@@ -216,6 +246,15 @@ struct SettingsView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "-"
         let build = info?["CFBundleVersion"] as? String ?? "-"
         return "\(version) (\(build))"
+    }
+
+    /// OS pending 알림 갯수 fetch — 64개 한계 모니터링용. Dev row 탭 / view appear 시 호출.
+    private func refreshPendingCount() {
+        UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+            DispatchQueue.main.async {
+                pendingNotificationCount = requests.count
+            }
+        }
     }
 }
 

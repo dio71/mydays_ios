@@ -295,7 +295,11 @@ struct ActivityHistoryView: View {
     private func recordRow(_ rc: RoutineCompletion) -> some View {
         let isActivity = rc.item?.itemKind == .activity
         let valueRecorded = Int(rc.valueRecorded?.doubleValue ?? 0)
-        let target = rc.item?.activityTargetValueInt ?? 0
+        // effective target — RC.targetSnapshot 우선 (그 시점의 target 보존), fallback item.target.
+        let target: Int = {
+            if let snap = rc.targetSnapshot?.doubleValue, snap > 0 { return Int(snap) }
+            return rc.item?.activityTargetValueInt ?? 0
+        }()
         // 활동 진행 케이스: done/failed 아니면서 valueRecorded > 0.
         let isActivityProgress = isActivity && !rc.done && !rc.failed && valueRecorded > 0
         VStack(alignment: .leading, spacing: 4) {

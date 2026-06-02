@@ -22,8 +22,11 @@ struct CancelTodoSheet: View {
     let onConfirm: (String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    /// preset catalog key 또는 user reason raw 텍스트. nil=미선택.
     @State private var selectedKey: String?
     @State private var customText: String = ""
+    /// 사용자 추가 사유. UnitSeparator(\u{1F})로 join.
+    @AppStorage("user_reasons.todo_cancel") private var userReasonsRaw: String = ""
 
     private static let presetReasonKeys: [String] = [
         "todo.cancel_sheet.reason.time_lack",
@@ -32,14 +35,36 @@ struct CancelTodoSheet: View {
         "todo.cancel_sheet.reason.skipped"
     ]
 
+    private var userReasons: [String] {
+        userReasonsRaw.split(separator: "\u{1F}", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    private func addUserReason() {
+        let trimmed = customText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var list = userReasons
+        guard !list.contains(trimmed) else {
+            selectedKey = trimmed
+            customText = ""
+            return
+        }
+        list.append(trimmed)
+        userReasonsRaw = list.joined(separator: "\u{1F}")
+        selectedKey = trimmed
+        customText = ""
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("todo.cancel_sheet.section.preset") {
-                    // 가변 폭 chip group — 가로 스크롤 대신 wrap.
+                    // 가변 폭 chip group — 가로 스크롤 대신 wrap. preset + user reasons 통합.
                     FlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
                         ForEach(Self.presetReasonKeys, id: \.self) { key in
-                            reasonChip(catalogKey: key)
+                            reasonChip(identifier: key, label: NSLocalizedString(key, comment: ""))
+                        }
+                        ForEach(userReasons, id: \.self) { text in
+                            reasonChip(identifier: text, label: text)
                         }
                     }
                     .padding(.vertical, 2)
@@ -51,6 +76,7 @@ struct CancelTodoSheet: View {
                         axis: .vertical
                     )
                     .lineLimit(1...4)
+                    addReasonButton
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -91,21 +117,50 @@ struct CancelTodoSheet: View {
         .appTint()
     }
 
-    /// customText 우선, 비어 있으면 선택된 preset의 localized text, 둘 다 없으면 nil.
+    /// customText 우선, 비어 있으면 선택된 chip 텍스트(preset이면 localized, user면 raw), 둘 다 없으면 nil.
     private var resolvedComment: String? {
         let trimmed = customText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
         if let key = selectedKey {
-            return NSLocalizedString(key, comment: "")
+            if Self.presetReasonKeys.contains(key) {
+                return NSLocalizedString(key, comment: "")
+            }
+            return key
         }
         return nil
     }
 
-    private func reasonChip(catalogKey: String) -> some View {
-        let isSelected = selectedKey == catalogKey
-        let label = NSLocalizedString(catalogKey, comment: "")
+    /// "선택 항목에 추가" 버튼 — chip outline 스타일.
+    @ViewBuilder
+    private var addReasonButton: some View {
+        let isEnabled = !customText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        HStack {
+            Button {
+                addUserReason()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                    Text("reason.add_to_options")
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .overlay(
+                    Capsule().stroke(Color.accentColor, lineWidth: 1)
+                )
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .opacity(isEnabled ? 1 : 0.4)
+            .allowsHitTesting(isEnabled)
+            Spacer()
+        }
+    }
+
+    private func reasonChip(identifier: String, label: String) -> some View {
+        let isSelected = selectedKey == identifier
         return Button {
-            selectedKey = isSelected ? nil : catalogKey
+            selectedKey = isSelected ? nil : identifier
         } label: {
             Text(verbatim: label)
                 .font(.subheadline)

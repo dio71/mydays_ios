@@ -137,11 +137,13 @@ extension Item {
                 return Calendar.gmt.isDate(d, inSameDayAs: today)
             }
             let prev = existing?.valueRecorded?.doubleValue ?? 0
-            let target = item.activityTargetValueDouble ?? 0
+            // 완료/포기된 RC는 그 시점의 snapshot 보존. 그 외는 item 현재 target 사용 (RC 갱신 시 sync됨).
+            let effectiveTarget = existing.flatMap { ($0.done || $0.failed) ? $0.targetSnapshot?.doubleValue : nil }
+                ?? item.activityTargetValueDouble ?? 0
             let wasDone = existing?.done ?? false
-            let reached = target > 0 && current >= target
+            let reached = effectiveTarget > 0 && current >= effectiveTarget
             let diff = abs(current - prev)
-            let threshold = max(target * 0.05, 0.5)
+            let threshold = max(effectiveTarget * 0.05, 0.5)
 
             // 갱신 필요 판정.
             let needsUpdate: Bool
@@ -167,6 +169,10 @@ extension Item {
                 rc.failed = false
             }
             rc.valueRecorded = NSNumber(value: current)
+            // 미완료 RC는 targetSnapshot을 item 현재 값으로 sync. 완료/포기는 보존.
+            if !rc.done && !rc.failed {
+                rc.targetSnapshot = item.activityTargetValue
+            }
             rc.completedAt = now
 
             if reached && !wasDone {
@@ -253,8 +259,14 @@ extension Item {
             rc.failed = false
         }
         rc.valueRecorded = NSNumber(value: value)
+        // 미완료 RC는 targetSnapshot을 item 현재 값으로 sync. 완료/포기 RC는 보존.
+        if !rc.done && !rc.failed {
+            rc.targetSnapshot = item.activityTargetValue
+        }
         // target 도달 시 done flip. 이미 done이면 그대로 (초과 누적 허용).
-        if let target = item.activityTargetValueInt, Int(value) >= target, !rc.done {
+        // 판정은 effective target (snapshot 우선) 기준.
+        let effectiveTarget = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+        if effectiveTarget > 0, value >= effectiveTarget, !rc.done {
             rc.done = true
         }
         rc.completedAt = now

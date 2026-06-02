@@ -56,6 +56,13 @@ struct RootView: View {
             sidebarSelection = .today
         }
         .task {
+            // Migration: RC.targetSnapshot 1회 backfill (출시 후 제거 예정).
+            // UserDefaults 플래그로 중복 실행 방지.
+            let migrationKey = "migrated.rc_target_snapshot"
+            if !UserDefaults.standard.bool(forKey: migrationKey) {
+                Item.backfillRCTargetSnapshots(in: context)
+                UserDefaults.standard.set(true, forKey: migrationKey)
+            }
             // routine 자동 status 동기화는 사용자 trigger(ListView.task / AddItemView.save) 시점에만 수행 —
             // launch 시 호출 제거. NTD 자동 완료는 알림/위젯 정확성 위해 유지.
             Item.completeFinishedNTDs(in: context)

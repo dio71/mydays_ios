@@ -166,7 +166,7 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
     }
 
     private var emptyContent: some View {
-        Image(systemName: "target")
+        Image(systemName: "scope")
             .font(.system(size: 18))
             .foregroundStyle(.secondary)
     }

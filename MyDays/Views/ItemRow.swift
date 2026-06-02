@@ -247,7 +247,9 @@ struct ItemRow: View {
     ///   HK sync는 RootView .task + scenePhase.active 트리거.
     @ViewBuilder
     private var activityTrailingProgress: some View {
-        let target = item.activityTargetValueInt ?? 0
+        // effective target — RC.targetSnapshot 우선, fallback item.target.
+        // (사용자가 target 변경해도 과거 완료 RC는 그 시점 snapshot 기준으로 평가됨.)
+        let target = Int(item.effectiveTargetValue(on: activityOccurrenceDate) ?? 0)
         let current = item.activityCurrentValue(on: activityOccurrenceDate)
         let step = Item.activityQuickStep(target: max(target, 1))
         let progress: Double = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
@@ -332,7 +334,8 @@ struct ItemRow: View {
     /// past 일자는 progress만 (▶ 숨김).
     @ViewBuilder
     private var focusTrailingProgress: some View {
-        let target = item.activityTargetValueInt ?? 0
+        // effective target — RC.targetSnapshot 우선, fallback item.target.
+        let target = Int(item.effectiveTargetValue(on: focusOccurrenceDate) ?? 0)
         let current = Int(item.focusCurrentMinutes(on: focusOccurrenceDate))
         let progress: Double = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
         let goalColor = goalAccentColor

@@ -76,10 +76,11 @@ struct ArchiveView: View {
 
     var body: some View {
         let hasFilter = filterCategoryID != nil
-        // 진짜 empty (Case A) — 필터 없음 + 활성/완료 모두 0개. Group으로 묶어 outer modifier 공유.
+        // 활성 0 + 필터 없음 → Case A/C 통합 layout (메시지만 분기, 토글에 따라 완료 섹션).
+        // 그 외 (hasFilter 또는 활성 1+) → 기존 List.
         Group {
-        if !hasFilter && items.isEmpty && (!showCompleted || completedItems.isEmpty) {
-            archiveEmptyContent
+        if !hasFilter && items.isEmpty {
+            archiveEmptyLayout
         } else {
         List {
             if hasFilter {
@@ -219,18 +220,93 @@ struct ArchiveView: View {
         .buttonStyle(.plain)
     }
 
-    /// 빈 상태 — "막연한 할일이 없습니다" (필터/그룹 모드 내 부분 empty용).
+    /// 활성 0 케이스 inline row — 필터 활성이면 Case B(필터 해제 링크), 그 외면 Case C(모두 완료).
+    @ViewBuilder
     private var emptyActiveRow: some View {
-        Text("archive.empty")
-            .foregroundStyle(.secondary)
-            .font(.subheadline)
+        if filterCategoryID != nil {
+            filteredEmptyRow
+        } else {
+            allDoneRow
+        }
     }
 
-    /// 진짜 empty (필터 없음 + 0개) — first-launch 톤. 탭 아이콘 + 가이드 메시지.
-    /// QuickEntryBar로 즉시 등록 가능 — 별도 CTA 버튼 불필요.
+    /// Case B — 필터 결과 0건. 작은 아이콘 + 메시지 + "필터 해제" 링크.
     @ViewBuilder
-    private var archiveEmptyContent: some View {
-        EmptyStateView(iconName: "tray.full.fill", message: "archive.empty.first")
+    private var filteredEmptyRow: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 10) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.title2)
+                    .foregroundStyle(.tertiary)
+                Text("archive.empty.filtered")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("filter.clear") {
+                    filterCategoryID = nil
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+            }
+            .padding(.vertical, 24)
+            Spacer()
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// Case C — 활성 0 + 완료 1+. 보관함에서 "정리할 게 없는" 긍정 톤.
+    @ViewBuilder
+    private var allDoneRow: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Color.accentColor)
+                Text("archive.empty.all_done")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 24)
+            Spacer()
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// 활성 0 + 필터 없음 layout — 메시지는 first-launch 톤(아이콘·문구 동일) 통일.
+    /// List 안 별도 Section의 첫 row로 EmptyStateView 배치 → 스크롤 시 함께 올라가 완료 섹션 공간 확보.
+    /// 토글 ON/OFF 차이는 완료 섹션 표시 여부만 — 상단 메시지는 동일 UI로 일관 시각.
+    @ViewBuilder
+    private var archiveEmptyLayout: some View {
+        List {
+            Section {
+                EmptyStateView(
+                    iconName: "tray.full.fill",
+                    message: "archive.empty.first",
+                    alignment: .top
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
+            }
+            if showCompleted && !completedItems.isEmpty {
+                Section("list.section.completed") {
+                    ForEach(filteredCompletedItems, id: \.objectID) { item in
+                        Button {
+                            sheet = .edit(item)
+                        } label: {
+                            ItemRow(item: item, referenceDate: referenceDate, mode: .list)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 
     /// filter 활성 시 section header — ListView와 동일 패턴(filled circle icon + 이름).

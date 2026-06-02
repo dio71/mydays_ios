@@ -87,6 +87,10 @@ enum UIStateKey {
     static let listGroupByCategory = "ui.listView.groupByCategory"
     static let archiveShowCompleted = "ui.archiveView.showCompleted"
     static let archiveGroupByCategory = "ui.archiveView.groupByCategory"
+    /// Dev: 달력 cell에 목표 달성률 큰 원 표시 여부 — Settings Dev section toggle. default true.
+    static let devShowAchievementCircle = "ui.dev.showAchievementCircle"
+    /// 첫 진입 onboarding(권한 안내 페이지) 노출 완료 여부. true면 skip.
+    static let onboardingShown = "ui.onboarding.shown"
 }
 
 // MARK: - App Group 공유 UserDefaults

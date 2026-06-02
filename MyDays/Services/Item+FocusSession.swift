@@ -44,8 +44,13 @@ extension Item {
         let prev = rc.valueRecorded?.doubleValue ?? 0
         let next = prev + minutes
         rc.valueRecorded = NSNumber(value: next)
-        // target 도달 → done flip. overshoot 허용 — done 이후도 누적 add 가능.
-        if let targetMinutes = item.activityTargetValueDouble, next >= targetMinutes, !rc.done {
+        // 미완료 RC는 targetSnapshot을 item 현재 값으로 sync. 완료/포기 RC는 보존.
+        if !rc.done && !rc.failed {
+            rc.targetSnapshot = item.activityTargetValue
+        }
+        // target 도달 → done flip. effective target(snapshot 우선) 기준 판정.
+        let effectiveTarget = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+        if effectiveTarget > 0, next >= effectiveTarget, !rc.done {
             rc.done = true
         }
         // completedAt = 마지막 업데이트 instant — 정렬에서 최신 세션이 위로.
