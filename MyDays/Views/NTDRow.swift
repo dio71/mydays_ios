@@ -76,19 +76,14 @@ struct NTDRow: View {
                         // 미래 일자엔 trailing(progress/countdown) 숨김 — 활동(+)/습관(체크)과 일관성.
                         // 다른 type들은 미래 trailing 인터랙션을 숨기는데 NTD만 countdown("1일 11시간 후")을
                         // 보여주던 게 일관성 떨어짐 → 같은 정책 적용. 오늘/과거는 그대로.
-                        // cancelMode/itemPickerMode에선 trailing 전체 숨김 — 활동/습관과 일관성 (모드 액션에 집중).
-                        if (occurrenceDate <= .todayCalendarAnchor || completed || failed) && !cancelMode && !itemPickerMode {
+                        // cancelMode에선 trailing 전체 숨김. itemPickerMode에선 progress만 노출 — 활동/집중과 일관성 (display는 유지, 액션만 숨김).
+                        if (occurrenceDate <= .todayCalendarAnchor || completed || failed) && !cancelMode {
                             // trailing + (x)/check/nosign 사이 간격은 activity (progress + (+)) 패턴과 동일 4pt.
                             HStack(spacing: 4) {
                                 trailingDisplay(now: now, completed: completed, failed: failed)
                                 // 우측 status/action 아이콘 — displayedDate=오늘인 row에서만 노출.
-                                // 어제 시작 + 오늘 진행 중인 multi-day occurrence는 두 row 모두 표시되는데,
-                                // 아이콘은 오늘 row에서만 (이중 노출 방지 + 액션 위치 일관성).
-                                // - 미완료/미포기: (x) 포기 버튼 (interactive)
-                                // - 완료: checkmark.circle (display only, 시각적 균형)
-                                // - 포기: nosign (display only, 시각적 균형)
-                                // 색상은 모두 goalAccentColor (item.iconColorHex) — 정체성 통일.
-                                if isActionableDisplayedDate {
+                                // itemPickerMode에선 액션/아이콘 숨김 (display는 유지).
+                                if isActionableDisplayedDate && !itemPickerMode {
                                     trailingStatusIcon(completed: completed, failed: failed)
                                 }
                             }

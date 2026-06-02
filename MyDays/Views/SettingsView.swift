@@ -14,8 +14,8 @@ struct SettingsView: View {
 
     @Environment(\.openURL) private var openURL
 
-    // Dev: 달력 cell 큰 원 표시 toggle — MonthGridView가 같은 키 sync.
-    @AppStorage(UIStateKey.devShowAchievementCircle) private var devShowAchievementCircle: Bool = true
+    // 온보딩 재진입용 — false로 toggle하면 WindowGroup이 OnboardingView 표시.
+    @AppStorage(UIStateKey.onboardingShown) private var onboardingShown: Bool = false
 
     // 사용자 테마 설정 — MyDaysApp의 @AppStorage와 같은 키 → 즉시 sync.
     // store: .appShared — App Group 공유. 위젯에서도 같은 값 읽음.
@@ -109,9 +109,16 @@ struct SettingsView: View {
             // 임시: 개발/테스트용. CloudKit이 데이터를 보관하므로 재설치해도 복원됨 → 명시적 삭제 필요.
             // 정식 출시 전 제거 또는 debug 빌드에서만 노출하도록 검토.
             Section(header: Text(verbatim: "Dev")) {
-                // 달력 cell 큰 원 (목표 달성률) 표시 toggle — 시각 영향 확인용.
-                Toggle(isOn: $devShowAchievementCircle) {
-                    Text(verbatim: "달력 큰 원 표시")
+                // 온보딩 다시 보기 — false로 set하면 WindowGroup이 OnboardingView 표시.
+                Button {
+                    onboardingShown = false
+                } label: {
+                    Label {
+                        Text(verbatim: "온보딩 다시 보기")
+                            .foregroundStyle(.primary)
+                    } icon: {
+                        Image(systemName: "sparkles")
+                    }
                 }
                 // OS pending 알림 갯수 — 64개 한계 모니터링용. 탭하면 즉시 refresh.
                 Button {

@@ -152,7 +152,8 @@ struct ItemRow: View {
             //   - 과거 일자도 노출 — 까먹고 안 한 거 나중에 기록 가능
             //   - 취소 모드일 땐 (x) 버튼 우선
             // 습관 trailing 체크 — 오늘/보관함 모드만. 목록 탭에선 숨김 (NTD progress·활동 progress와 동일 정책 — D-day 중심 조망).
-            if isHabit && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
+            // picker 모드에선 액션만 있는 trailing은 전체 hide (display 가치 없음).
+            if isHabit && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode && !itemPickerMode {
                 habitTrailingCheck
             }
 
@@ -160,6 +161,7 @@ struct ItemRow: View {
             // 정책: 오늘/보관함 모드만 노출. 목록 탭(.list)에선 숨김 — NTD가 목록 탭에서 progress 안 보이는 것과 동일.
             //       (목록 탭은 D-day 중심 조망용 — progress 인터랙션은 오늘 탭에서만 수행)
             // 미래 일자 / 시작 전 / 취소 모드 제외.
+            // picker 모드: progress capsule은 유지, trailing 액션 아이콘(+)은 내부에서 숨김.
             if isActivity && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
                 activityTrailingProgress
             }
@@ -167,6 +169,7 @@ struct ItemRow: View {
             // 집중 trailing — progress capsule + ▶ 시작 버튼.
             // 정책: 오늘 모드 + 오늘 일자만 (다른 일자 시작은 의미 없음 — 사용자가 원하는 시점에 시작).
             // 진행 중인 active session이 있으면 ▶ disabled (전역 single-active).
+            // picker 모드: progress capsule은 유지, ▶은 내부에서 숨김.
             if isFocus && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
                 focusTrailingProgress
             }
@@ -286,8 +289,9 @@ struct ItemRow: View {
             // 과거 일자는 trailing 아이콘 완전 숨김 — progress bar만으로 그날 결과 표시.
             // 입력 정책: 활동은 당일에만 가능. 과거는 결과 확인만.
             // 진행 중은 line, 완료(target 도달)는 filled — 목표 trailing 시각 정책.
+            // picker 모드: 액션 아이콘 숨김 (progress capsule만 유지).
             let isDone = current >= target && target > 0
-            if !isPastDate {
+            if !isPastDate && !itemPickerMode {
                 if isAutoSource {
                     // HK auto source — heart badge (non-interactive). 진행 중=line, 완료=fill.
                     Image(systemName: isDone ? "heart.fill" : "heart")
@@ -365,7 +369,8 @@ struct ItemRow: View {
 
             // ▶ 시작 버튼 — 오늘 일자에만. focusSessionPresentation 트리거.
             // 진행 중(target 미달)=line, 완료(target 도달)=filled — 목표 trailing 시각 정책.
-            if !isPastDate {
+            // picker 모드: 액션 아이콘 숨김 (progress capsule만 유지).
+            if !isPastDate && !itemPickerMode {
                 let isDone = target > 0 && current >= target
                 Button {
                     presentFocusSession = true
@@ -472,6 +477,8 @@ struct ItemRow: View {
                 .foregroundStyle(style.color)
         }
         .buttonStyle(.plain)
+        // picker 모드에선 tap 차단 — 시각은 유지(상태 표시), 액션은 leftmost 선택 체크에 위임.
+        .allowsHitTesting(!itemPickerMode)
     }
 
     private func todoCheckboxStyle() -> (icon: String, color: Color) {

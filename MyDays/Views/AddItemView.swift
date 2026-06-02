@@ -76,6 +76,9 @@ struct AddItemView: View {
     @State private var showDeleteConfirm = false
     @State private var showCancelConfirm = false
     @State private var showRecurrenceSheet = false
+    /// 활동 기록 "전체 보기" sheet — NavigationLink push 대신 sheet로 띄움.
+    /// 이유: monthview 가로 swipe가 NavigationStack back-swipe와 충돌해 의도치 않게 pop되는 회귀 회피.
+    @State private var showFullHistory = false
     @State private var showPeriod: Bool
     @State private var recurrenceConfig: RecurrenceConfig?
     /// 선택된 카테고리 id. nil이면 미분류.
@@ -264,6 +267,12 @@ struct AddItemView: View {
     }
 
     private var isEditing: Bool { editingItem != nil }
+
+    /// 활동 기록(`routineHistoryRecords`) 1+ 보유 여부 — 상단 아이콘 버튼 노출 조건.
+    private var hasHistoryRecords: Bool {
+        guard let item = editingItem else { return false }
+        return !item.routineHistoryRecords.isEmpty
+    }
     private var isNTD: Bool { kind == .notTodo }
     /// 목표(절제/활동/집중/습관) 그룹 판정 — 같은 섹션·같은 입력 UI 사용.
     private var isGoal: Bool { kind.isGoal }
@@ -588,18 +597,16 @@ struct AddItemView: View {
                     ForEach(records.prefix(10), id: \.objectID) { record in
                         activityRow(record)
                     }
-                    // 기록 있으면 전체 보기 navigation (10건 이하라도 노출 — 검색/필터 가능).
-                    // ZStack 트릭 — NavigationLink는 List에서 자동으로 chevron 붙어 좌측 라벨이 됨.
-                    // chevron 없이 중앙 정렬된 텍스트만 보이도록 hidden NavigationLink + 중앙 Text overlay.
-                    ZStack {
-                        NavigationLink {
-                            ActivityHistoryView(item: item)
-                        } label: { EmptyView() }
-                            .opacity(0)
+                    // 기록 있으면 전체 보기 — sheet 진입 (NavigationLink push 대신).
+                    // NavigationStack push 시 monthview 가로 swipe와 시스템 back-swipe 충돌 → sheet으로 우회.
+                    Button {
+                        showFullHistory = true
+                    } label: {
                         Text("activity_history.show_all")
                             .foregroundStyle(Color.accentColor)
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -815,6 +822,27 @@ struct AddItemView: View {
                         .focused($titleFocused)
                     TextField("add.field.notes", text: $notes, axis: .vertical)
                         .lineLimit(2...5)
+                } header: {
+                    // 빈 header 영역을 활용해 우측 정렬 활동 기록 아이콘 버튼 노출.
+                    // 편집 모드 + 기록 1+ 일 때만. 평소엔 빈 header → 시각 영향 없음.
+                    // capsule + tint 배경으로 "버튼" 느낌 강조 (header text plain 텍스트와 시각 구분).
+                    if isEditing, hasHistoryRecords {
+                        HStack {
+                            Spacer()
+                            Button {
+                                showFullHistory = true
+                            } label: {
+                                Image(systemName: "calendar.badge.clock")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("activity_history.show_all")
+                        }
+                    }
                 }
 
                 // 종류 picker. 편집 시엔 숨김 (kind 변환은 의미 shift 위험).
@@ -1278,6 +1306,15 @@ struct AddItemView: View {
                         recurrenceConfig = nil
                     }
                 )
+            }
+            .sheet(isPresented: $showFullHistory) {
+                // 활동 기록 전체 보기 — NavigationStack 안에 ActivityHistoryView. 자체 toolbar(닫기 버튼) 표시.
+                if let item = editingItem {
+                    NavigationStack {
+                        ActivityHistoryView(item: item, showsCloseButton: true)
+                    }
+                    .appTint()
+                }
             }
             // NavigationStack root에 직접 .appTint() — iOS 26 idle-tint-loss 방어.
             // 외곽 .appTint()와 함께 belt-and-suspenders로 propagation 보장.

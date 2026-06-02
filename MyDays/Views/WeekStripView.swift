@@ -26,6 +26,13 @@ struct WeekStripView: View {
     /// 가로 swipe로 ±7일 shift callback (음수=과거, 양수=미래).
     let onShiftWeek: (Int) -> Void
 
+    // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
+    @AppStorage(AppThemeKey.tintPreset, store: .appShared)
+    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintColor: Color {
+        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+    }
+
     var body: some View {
         // TodayView 본문과 동일한 transition 패턴: ZStack + .id로 view identity 변경 시 슬라이드.
         // forward=true면 새 view가 오른쪽에서 진입, 이전 view가 왼쪽으로 퇴장. forward=false면 반대.
@@ -107,12 +114,12 @@ struct WeekStripView: View {
         let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
         Text(verbatim: Self.weekdayLabel(date))
             .font(.caption2)
-            .foregroundStyle(isToday ? Color.accentColor : .secondary)
+            .foregroundStyle(isToday ? tintColor : .secondary)
     }
 
     /// 날짜 cell (하단 row) — tap 활성. MonthGridView와 동일 시각 정책:
     /// - Today: 우상단 작은 red dot
-    /// - Selected: 가는 accent stroke 1pt
+    /// - Selected: 옅은 accent fill (opacity 0.22) — MonthGridView와 통일
     /// - 숫자 색: today면 accent, 그 외 primary
     @ViewBuilder
     private func dayCell(for date: Date) -> some View {
@@ -120,12 +127,13 @@ struct WeekStripView: View {
         let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
         ZStack(alignment: .topTrailing) {
             ZStack {
+                if isSelected {
+                    Circle().fill(tintColor.opacity(0.22))
+                        .frame(width: 26, height: 26)
+                }
                 Text(verbatim: Self.dayNumber(date))
                     .font(.callout.weight(isToday ? .semibold : .regular))
-                    .foregroundStyle(isToday ? Color.accentColor : Color.primary)
-                if isSelected {
-                    Circle().stroke(Color.accentColor, lineWidth: 1)
-                }
+                    .foregroundStyle(isToday ? tintColor : Color.primary)
             }
             .frame(width: 28, height: 28)
 

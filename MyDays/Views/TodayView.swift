@@ -72,6 +72,14 @@ struct TodayView: View {
     // 상단 영역 모드 — Day (WeekStrip) / Month (MonthGrid). TodayList 본문은 두 모드 공통.
     // 앱 종료 후 재실행 시 마지막 선택 모드 복원 (@AppStorage).
     @AppStorage(UIStateKey.todayViewMode) private var viewMode: TodayViewMode = .day
+
+    // 사용자 tint preset — @AppStorage로 직접 읽어 toolbar 버튼 .tint()에 명시 적용.
+    // SwiftUI environment의 accent color가 일부 케이스에서 풀려 시스템 blue로 fallback되는 회귀 방어.
+    @AppStorage(AppThemeKey.tintPreset, store: .appShared)
+    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var resolvedTintColor: Color {
+        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+    }
     // 특정일 이동 시트.
     @State private var showDatePicker: Bool = false
     @State private var datePickerSelection: Date = Date()
@@ -164,7 +172,7 @@ struct TodayView: View {
                             .foregroundStyle(Color.white)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.accentColor)
+                    .tint(resolvedTintColor)
                     .accessibilityLabel("common.done")
                 }
             } else if itemPickerMode {
@@ -183,7 +191,7 @@ struct TodayView: View {
                             .foregroundStyle(Color.white)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.accentColor)
+                    .tint(resolvedTintColor)
                     .accessibilityLabel("common.done")
                 }
             } else {
@@ -193,7 +201,9 @@ struct TodayView: View {
                     Button {
                         viewMode = (viewMode == .day) ? .month : .day
                     } label: {
-                        Image(systemName: viewMode == .day ? "calendar" : "list.bullet")
+                        // 현재 상태 표시 패턴 — 완료 토글과 일관성.
+                        // 이전 도착지 패턴 (Day → calendar, Month → list.bullet) 의 단순 swap.
+                        Image(systemName: viewMode == .day ? "list.bullet" : "calendar")
                     }
                     categoryFilterMenu
                     Button {
@@ -257,7 +267,7 @@ struct TodayView: View {
                             .foregroundStyle(isToday ? .white : Color.secondary)
                             .padding(.horizontal, 18)
                             .padding(.vertical, 14)
-                            .background(Capsule().fill(isToday ? Color.accentColor : Color(.systemGray4)))
+                            .background(Capsule().fill(isToday ? resolvedTintColor : Color(.systemGray4)))
                             .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
                     }
                     Button { shiftDay(1) } label: {
@@ -293,7 +303,7 @@ struct TodayView: View {
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(width: 56, height: 56)
-                        .background(Circle().fill(Color.accentColor))
+                        .background(Circle().fill(resolvedTintColor))
                         .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
                 }
                 .padding(20)
@@ -407,11 +417,11 @@ struct TodayView: View {
     private var pickerModeBanner: some View {
         Text("today.picker.banner")
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(resolvedTintColor)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .center)
-            .background(Color.accentColor.opacity(0.12))
+            .background(resolvedTintColor.opacity(0.12))
     }
 
     /// 취소 모드 안내 banner — pickerModeBanner와 동일 시각. inline icon으로 nosign 버튼 시각 hint.
@@ -423,11 +433,11 @@ struct TodayView: View {
             Text("today.cancel.banner")
                 .font(.subheadline.weight(.medium))
         }
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(resolvedTintColor)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .center)
-        .background(Color.accentColor.opacity(0.12))
+        .background(resolvedTintColor.opacity(0.12))
     }
 
     /// 상단 viewMode content — Day(WeekStripView) / Month(MonthGridView) 분기.
@@ -601,6 +611,13 @@ struct TodayList: View {
     @Environment(\.onPickItem) private var onPickItem
     /// 상단 영역 모드 — TodayView의 @AppStorage와 동일 key/store sync. Empty 메시지의 top padding 분기에 사용.
     @AppStorage(UIStateKey.todayViewMode) private var viewMode: TodayViewMode = .day
+
+    // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
+    @AppStorage(AppThemeKey.tintPreset, store: .appShared)
+    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var resolvedTintColor: Color {
+        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+    }
 
     /// 할일(1회성+루틴) 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
     /// 같은 date 내에서 체크/취소 토글 시 즉시 reorder되지 않게 cache. 다음 navigation 시 재계산.
@@ -1070,7 +1087,7 @@ struct TodayList: View {
                 HStack(spacing: 8) {
                     let color: Color = {
                         guard let raw = cat.colorHex, let cc = CategoryColor(rawValue: raw) else {
-                            return Color.accentColor
+                            return resolvedTintColor
                         }
                         return cc.color
                     }()
@@ -1091,7 +1108,7 @@ struct TodayList: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 20, height: 20)
-                        .background(Circle().fill(Color.accentColor))
+                        .background(Circle().fill(resolvedTintColor))
                     Text(verbatim: kind.displayName)
                 }
             } else {

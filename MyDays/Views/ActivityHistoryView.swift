@@ -21,13 +21,22 @@ struct ActivityHistoryView: View {
     let item: Item?
     /// all-item 모드의 분리 axis. per-item에선 무시.
     let scope: HistoryScope
+    /// sheet 진입 시 toolbar leading에 닫기(xmark) 버튼 노출. push 진입에선 system back button 사용 → false.
+    let showsCloseButton: Bool
 
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @State private var filter: HistoryFilter = .all
     @State private var filterCategoryID: UUID?
     /// 목표 유형 필터 — scope=.goal일 때만 사용. nil=모든 목표 type.
     @State private var filterGoalKind: ItemKind?
     @State private var searchText: String = ""
+
+    /// per-item 상단 고정 monthview의 anchor 일자 (UTC anchor) — 월 단위 swipe 시 갱신.
+    /// 일자 선택은 비활성 — 단순 history 조망 목적.
+    @State private var monthAnchor: Date = .todayCalendarAnchor
+    /// 월 swipe 방향 — slide transition edge 계산용.
+    @State private var monthForward: Bool = true
 
     // FetchRequest로 RC 직접 fetch. predicate는 item != nil이면 item만, nil이면 전체.
     @FetchRequest private var records: FetchedResults<RoutineCompletion>
@@ -59,9 +68,10 @@ struct ActivityHistoryView: View {
     /// nil=전체, 절제/활동/집중/습관 중 하나 선택.
     private static let goalKindOptions: [ItemKind] = [.notTodo, .activity, .focus, .habit]
 
-    init(item: Item?, scope: HistoryScope = .todo) {
+    init(item: Item?, scope: HistoryScope = .todo, showsCloseButton: Bool = false) {
         self.item = item
         self.scope = scope
+        self.showsCloseButton = showsCloseButton
         // 단순화: item 매칭만 predicate로. done/failed/valueRecorded·kind 필터는 view-side(filteredRecords)에서 처리.
         // Core Data NSPredicate의 Optional NSNumber 비교(`valueRecorded > 0`)가 일부 경우 nil 매칭 이슈가 있어 회피.
         let predicate: NSPredicate
@@ -179,7 +189,24 @@ struct ActivityHistoryView: View {
         }
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // per-item 모드 상단에 monthview 고정 — "yyyy년 M월" 타이틀 + grid. picked goal/Todo ring/dot 시각.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if item != nil {
+                monthHeader
+            }
+        }
         .toolbar {
+            // sheet 진입 시 — 닫기 버튼 leading에 배치 (system back button 없음).
+            if showsCloseButton {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("common.close")
+                }
+            }
             // 필터 활성 시 — title에 활성 필터 명칭 prefix. ToolbarItem(.principal)로 기본 title 대체.
             //   .todo + 카테고리 선택: "<카테고리명> 기록"
             //   .goal + 목표 유형 선택: "<유형> 목표 기록"
@@ -206,6 +233,62 @@ struct ActivityHistoryView: View {
         .modifier(SearchableIfAllItem(item: item, searchText: $searchText))
         // sheet/push 양쪽 모두에서 사용자 테마 보존 (NavigationLink pop 시 tint 잃는 케이스 방어).
         .appTint()
+    }
+
+    /// Per-item 모드 상단 monthview — "yyyy년 M월" 타이틀 + MonthGridView 재사용.
+    /// 일자 선택은 no-op (월 단위 조망만), 월 단위 swipe로만 navigate.
+    @ViewBuilder
+    private var monthHeader: some View {
+        if let item {
+            VStack(spacing: 4) {
+                Text(verbatim: monthAnchorLabel)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 8)
+                    // 제목 transition을 grid slide와 분리 — ambient animation이 텍스트에 묻어 시각 충돌하는 케이스 방어.
+                    .transaction { $0.animation = nil }
+                MonthGridView(
+                    selectedDate: monthAnchor,
+                    forward: monthForward,
+                    onSelectDate: { _ in },
+                    onShiftMonth: { delta in
+                        shiftMonth(by: delta)
+                    },
+                    pickedItemID: item.id,
+                    fixedSixRows: true,
+                    showsSelection: false
+                )
+            }
+            .background(Color(.systemBackground))
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
+        }
+    }
+
+    /// monthAnchor 일자의 "yyyy년 M월" 형식 라벨. 로케일 자동 (영문: "May 2026").
+    private var monthAnchorLabel: String {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        f.setLocalizedDateFormatFromTemplate("yMMMM")
+        return f.string(from: monthAnchor)
+    }
+
+    /// 월 navigation — 방향 전환 시 forward flag를 한 박자 먼저 갱신해
+    /// old view의 removal transition이 새 방향으로 re-capture되도록 함 (TodayView.navigateTo와 동일 패턴).
+    /// 같은 cycle에서 둘 다 바꾸면 "한 방향으로만 자연스럽고 방향 바꾸면 같은 쪽으로 사라지는" 슬라이드 버그 발생.
+    private func shiftMonth(by delta: Int) {
+        guard let next = Calendar.gmt.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
+        let forward = delta > 0
+        if forward != monthForward {
+            monthForward = forward
+            DispatchQueue.main.async {
+                monthAnchor = next
+            }
+        } else {
+            monthAnchor = next
+        }
     }
 
     private var navigationTitle: LocalizedStringKey {

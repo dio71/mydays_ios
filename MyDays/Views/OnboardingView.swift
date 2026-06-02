@@ -167,24 +167,32 @@ private struct OnboardingTodoPage: View {
             subtitle: "onboarding.feature.todo.body"
         ) {
             IllustrationCard(width: 280) {
-                // row 1: 반복 todo
+                // row 1: 반복 todo — 반복 주기 텍스트 + 오른쪽 D-day 라벨.
                 HStack(spacing: 12) {
                     Image(systemName: "circle")
                         .font(.system(size: 18))
                         .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 6) {
-                        PlaceholderBar(width: 160)
+                        PlaceholderBar(width: 140)
                         HStack(spacing: 6) {
+                            Image(systemName: "flag.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.yellow)
                             Image(systemName: "repeat")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Color.accentColor)
-                            PlaceholderBar(width: 50, color: Color.accentColor, opacity: 0.5)
+                            Text("onboarding.mockup.recurrence.weekly_mon_wed")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.accentColor)
                         }
                     }
                     Spacer()
+                    Text(verbatim: "D-2")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 Divider().opacity(0.4)
-                // row 2: 체크리스트 펼침 상태 — 부모 + 4개 sub-item (2개 완료).
+                // row 2: 체크리스트 펼침 상태 — 부모 + 3개 sub-item (2개 완료).
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 12) {
                         Image(systemName: "circle")
@@ -196,7 +204,7 @@ private struct OnboardingTodoPage: View {
                                 Image(systemName: "checkmark.square")
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
-                                Text(verbatim: "2/4")
+                                Text(verbatim: "2/3")
                                     .font(.system(size: 10).monospacedDigit())
                                     .foregroundStyle(.secondary)
                                 Image(systemName: "chevron.down")
@@ -211,9 +219,27 @@ private struct OnboardingTodoPage: View {
                         checklistSubItem(checked: true, width: 140)
                         checklistSubItem(checked: true, width: 120)
                         checklistSubItem(checked: false, width: 150)
-                        checklistSubItem(checked: false, width: 110)
                     }
                     .padding(.leading, 30)
+                }
+                Divider().opacity(0.4)
+                // row 3: 완료된 todo — filled check + priority 깃발(빨강) + 알림 아이콘.
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 6) {
+                        PlaceholderBar(width: 140, opacity: 0.2)
+                        HStack(spacing: 6) {
+                            Image(systemName: "flag.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.red)
+                            Image(systemName: "bell")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
                 }
             }
         }
@@ -239,57 +265,193 @@ private struct OnboardingGoalPage: View {
             title: "onboarding.feature.goal.title",
             subtitle: "onboarding.feature.goal.body"
         ) {
-            VStack(spacing: 16) {
-                // 4 type chip 가로
-                HStack(spacing: 12) {
-                    goalChip(symbol: "hand.raised.fill", color: .red)
-                    goalChip(symbol: "figure.run", color: .orange)
-                    goalChip(symbol: "hourglass.bottomhalf.filled", color: .indigo)
-                    goalChip(symbol: "checkmark.square.fill", color: .green)
-                }
-                // 진행 중 row 2개
-                IllustrationCard(width: 280) {
-                    progressRow(symbol: "flame.fill", color: .red, progress: 0.55)
-                    Divider().opacity(0.4)
-                    progressRow(symbol: "figure.walk", color: .orange, progress: 0.75)
-                }
+            IllustrationCard(width: 280) {
+                // 절제 — 진행 중 + 🔥23 + 매일 + 16시간 + (x) 포기 버튼
+                goalRow(
+                    icon: "hand.raised.fill",
+                    color: .red,
+                    titleWidth: 70,
+                    progress: 0.55,
+                    done: false,
+                    streak: 23,
+                    metaText: "onboarding.mockup.recurrence.daily",
+                    metaTrailingIcon: "clock",
+                    metaTrailingText: "onboarding.mockup.duration.16h",
+                    actionIcon: "xmark.circle"
+                )
+                Divider().opacity(0.4)
+                // 활동 — 완료 + 🔥72 + auto source heart filled
+                goalRow(
+                    icon: "figure.run",
+                    color: .orange,
+                    titleWidth: 70,
+                    progress: 1.0,
+                    done: true,
+                    streak: 72,
+                    metaText: "onboarding.mockup.recurrence.weekdays",
+                    metaTrailingIcon: nil,
+                    metaTrailingText: nil,
+                    actionIcon: "heart.fill"
+                )
+                Divider().opacity(0.4)
+                // 집중 — 진행 중 + 🔥4 + ▶ start 버튼
+                goalRow(
+                    icon: "hourglass.bottomhalf.filled",
+                    color: .indigo,
+                    titleWidth: 70,
+                    progress: 0.4,
+                    done: false,
+                    streak: 4,
+                    metaText: "onboarding.mockup.recurrence.monthly_dates",
+                    metaTrailingIcon: nil,
+                    metaTrailingText: nil,
+                    actionIcon: "play.circle"
+                )
+                Divider().opacity(0.4)
+                // 습관 — 체크 안된 상태 + 🔥17 + 매일 + 알림
+                habitRow(
+                    color: .green,
+                    titleWidth: 90,
+                    streak: 17,
+                    metaText: "onboarding.mockup.recurrence.daily",
+                    hasReminder: true
+                )
             }
         }
     }
 
-    private func goalChip(symbol: String, color: Color) -> some View {
-        ZStack {
-            Circle().fill(color)
-            Image(systemName: symbol)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: 56, height: 56)
-    }
+    // MARK: - Row builders
 
-    private func progressRow(symbol: String, color: Color, progress: CGFloat) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(color)
-                Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 24, height: 24)
+    /// 절제/활동/집중 공통 row — leading icon circle + title + progress capsule + trailing action icon.
+    /// done=true면 progress fully filled + opacity 살짝 낮춤 (완료 시각화).
+    /// progress capsule은 항상 80pt 고정 폭 — 3 row 시각 통일.
+    /// actionIcon: 진행바 오른쪽 trailing 아이콘 — 절제=(x), 활동=heart.fill(auto), 집중=▶.
+    private func goalRow(
+        icon: String,
+        color: Color,
+        titleWidth: CGFloat,
+        progress: CGFloat,
+        done: Bool,
+        streak: Int,
+        metaText: LocalizedStringKey,
+        metaTrailingIcon: String?,
+        metaTrailingText: LocalizedStringKey?,
+        actionIcon: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            goalIcon(symbol: icon, color: color, done: done)
             VStack(alignment: .leading, spacing: 6) {
-                PlaceholderBar(width: 100)
-                // progress bar capsule
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color(.tertiarySystemFill))
-                        Capsule()
-                            .fill(color.opacity(0.45))
-                            .frame(width: proxy.size.width * progress)
+                HStack(spacing: 8) {
+                    PlaceholderBar(width: titleWidth, opacity: done ? 0.2 : 0.35)
+                    Spacer(minLength: 8)
+                    progressCapsule(color: color, progress: progress, done: done)
+                        .frame(width: 80)
+                    Image(systemName: actionIcon)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                metaLine(
+                    streak: streak,
+                    metaText: metaText,
+                    trailingIcon: metaTrailingIcon,
+                    trailingText: metaTrailingText
+                )
+            }
+        }
+    }
+
+    /// 습관 row — progress 대신 trailing의 unchecked square 체크 박스.
+    /// 알림 켜진 상태(bell) 같이 표시.
+    private func habitRow(
+        color: Color,
+        titleWidth: CGFloat,
+        streak: Int,
+        metaText: LocalizedStringKey,
+        hasReminder: Bool
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            goalIcon(symbol: "checkmark.square.fill", color: color, done: false)
+            VStack(alignment: .leading, spacing: 6) {
+                PlaceholderBar(width: titleWidth)
+                HStack(spacing: 6) {
+                    streakBadge(streak)
+                    Image(systemName: "repeat")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    Text(metaText)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    if hasReminder {
+                        Image(systemName: "bell")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .frame(height: 8)
             }
-            Spacer()
+            Spacer(minLength: 0)
+            Image(systemName: "square")
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Building blocks
+
+    private func goalIcon(symbol: String, color: Color, done: Bool) -> some View {
+        ZStack {
+            Circle().fill(color.opacity(done ? 0.85 : 1.0))
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 22, height: 22)
+    }
+
+    private func progressCapsule(color: Color, progress: CGFloat, done: Bool) -> some View {
+        let p = max(0, min(progress, 1))
+        return ZStack(alignment: .leading) {
+            Capsule().fill(Color(.tertiarySystemFill))
+            GeometryReader { proxy in
+                Capsule()
+                    .fill(color.opacity(done ? 0.5 : 0.4))
+                    .frame(width: proxy.size.width * p)
+            }
+        }
+        .frame(height: 10)
+    }
+
+    @ViewBuilder
+    private func metaLine(streak: Int, metaText: LocalizedStringKey, trailingIcon: String?, trailingText: LocalizedStringKey?) -> some View {
+        HStack(spacing: 6) {
+            streakBadge(streak)
+            Image(systemName: "repeat")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text(metaText)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            // 반복 텍스트 바로 옆에 inline으로 trailing meta(시간 등) 표시 — 실제 ItemRow statusIcons 패턴.
+            if let trailingIcon, let trailingText {
+                Image(systemName: trailingIcon)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Text(trailingText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 🔥 streak badge — flame.fill 오렌지 + 연속 일자 숫자.
+    /// 실제 ItemRow statusIcons의 streak 패턴과 같은 시각.
+    private func streakBadge(_ count: Int) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.orange)
+            Text(verbatim: "\(count)")
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 }

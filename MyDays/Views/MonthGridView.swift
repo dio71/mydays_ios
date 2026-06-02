@@ -35,8 +35,22 @@ struct MonthGridView: View {
     /// nil이면 무관 (전체 종합). non-nil이면 그 item만 캘린더 표시 (Todo면 dot/bar / 목표면 achievement fill).
     var pickedItemID: UUID? = nil
 
-    /// Dev toggle — 달성률 큰 원 표시 여부. Settings Dev section에서 변경.
-    @AppStorage(UIStateKey.devShowAchievementCircle) private var showAchievementCircle: Bool = true
+    /// week row 수를 6으로 고정 (4~5주짜리 월도 빈 row로 패딩) — true면 grid 높이 일정.
+    /// ActivityHistoryView처럼 monthview가 상단 고정 영역인 경우 사용 — 월 전환 시 높이 점프 회피.
+    /// 기본 false (TodayView 기존 dynamic 동작 유지).
+    var fixedSixRows: Bool = false
+
+    /// 선택일 강조 시각(accent fill 원) 노출 여부. false면 일자 cell에서 selection fill 안 그림.
+    /// 일자 선택 인터랙션 없는 화면(ActivityHistoryView monthview 등)에서 사용 — 의미 없는 highlight 제거.
+    /// 기본 true (TodayView 기존 동작 유지).
+    var showsSelection: Bool = true
+
+    // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
+    @AppStorage(AppThemeKey.tintPreset, store: .appShared)
+    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintColor: Color {
+        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+    }
 
     /// 모든 active 항목 — Someday 제외, 삭제(status=2) 제외. cell 인디케이터(dot) 계산용.
     /// 일자별로 어떤 항목이 cover하는지 매 render마다 계산. 100여개 항목 × 42 cells 정도면 무시 가능 비용.
@@ -46,6 +60,17 @@ struct MonthGridView: View {
         animation: .default
     )
     private var allItems: FetchedResults<Item>
+
+    /// RC 변경 observe — 활동 (+N) / 집중 세션 종료 / NTD 포기 등으로 RC가 mutate됐을 때
+    /// MonthGridView body를 재실행시키기 위한 의존성 binding.
+    /// Item.updatedAt bump만으론 SwiftUI가 child 관계 변경을 즉시 trigger 못 잡는 케이스가 있어
+    /// RC를 직접 fetch해 변경 시점에 view가 re-evaluate되도록 강제.
+    /// body에서 `_ = allCompletions.count`로 참조 (값 자체는 안 씀).
+    @FetchRequest(
+        sortDescriptors: [SortDescriptor(\RoutineCompletion.completedAt, order: .reverse)],
+        animation: .default
+    )
+    private var allCompletions: FetchedResults<RoutineCompletion>
 
     /// dot 인디케이터용 items — **목표 + Todo 모두 포함**. 목표는 큰 원(achievement fill)과 dot 둘 다 노출 (사용자 결정).
     /// 필터 정책:
@@ -70,15 +95,19 @@ struct MonthGridView: View {
         // TodayView/WeekStripView와 동일한 transition 패턴.
         let insertionEdge: Edge = forward ? .trailing : .leading
         let removalEdge: Edge = forward ? .leading : .trailing
+        // RC FetchRequest 의존성 강제 — (+N) 활동 누적, 집중 세션 종료, 포기 등으로
+        // RC가 mutate될 때 body 재실행 보장. 값 자체는 안 쓰고 count만 참조.
+        let _ = allCompletions.count
         // **퍼포먼스 critical**: 모든 caches는 body 진입 1회만 계산해 cell에 inject.
-        // - dotsCache: 단일/다일 통합 dot 인디케이터 (목표 + Todo). 정렬 적용.
-        // - rates: 목표 4-type 종합 달성률 — achievement fill circle용
-        let dotsCache: [Date: [DotIndicator]] = days.reduce(into: [:]) { dict, day in
-            dict[day] = dotIndicators(day: day)
-        }
-        let rates: [Date: Double?] = days.reduce(into: [:]) { dict, day in
-            dict[day] = goalAchievementRate(day: day)
-        }
+        // - picked goal 모드: ring 표시 + dots 숨김.
+        // - picked Todo 모드 또는 일반 모드: dots 표시 (ring 없음). Todo는 partial progress 의미 없음.
+        let isPickedGoal = pickedGoalItem != nil
+        let dotsCache: [Date: [DotIndicator]] = isPickedGoal
+            ? [:]
+            : days.reduce(into: [:]) { dict, day in dict[day] = dotIndicators(day: day) }
+        let ringStates: [Date: RingState?] = isPickedGoal
+            ? days.reduce(into: [:]) { dict, day in dict[day] = pickedRingState(day: day) }
+            : [:]
 
         VStack(spacing: 0) {
             // 요일 헤더 — firstWeekday 기준으로 회전된 short symbols.
@@ -111,7 +140,7 @@ struct MonthGridView: View {
                                 cell(
                                     for: day,
                                     dots: dotsCache[day] ?? [],
-                                    achievementRate: rates[day] ?? nil
+                                    ring: ringStates[day] ?? nil
                                 )
                                 .frame(maxWidth: .infinity)
                                 .contentShape(Rectangle())
@@ -136,7 +165,9 @@ struct MonthGridView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .gesture(
+        // highPriorityGesture — 시스템 back-swipe(NavigationStack pop)와 sheet pan-to-dismiss 가로채는 케이스 방어.
+        // ActivityHistoryView 같은 push된 화면에서 monthview swipe가 부모 navigation/sheet으로 전달되는 회귀 차단.
+        .highPriorityGesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { value in
                     let h = value.translation.width
@@ -152,15 +183,22 @@ struct MonthGridView: View {
 
     /// 화면에 표시할 일자들 (weekCount × 7일). 월 첫주 시작 ~ 월 마지막주 끝 사이.
     /// 대부분 5주, 31일 월이 금/토 시작이면 6주, 28일 2월이 first weekday 시작이면 4주.
+    /// fixedSixRows=true면 항상 42일(6주) 반환 — 월 전환 시 grid 높이 일정 유지.
     private var days: [Date] {
-        guard let start = gridStart, let end = gridEnd else { return [] }
-        let total = (Calendar.gmt.dateComponents([.day], from: start, to: end).day ?? 0) + 1
+        guard let start = gridStart else { return [] }
+        let total: Int
+        if fixedSixRows {
+            total = 42
+        } else {
+            guard let end = gridEnd else { return [] }
+            total = (Calendar.gmt.dateComponents([.day], from: start, to: end).day ?? 0) + 1
+        }
         return (0..<total).compactMap {
             Calendar.gmt.date(byAdding: .day, value: $0, to: start)
         }
     }
 
-    /// 표시할 week 수 — days.count / 7. 4~6 범위.
+    /// 표시할 week 수 — days.count / 7. 4~6 범위 (fixedSixRows면 항상 6).
     private var weekCount: Int { max(1, days.count / 7) }
 
     /// grid의 첫 칸(좌상단) — selectedDate가 속한 월의 1일이 포함된 주의 시작 (firstWeekday 기준).
@@ -207,35 +245,32 @@ struct MonthGridView: View {
     // MARK: - Cell
 
     @ViewBuilder
-    private func cell(for date: Date, dots: [DotIndicator], achievementRate: Double?) -> some View {
+    private func cell(for date: Date, dots: [DotIndicator], ring: RingState?) -> some View {
         let isSelected = Calendar.gmt.isDate(date, inSameDayAs: selectedDate)
         let isToday = Calendar.gmt.isDate(date, inSameDayAs: .todayCalendarAnchor)
         let inCurrentMonth = sameMonth(date, selectedDate)
+        let isPickedGoal = pickedGoalItem != nil
         VStack(spacing: 2) {
-            // 일자 숫자 + 목표 achievement circle.
-            // 3 단계 시각:
-            //   100%: solid fill + 흰 숫자
-            //   (0%, 100%): 옅은 fill (opacity 0.3) + primary 숫자
-            //   0% / 활성 없음: 시각 없음 (그냥 숫자)
-            // Fill 색상: aggregate(전체 종합)는 accent, pickedItem(단일 목표 선택) 시 그 목표의 iconColorHex.
-            // Today: 우상단 작은 red dot. Selected: 굵은 accent stroke 2.5pt.
-            // Dev toggle OFF면 큰 원 미노출 — 숫자 색만 일반 처리.
-            let displayRate: Double? = showAchievementCircle ? achievementRate : nil
-            let achievementFull: Bool = (displayRate ?? 0) >= 1.0
-            let fillColor: Color = pickedGoalColor ?? Color.accentColor
+            // 시각 layer:
+            //   1. 안쪽: 선택일 = solid accent fill + 흰 글자 (WeekStripView 패턴 통일).
+            //   2. 바깥: picked 모드 = ring progress (track + colored arc, Apple Watch 패턴).
+            //   3. 우상단: 오늘 = 작은 red dot.
+            // 일반 모드는 큰 원/링 없이 dots만 사용.
             ZStack(alignment: .topTrailing) {
                 ZStack {
-                    if let rate = displayRate, rate >= 1.0 {
-                        Circle().fill(fillColor)
-                    } else if let rate = displayRate, rate > 0 {
-                        Circle().fill(fillColor.opacity(0.3))
+                    // 선택일 fill — 가장 안쪽 layer. 투명도 0.22 (글자·ring과 시각 충돌 최소).
+                    // showsSelection=false면 그리지 않음 (ActivityHistoryView 등 일자 선택 없는 화면).
+                    if isSelected && showsSelection {
+                        Circle().fill(tintColor.opacity(0.22))
+                            .frame(width: 26, height: 26)
+                    }
+                    // picked goal 모드 ring — 28pt 외경, 2.5pt 두께. 선택 fill보다 살짝 크게 → 둘 다 보임.
+                    if isPickedGoal, let ring {
+                        pickedRingView(ring: ring)
                     }
                     Text(verbatim: Self.dayNumber(date))
                         .font(.callout)
-                        .foregroundStyle(numberColor(achievementFull: achievementFull, inMonth: inCurrentMonth))
-                    if isSelected {
-                        Circle().stroke(Color.accentColor, lineWidth: 1)
-                    }
+                        .foregroundStyle(numberColor(isSelected: isSelected, inMonth: inCurrentMonth))
                 }
                 .frame(width: 28, height: 28)
 
@@ -248,86 +283,88 @@ struct MonthGridView: View {
             }
             .frame(width: 28, height: 28)
 
-            // Dot zone — 단일/다일 통합. 목표(원) + 할일(사각). 최대 18개 + "+N".
-            dotsZone(indicators: dots)
-                .padding(.top, 2)
+            // Dot zone — picked 모드(goal/Todo 둘 다)는 8pt 고정 영역 확보해 cell 높이 일정 유지.
+            //   · picked goal: ring이 메인 시각 → 빈 공간만.
+            //   · picked Todo: 그 Todo dot이 있는 날만 표시 (없는 날은 빈 공간).
+            //   · 일반 모드: dynamic 높이 (dotsZone이 indicator 수에 맞춰 자체 row 구성).
+            // 구현: Color.clear가 항상 8pt 차지 → dotsZone이 EmptyView 반환해도 frame 보존.
+            // (`Group { ... }.frame()`은 내부 EmptyView면 layout 안 잡혀 height 0이 되는 회귀 회피.)
+            if pickedItemID != nil {
+                Color.clear
+                    .frame(height: 8)
+                    .overlay(alignment: .top) {
+                        if !isPickedGoal {
+                            dotsZone(indicators: dots)
+                        }
+                    }
+            } else {
+                dotsZone(indicators: dots)
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity)
     }
 
-    /// 일자 숫자 색 — 100% 달성 fill 위에선 흰색 (대비), 그 외 inMonth 여부에 따라 primary/secondary.
-    private func numberColor(achievementFull: Bool, inMonth: Bool) -> Color {
-        if achievementFull { return .white }
-        return inMonth ? Color.primary : Color.secondary
+    /// 일자 숫자 색 — 선택일 fill 옅어서 primary 글자도 가독성 OK. inMonth 여부만 반영.
+    private func numberColor(isSelected: Bool, inMonth: Bool) -> Color {
+        inMonth ? Color.primary : Color.secondary
     }
 
-    // MARK: - Goal achievement rate
+    /// picked 모드 ring rendering — Apple Watch 패턴.
+    /// 28pt 외경 / 2.5pt thickness / 12시 방향 시작 / 시계 방향 fill.
+    /// - pending: 옅은 track ring (활성 occurrence 신호)
+    /// - partial(p): track + colored arc (0~1.0)
+    /// - completed: 완전 닫힌 colored ring
+    /// - cancelled: 완전 닫힌 colored ring + opacity 0.2
+    @ViewBuilder
+    private func pickedRingView(ring: RingState) -> some View {
+        let lineWidth: CGFloat = 2.5
+        switch ring.kind {
+        case .pending:
+            // 활성 occurrence 신호 — 옅은 track만.
+            Circle()
+                .stroke(ring.color.opacity(0.25), style: StrokeStyle(lineWidth: lineWidth))
+                .frame(width: 28, height: 28)
+        case .partial(let p):
+            ZStack {
+                Circle()
+                    .stroke(ring.color.opacity(0.25), style: StrokeStyle(lineWidth: lineWidth))
+                Circle()
+                    .trim(from: 0, to: max(0, min(p, 1.0)))
+                    .stroke(ring.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 28, height: 28)
+        case .completed:
+            Circle()
+                .stroke(ring.color, style: StrokeStyle(lineWidth: lineWidth))
+                .frame(width: 28, height: 28)
+        case .cancelled:
+            Circle()
+                .stroke(ring.color.opacity(0.2), style: StrokeStyle(lineWidth: lineWidth))
+                .frame(width: 28, height: 28)
+        }
+    }
 
-    /// 그날의 목표 달성률 계산. 옵션 1: 활성 목표 개수 중 달성 비율.
-    /// - 반환 nil: 미래 일자 OR 활성 목표 없음 OR 카테고리 필터 활성 (목표 표시 안 함)
-    /// - 반환 0.0~1.0: done count / active count
+    // MARK: - Ring state (picked 모드)
+
+    /// picked 모드 ring 상태 산출 — 그날 해당 목표의 진행 상태를 4-state로 분류.
+    /// **목표 항목만 대상** (Todo는 nil 반환 → dot 사용).
+    /// **미래 일자는 nil** — 사용자 정책상 미래 ring 미노출 (오늘/과거만).
+    /// - nil: 활성 occurrence 아님 / 미래 / Todo
+    /// - pending: 오늘 활성 occurrence + 진행 0% (track ring만)
+    /// - partial(p): 진행 중 (0 < p < 1) — 활동/집중·NTD 포기 일자
+    /// - completed: target 도달 / status=done / RC.done=true
+    /// - cancelled: 과거 + 미달성 / 명시 포기(RC.failed=true)
     ///
-    /// 정책:
-    /// - 활성 = 그날 occurrence 있음 (반복 rule.occurs / 1회성 startDate == day)
-    /// - 달성 = RC.done=true (반복) OR item.status=.done (1회성)
-    /// - 포기 = 달성 안 함 (분모 포함, 분자 X)
-    /// - Multi-day NTD = 시작일에만 활성 1개 카운트 (cover하는 후속일 중복 카운트 회피)
-    /// - 미래 일자 = noop (계산 안 함)
-    /// - **카테고리 필터**: Todo 카테고리 조망 중 → 목표 fill 무관 → 숨김 (단 pickedItemID 활성 시 무시)
-    /// - **목표 유형 필터**: 해당 type만 active/done 카운트
-    /// - **pickedItemID 활성**: 그 목표 1개만 — Todo면 nil 반환 (Todo는 dot/bar로 별도 표시)
-    private func goalAchievementRate(day: Date) -> Double? {
-        // pickedItemID 활성 시 — 그 항목이 목표면 단일 계산, Todo면 nil (Todo는 dot/bar).
-        if let pid = pickedItemID {
-            guard let item = allItems.first(where: { $0.id == pid }) else { return nil }
-            guard item.itemKind != .todo else { return nil }
-            return singleItemAchievementRate(item: item, day: day)
-        }
-        // 카테고리 필터 활성 시 achievement fill 숨김 — Todo 카테고리 조망에 목표는 노이즈.
-        if categoryFilter != nil { return nil }
-        // 미래 일자는 noop.
+    /// 색은 picked 목표의 iconColorHex.
+    /// 카테고리 필터는 ring 무관 (picked 우선).
+    private func pickedRingState(day: Date) -> RingState? {
+        guard let item = pickedGoalItem else { return nil }
+        // 미래 일자: 사용자 정책 — 미노출.
         if day > .todayCalendarAnchor { return nil }
-        var active = 0
-        var done = 0
-        for item in allItems {
-            let kind = item.itemKind
-            // 목표 4 type만. Todo 제외.
-            guard kind == .notTodo || kind == .activity || kind == .focus || kind == .habit else { continue }
-            // 목표 유형 필터 활성 시 그 type만 — 선택한 type의 달성률만 표시.
-            if let filterKind = goalKindFilter, kind != filterKind { continue }
-            // 그날 활성 occurrence 있는지.
-            if let rule = item.recurrenceRule {
-                guard rule.occurs(on: day, startDate: item.startDate, endDate: item.recurrenceEndDate) else { continue }
-            } else {
-                // 1회성: startDate가 그날과 같은 day.
-                guard let s = item.startDate, Calendar.gmt.isDate(s, inSameDayAs: day) else { continue }
-            }
-            active += 1
-            // 달성 여부.
-            if item.recurrenceRule != nil {
-                // 반복: RC.done=true 있는지.
-                if let rc = item.routineRecord(on: day), rc.done {
-                    done += 1
-                }
-            } else {
-                // 1회성: item.status=.done.
-                if item.itemStatus == .done {
-                    done += 1
-                }
-            }
-        }
-        guard active > 0 else { return nil }
-        return Double(done) / Double(active)
-    }
 
-    /// 단일 목표 항목의 그날 달성률 — pickedItemID 활성 시 사용.
-    /// - 활동/집중: target 대비 valueRecorded 비율 (partial progress 표시 가능)
-    /// - 절제: done=1.0 / 포기=elapsed/total (포기 시각까지 진행률) / 그 외=0
-    /// - 습관: binary — done이면 1.0, 아니면 0
-    /// 활성 occurrence 아닌 날 OR 미래 → nil
-    private func singleItemAchievementRate(item: Item, day: Date) -> Double? {
-        if day > .todayCalendarAnchor { return nil }
-        // 그날 활성 occurrence 있는지.
+        // 활성 occurrence 판정.
         let isActive: Bool
         if let rule = item.recurrenceRule {
             isActive = rule.occurs(on: day, startDate: item.startDate, endDate: item.recurrenceEndDate)
@@ -337,58 +374,110 @@ struct MonthGridView: View {
             isActive = false
         }
         guard isActive else { return nil }
+
+        let color = ringColor(for: item)
+        let isPast = day < .todayCalendarAnchor
         let kind = item.itemKind
-        // 활동/집중 — partial progress (valueRecorded / target).
-        if kind == .activity || kind == .focus {
-            let stored = item.routineRecord(on: day)?.valueRecorded?.doubleValue ?? 0
-            guard let target = item.activityTargetValueDouble, target > 0 else {
-                return 0
+
+        // 포기/실패 우선 처리. NTD는 elapsed/total 진행률 시각화 (failedPartial), 그 외는 cancelled.
+        let isFailed: Bool = {
+            if item.recurrenceRule != nil {
+                return item.routineRecord(on: day)?.failed == true
             }
-            return min(stored / target, 1.0)
-        }
-        // 절제 — done=1.0 / 포기=fractional (포기 시점까지 elapsed / total) / 그 외=0
-        if kind == .notTodo {
-            let isDone: Bool = {
-                if item.recurrenceRule != nil {
-                    return item.routineRecord(on: day)?.done == true
-                }
-                return item.itemStatus == .done
-            }()
-            if isDone { return 1.0 }
-            // 포기 케이스 — partial. 1회성/반복 모두 ntdLastCompletionInstant로 포기 시각 가져옴.
-            let isFailed: Bool = {
-                if item.recurrenceRule != nil {
-                    return item.routineRecord(on: day)?.failed == true
-                }
-                return item.itemStatus == .failed
-            }()
-            if isFailed,
+            return item.itemStatus == .failed
+        }()
+        if isFailed {
+            // NTD 포기: elapsed/total을 partial로 시각화 (활동/집중 진행 중과 동일 시각, 사용자 일관성).
+            // 진행 0%면 cancelled로 처리 (호 안 보이는 ring보단 닫힌 시각).
+            if kind == .notTodo,
                let start = item.ntdStartInstant(on: day),
                let giveUp = item.ntdLastCompletionInstant(on: day) {
                 let elapsed = giveUp.timeIntervalSince(start)
+                let progress: Double
                 if let end = item.ntdEndInstant(on: day) {
                     let total = end.timeIntervalSince(start)
-                    guard total > 0 else { return 0 }
-                    return max(0, min(elapsed / total, 1.0))
+                    progress = total > 0 ? max(0, min(elapsed / total, 1.0)) : 0
+                } else {
+                    // duration 미설정 NTD — 30일 cap (NTDRow progress 정책과 통일).
+                    let thirtyDays: TimeInterval = 30 * 24 * 3600
+                    progress = max(0, min(elapsed / thirtyDays, 1.0))
                 }
-                // duration 미설정 NTD — 30일 cap (NTDRow progress와 동일 정책).
-                let thirtyDays: TimeInterval = 30 * 24 * 3600
-                return max(0, min(elapsed / thirtyDays, 1.0))
+                if progress > 0 {
+                    return RingState(kind: .partial(progress), color: color)
+                }
             }
-            return 0
+            return RingState(kind: .cancelled, color: color)
         }
-        // 습관 — binary.
+
+        // 완료 — done flag 우선. 활동/집중은 valueRecorded vs target 직접 검사 (done flag stale 대비).
         let isDone: Bool = {
-            if item.recurrenceRule != nil {
-                return item.routineRecord(on: day)?.done == true
+            if let rc = item.routineRecord(on: day) {
+                if rc.done { return true }
+                if kind == .activity || kind == .focus {
+                    let val = rc.valueRecorded?.doubleValue ?? 0
+                    let target = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+                    if target > 0 && val >= target { return true }
+                }
             }
-            return item.itemStatus == .done
+            if item.recurrenceRule == nil, item.itemStatus == .done { return true }
+            return false
         }()
-        return isDone ? 1.0 : 0
+        if isDone { return RingState(kind: .completed, color: color) }
+
+        // 활동/집중 partial progress — valueRecorded / target.
+        if kind == .activity || kind == .focus,
+           let rc = item.routineRecord(on: day) {
+            let val = rc.valueRecorded?.doubleValue ?? 0
+            let target = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+            if target > 0, val > 0 {
+                return RingState(kind: .partial(val / target), color: color)
+            }
+        }
+
+        // NTD partial progress — 시작 시각부터 현재까지 elapsed / total (duration).
+        // 시작 전이면 pending. 종료 instant 도과면 completed (auto-complete 늦은 케이스).
+        // duration 미설정 NTD는 30일 cap (NTDRow / 위젯 progress 정책과 통일).
+        if kind == .notTodo {
+            let now = Date()
+            if let start = item.ntdStartInstant(on: day), start <= now {
+                let elapsed = now.timeIntervalSince(start)
+                let total: Double
+                if let end = item.ntdEndInstant(on: day) {
+                    total = end.timeIntervalSince(start)
+                } else {
+                    total = 30 * 24 * 3600
+                }
+                if total > 0 {
+                    let p = elapsed / total
+                    if p >= 1.0 { return RingState(kind: .completed, color: color) }
+                    if p > 0    { return RingState(kind: .partial(p), color: color) }
+                }
+            }
+        }
+
+        // 과거 + 미달성 → cancelled (활동/집중 미완료 정책 + 다른 type도 일관 처리).
+        if isPast { return RingState(kind: .cancelled, color: color) }
+
+        // 오늘/미래 + 활성 + 미진행 → pending track.
+        return RingState(kind: .pending, color: color)
+    }
+
+    /// picked 항목 색 — 목표는 iconColorHex 사용. (Todo는 ring 사용 안 함 → 이 함수 호출 안 됨.)
+    private func ringColor(for item: Item) -> Color {
+        Self.indicatorColor(colorHex: item.iconColorHex)
+    }
+
+    /// picked 항목이 목표(non-Todo)이면 그 item, 아니면 nil. ring 노출 여부의 source of truth.
+    /// Todo는 dot 시각 유지 (partial progress 의미 없음 + 사용자 기대).
+    private var pickedGoalItem: Item? {
+        guard let pid = pickedItemID,
+              let item = allItems.first(where: { $0.id == pid }),
+              item.itemKind != .todo else { return nil }
+        return item
     }
 
     /// Dot zone — 단일 행 max 6, 최대 3행 (18 dot), 18+ 시 마지막 자리에 "+N".
-    /// 모양: 목표 = 원, 할일 = 사각. 상태: pending=stroke, completed=filled solid, cancelled=filled opacity 0.4.
+    /// 모양: 목표 = 원, 할일 = 사각. 상태: pending=stroke / completed=filled solid / cancelled=filled opacity 0.2.
     @ViewBuilder
     private func dotsZone(indicators: [DotIndicator]) -> some View {
         guard !indicators.isEmpty else { return AnyView(EmptyView()) }
@@ -434,26 +523,30 @@ struct MonthGridView: View {
         }
     }
 
-    /// 목표 dot (원) — pending=stroke / completed·cancelled=filled opacity 0.2 (통일).
+    /// 목표 dot (원) — pending=stroke / completed=filled solid / cancelled=filled opacity 0.2.
     /// stroke은 5pt path + 1pt lineWidth → outer 6pt. filled도 6pt로 맞춰 시각 크기 통일.
     @ViewBuilder
     private func goalDotView(color: Color, state: IndicatorState) -> some View {
         switch state {
         case .pending:
             Circle().stroke(color, lineWidth: 1).frame(width: 5, height: 5)
-        case .completed, .cancelled:
+        case .completed:
+            Circle().fill(color).frame(width: 6, height: 6)
+        case .cancelled:
             Circle().fill(color).opacity(0.2).frame(width: 6, height: 6)
         }
     }
 
-    /// 할일 dot (사각) — pending=stroke / completed·cancelled=filled opacity 0.2 (통일).
+    /// 할일 dot (사각) — pending=stroke / completed=filled solid / cancelled=filled opacity 0.2.
     /// stroke spill 포함 outer 6pt에 filled도 맞춤.
     @ViewBuilder
     private func todoDotView(color: Color, state: IndicatorState) -> some View {
         switch state {
         case .pending:
             Rectangle().stroke(color, lineWidth: 1).frame(width: 5, height: 5)
-        case .completed, .cancelled:
+        case .completed:
+            Rectangle().fill(color).frame(width: 6, height: 6)
+        case .cancelled:
             Rectangle().fill(color).opacity(0.2).frame(width: 6, height: 6)
         }
     }
@@ -591,18 +684,45 @@ struct MonthGridView: View {
     /// 주어진 occurrence 일자에서의 항목 상태 계산.
     /// - 1회성: `Item.status` 직접 반영 (done/failed/pending).
     /// - 반복: 해당 occurrence 일자의 `RoutineCompletion`에서 done/failed 확인. 기록 없으면 pending.
+    /// - **활동·집중**: `rc.done` 플래그만 믿지 않고 `valueRecorded >= effectiveTarget` 직접 검사.
+    ///   BG handler 실패 / 옛 빌드 done flip 버그 / target 사후 변경 등으로 done=false인 채 value 초과 가능 — 강건성 위해.
+    /// - **활동·집중 + 과거 일자 + target 미달성**: cancelled 시각 (filled opacity 0.2)로 처리.
+    ///   미완료 상태로 만료된 의미. 오늘 / 미래는 pending(line) 유지 — 사용자가 아직 로깅 가능.
     private func indicatorState(of item: Item, occurrenceStart: Date) -> IndicatorState {
+        let kind = item.itemKind
+        let isPast = occurrenceStart < .todayCalendarAnchor
+        let isActivityOrFocus = (kind == .activity || kind == .focus)
+
         if item.recurrenceRule == nil {
             switch item.itemStatus {
             case .done:   return .completed
             case .failed: return .cancelled
-            default:      return .pending
+            default:
+                // 1회성 활동/집중 — RC value vs target 직접 비교. done flag 못 믿는 케이스 방어.
+                if isActivityOrFocus, let rc = item.routineRecord(on: occurrenceStart) {
+                    if rc.failed { return .cancelled }
+                    let val = rc.valueRecorded?.doubleValue ?? 0
+                    let target = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+                    if target > 0 && val >= target { return .completed }
+                }
+                // 1회성 활동/집중 + 과거 + target 미달성 → 미완료 = cancelled 시각.
+                if isPast && isActivityOrFocus { return .cancelled }
+                return .pending
             }
         }
         if let rc = item.routineRecord(on: occurrenceStart) {
             if rc.failed { return .cancelled }
-            if rc.done   { return .completed }
+            // 활동/집중 반복: value vs target 직접 비교 (done flag 보강).
+            if isActivityOrFocus {
+                let val = rc.valueRecorded?.doubleValue ?? 0
+                let target = rc.targetSnapshot?.doubleValue ?? item.activityTargetValueDouble ?? 0
+                if target > 0 && val >= target { return .completed }
+            } else if rc.done {
+                return .completed
+            }
         }
+        // 반복 활동/집중 + 과거 + done/failed 아님 (RC 미생성 또는 partial 누적) → 미완료 = cancelled 시각.
+        if isPast && isActivityOrFocus { return .cancelled }
         return .pending
     }
 
@@ -633,16 +753,6 @@ struct MonthGridView: View {
         }
         // 목표 (절제/활동/집중/습관)
         return item.iconColorHex
-    }
-
-    /// pickedItemID 활성 + 목표일 때 그 목표의 iconColorHex → Color. 아니면 nil.
-    /// achievement fill 색상에 사용 — 단일 목표 모드에서 그 목표의 정체성 색으로 표시.
-    private var pickedGoalColor: Color? {
-        guard let pid = pickedItemID,
-              let item = allItems.first(where: { $0.id == pid }),
-              item.itemKind != .todo
-        else { return nil }
-        return Self.indicatorColor(colorHex: item.iconColorHex)
     }
 
     // MARK: - 포맷 helpers
@@ -680,6 +790,20 @@ private struct DotIndicator: Hashable {
     let colorHex: String?
     /// 정렬 키 — Todo만 사용 (시작 시간, 시간 미지정/기간 = 0). 목표는 0 default.
     let sortHour: Int
+}
+
+/// picked 모드 ring 상태 — 28pt 외경 ring으로 한 항목의 그날 진행도 시각화.
+/// kind에 따라 pickedRingView가 다른 stroke 패턴으로 렌더링.
+/// NTD 포기 시 elapsed/total도 partial 재사용 — 활동/집중 진행 중과 동일 시각 (사용자 일관성 우선).
+struct RingState {
+    enum Kind {
+        case pending                   // 활성 occurrence + 진행 0% — 옅은 track ring
+        case partial(Double)           // 진행 중 0~1 — 활동/집중 valueRecorded/target, NTD 포기 elapsed/total
+        case completed                 // target 도달 / done — 완전 닫힌 색 ring
+        case cancelled                 // 과거 미달성 / NTD 포기 (진행 0%) — 완전 닫힌 ring opacity 0.2
+    }
+    let kind: Kind
+    let color: Color
 }
 
 #Preview {

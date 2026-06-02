@@ -4168,13 +4168,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Manage tasks in detail"
+            "value" : "Manage today's Todos with ease"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "할일을 자세히 관리하세요"
+            "value" : "오늘의 할일을 간편하게 관리"
           }
         }
       }
@@ -4184,13 +4184,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Set due dates, recurrence, and checklists. Beyond simple to-dos."
+            "value" : "Reminders, due dates, recurrence, and checklists — experience simple yet powerful task management."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "기간, 반복, 체크리스트까지. 단순한 할일을 넘어선 일정 관리."
+            "value" : "알림, 기간, 반복 설정 그리고 체크리스트까지 단순하지만 강력한 일정 관리를 경험해보세요."
           }
         }
       }
@@ -4200,13 +4200,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Track goals that stick"
+            "value" : "Stay on track with your Missions"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "꾸준한 목표 추적"
+            "value" : "당신의 목표를 꾸준히 실천"
           }
         }
       }
@@ -4216,13 +4216,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fasts, activity, focus, and habits — four ways to measure every day."
+            "value" : "Fast, Activity, Focus, and Habit — four Mission types to support your achievements."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "절제, 활동, 집중, 습관. 네 가지 방식으로 매일을 측정해요."
+            "value" : "절제, 활동, 집중, 습관 네 가지 유형으로 당신의 목표 달성을 도와줍니다"
           }
         }
       }
@@ -4232,13 +4232,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your day at a glance"
+            "value" : "Todos and Missions at a glance"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "한눈에 보는 오늘"
+            "value" : "한눈에 보는 목표와 할일"
           }
         }
       }
@@ -4248,13 +4248,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tasks and goals in one screen. Home and lock screen widgets for quick access."
+            "value" : "See your Todos and Missions in weekly and monthly views. Check anywhere with home and lock screen widgets."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "할일과 목표를 한 화면에. 홈·잠금 위젯으로 어디서나 빠르게 확인."
+            "value" : "할일과 목표를 주간 및 월간 화면으로 한눈에, 홈·잠금 위젯으로 어디서나 빠르게 확인 가능해요"
           }
         }
       }
@@ -4270,7 +4270,7 @@
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "떠오르면 바로 캡처"
+            "value" : "떠오르면 바로 입력"
           }
         }
       }
@@ -4280,13 +4280,93 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add to your inbox with text or voice. Sort out the details later."
+            "value" : "Capture Todos by voice as they come. Sort schedules and categories later."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "보관함에 텍스트나 음성으로 빠르게. 일정은 나중에 정해도 돼요."
+            "value" : "할일이 떠오르면 음성으로 빠르게 입력하세요. 일정과 카테고리 분류는 나중에 해도 되요."
+          }
+        }
+      }
+    },
+    "onboarding.mockup.recurrence.daily" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매일"
+          }
+        }
+      }
+    },
+    "onboarding.mockup.recurrence.weekdays" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekdays"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매주 월·화·수·목·금"
+          }
+        }
+      }
+    },
+    "onboarding.mockup.recurrence.weekly_mon_wed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mon, Wed"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매주 월,수"
+          }
+        }
+      }
+    },
+    "onboarding.mockup.recurrence.monthly_dates" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5, 15, 20 of month"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매월 5·15·20일"
+          }
+        }
+      }
+    },
+    "onboarding.mockup.duration.16h" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 hr"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16시간"
           }
         }
       }
