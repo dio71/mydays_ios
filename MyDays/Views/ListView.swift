@@ -454,11 +454,19 @@ struct ListView: View {
                     } else {
                         ForEach(items, id: \.objectID) { item in
                             Button { onTap(item) } label: {
-                                ItemRow(
-                                    item: item,
-                                    referenceDate: referenceDate,
-                                    mode: .list
-                                )
+                                if item.itemKind.isGoal {
+                                    MissionRow(
+                                        item: item,
+                                        occurrenceDate: searchOccurrenceDate(for: item),
+                                        mode: .list
+                                    )
+                                } else {
+                                    ItemRow(
+                                        item: item,
+                                        referenceDate: referenceDate,
+                                        mode: .list
+                                    )
+                                }
                             }
                             .buttonStyle(.plain)
                         }
@@ -469,6 +477,14 @@ struct ListView: View {
             .scrollDismissesKeyboard(.immediately)
             // normalList와 통일 — 태그 chip 위 작은 여백은 insetGrouped 자체 동작이라 수용.
             .listStyle(.insetGrouped)
+        }
+
+        /// 검색 결과 mission row용 occurrenceDate — 1회성=startDate, 반복=referenceDate.
+        private func searchOccurrenceDate(for item: Item) -> Date {
+            if item.recurrenceRule == nil, let start = item.startDate {
+                return start
+            }
+            return referenceDate
         }
 
         /// 태그 chip 가로 스크롤 행. List row 1개 안에 ScrollView로 배치 — wrap 보다 단순.
@@ -627,17 +643,36 @@ struct ListView: View {
         }
     }
 
+    @ViewBuilder
     private func rowButton(for item: Item) -> some View {
         Button {
             sheet = .edit(item)
         } label: {
-            ItemRow(
-                item: item,
-                referenceDate: referenceDate,
-                mode: .list
-            )
+            if item.itemKind.isGoal {
+                // 목표: MissionRow. occurrenceDate는 canonical — 1회성=startDate, 반복=today (반복은 per-occurrence 개념 list에 없음).
+                MissionRow(
+                    item: item,
+                    occurrenceDate: missionListOccurrenceDate(for: item),
+                    mode: .list
+                )
+            } else {
+                ItemRow(
+                    item: item,
+                    referenceDate: referenceDate,
+                    mode: .list
+                )
+            }
         }
         .buttonStyle(.plain)
+    }
+
+    /// 목표 MissionRow용 occurrenceDate — ListView는 per-occurrence 개념 없음.
+    /// 1회성: item.startDate (canonical event date). 반복: referenceDate(today).
+    private func missionListOccurrenceDate(for item: Item) -> Date {
+        if item.recurrenceRule == nil, let start = item.startDate {
+            return start
+        }
+        return referenceDate
     }
 
     private func emptyRow(_ key: LocalizedStringKey) -> some View {

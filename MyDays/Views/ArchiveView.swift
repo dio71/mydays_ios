@@ -131,7 +131,11 @@ struct ArchiveView: View {
                             Button {
                                 sheet = .edit(item)
                             } label: {
-                                ItemRow(item: item, referenceDate: referenceDate, mode: .list)
+                                if item.itemKind.isGoal {
+                                    MissionRow(item: item, occurrenceDate: archiveOccurrenceDate(for: item), mode: .list)
+                                } else {
+                                    ItemRow(item: item, referenceDate: referenceDate, mode: .list)
+                                }
                             }
                             .buttonStyle(.plain)
                         }
@@ -210,14 +214,30 @@ struct ArchiveView: View {
         }
     }
 
-    /// 보관함 row — group/flat 공용.
+    /// 보관함 row — group/flat 공용. 목표는 MissionRow, 할일은 ItemRow.
+    @ViewBuilder
     private func archiveRow(for item: Item) -> some View {
         Button {
             sheet = .edit(item)
         } label: {
-            ItemRow(item: item, referenceDate: referenceDate)
+            if item.itemKind.isGoal {
+                MissionRow(
+                    item: item,
+                    occurrenceDate: archiveOccurrenceDate(for: item)
+                )
+            } else {
+                ItemRow(item: item, referenceDate: referenceDate)
+            }
         }
         .buttonStyle(.plain)
+    }
+
+    /// archive list mode용 occurrenceDate — 1회성=startDate, 반복=referenceDate.
+    private func archiveOccurrenceDate(for item: Item) -> Date {
+        if item.recurrenceRule == nil, let start = item.startDate {
+            return start
+        }
+        return referenceDate
     }
 
     /// 활성 0 케이스 inline row — 필터 활성이면 Case B(필터 해제 링크), 그 외면 Case C(모두 완료).
@@ -299,7 +319,11 @@ struct ArchiveView: View {
                         Button {
                             sheet = .edit(item)
                         } label: {
-                            ItemRow(item: item, referenceDate: referenceDate, mode: .list)
+                            if item.itemKind.isGoal {
+                                MissionRow(item: item, occurrenceDate: archiveOccurrenceDate(for: item), mode: .list)
+                            } else {
+                                ItemRow(item: item, referenceDate: referenceDate, mode: .list)
+                            }
                         }
                         .buttonStyle(.plain)
                     }

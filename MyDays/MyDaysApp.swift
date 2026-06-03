@@ -30,6 +30,24 @@ struct MyDaysApp: App {
         // 활성 활동 목표가 없는 source도 등록(observer는 cheap, handler에서 active 항목 없으면 skip).
         // 앱이 알림 또는 BG fetch로 launch될 때도 init에서 등록되어 즉시 fire 수신 가능.
         registerHealthKitObservers()
+        // UIKit appearance 차원의 tint 설정 — SwiftUI .tint() propagation이 sheet 깊은 곳에서 풀려
+        // 시스템 blue로 fallback되는 회귀 보강. UIWindow.tintColor는 모든 UIView descendant에 propagate.
+        applyTintAppearance()
+    }
+
+    /// 사용자 tint preset을 UIKit appearance에 반영. init + tint 변경 시 호출.
+    /// 한 번 적용 후 새로 생성되는 UIView/UIKit-bridge component (DatePicker, NavigationStack toolbar 등)에 모두 propagate.
+    private func applyTintAppearance() {
+        let color = UIColor((TintPreset(rawValue: tintPresetRaw) ?? .blue).color)
+        UIView.appearance().tintColor = color
+        UIWindow.appearance().tintColor = color
+        // 이미 생성된 window들도 즉시 갱신 (런타임 preset 변경 케이스 대응).
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                window.tintColor = color
+            }
+        }
     }
 
     /// 4-source HK observer 일괄 등록. handler에서 source별 active 항목 fetch → 조건부 update.
@@ -61,6 +79,10 @@ struct MyDaysApp: App {
             }
             .tint(tintColor)
             .preferredColorScheme(colorScheme)
+            // tintPreset 런타임 변경 (Settings에서 색 선택) 시 UIKit appearance 즉시 갱신.
+            .onChange(of: tintPresetRaw) { _, _ in
+                applyTintAppearance()
+            }
         }
     }
 }

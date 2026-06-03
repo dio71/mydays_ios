@@ -587,10 +587,12 @@ struct MyDaysWidgetEntryView: View {
     @ViewBuilder
     private func itemRow(_ snap: ItemSnapshot) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: snap.iconName)
-                .font(.subheadline)
-                .foregroundStyle(snap.resolvedColor())
-                .frame(width: 18, alignment: .center)
+            // leading icon — MissionRow goalLeadingIcon 4-state 시각 규칙 적용:
+            //   - scheduled (예정): 회색 outline circle + 회색 icon
+            //   - ongoing (진행 중): goalColor outline circle + goalColor icon
+            //   - past (완료/포기): goalColor filled + 흰 icon
+            widgetLeadingIcon(snap)
+                .frame(width: 22, height: 22)
             if snap.isGoal {
                 progressCapsule(snap)
             } else {
@@ -608,8 +610,43 @@ struct MyDaysWidgetEntryView: View {
         .opacity(snap.bucket == .past ? 0.55 : 1.0)
     }
 
+    /// leading icon — MissionRow.goalLeadingIcon 4-state 시각 규칙.
+    /// 모든 항목(목표/할일)에 동일 규칙 적용 — bucket 기반.
+    @ViewBuilder
+    private func widgetLeadingIcon(_ snap: ItemSnapshot) -> some View {
+        let color = snap.resolvedColor()
+        let iconPointSize: CGFloat = 12
+        switch snap.bucket {
+        case .past:
+            // 완료/포기 — color filled + 흰 icon (MissionRow done state).
+            ZStack {
+                Circle().fill(color)
+                Image(systemName: snap.iconName)
+                    .font(.system(size: iconPointSize, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        case .ongoing:
+            // 진행 중 — color outline + color icon (MissionRow inProgress state).
+            ZStack {
+                Circle().strokeBorder(color, lineWidth: 1)
+                Image(systemName: snap.iconName)
+                    .font(.system(size: iconPointSize, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+        case .scheduled:
+            // 예정 — secondary outline + secondary icon (MissionRow scheduled state).
+            ZStack {
+                Circle().strokeBorder(Color.secondary, lineWidth: 1)
+                Image(systemName: snap.iconName)
+                    .font(.system(size: iconPointSize, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     /// 목표 row의 progress capsule + 타이틀 overlay.
-    /// 배경 capsule + 진행률 fill capsule + 타이틀 (leading, 좌측 padding).
+    /// MissionRow.progressCapsule과 동일 패턴 — 안쪽 fill은 Capsule (양끝 round) + outer `.clipShape(Capsule())`로
+    /// 진행률 작을 때 round가 바 영역 바깥으로 나가지 않도록 clip.
     @ViewBuilder
     private func progressCapsule(_ snap: ItemSnapshot) -> some View {
         let progress = max(0, min(snap.progress, 1))
@@ -630,6 +667,7 @@ struct MyDaysWidgetEntryView: View {
                     .padding(.horizontal, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .clipShape(Capsule())
         }
         .frame(height: 24)
         .frame(maxWidth: .infinity)

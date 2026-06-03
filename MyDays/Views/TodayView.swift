@@ -447,7 +447,8 @@ struct TodayView: View {
         Group {
             switch viewMode {
             case .day:
-                WeekStripView(
+                // WeekStripView 통합 → MonthGridView(.week). dot 인디케이터/picked mode/필터 시각 자동 획득.
+                MonthGridView(
                     selectedDate: displayedDate,
                     forward: lastNavigationForward,
                     onSelectDate: { date in
@@ -455,10 +456,15 @@ struct TodayView: View {
                         guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
                         navigateTo(date, forward: date > displayedDate)
                     },
-                    onShiftWeek: { days in
+                    onShift: { delta in
                         guard !cancelMode else { return }
-                        shiftDay(days)
-                    }
+                        shiftDay(delta * 7)
+                    },
+                    categoryFilter: filterCategoryID,
+                    goalKindFilter: filterGoalKind,
+                    pickedItemID: pickedItemID,
+                    pickerModeActive: itemPickerMode,
+                    displayMode: .week
                 )
             case .month:
                 MonthGridView(
@@ -469,13 +475,14 @@ struct TodayView: View {
                         guard !Calendar.gmt.isDate(date, inSameDayAs: displayedDate) else { return }
                         navigateTo(date, forward: date > displayedDate)
                     },
-                    onShiftMonth: { delta in
+                    onShift: { delta in
                         guard !cancelMode else { return }
                         shiftMonth(delta)
                     },
                     categoryFilter: filterCategoryID,
                     goalKindFilter: filterGoalKind,
-                    pickedItemID: pickedItemID
+                    pickedItemID: pickedItemID,
+                    pickerModeActive: itemPickerMode
                 )
             }
         }
@@ -1273,26 +1280,17 @@ struct TodayList: View {
     }
 
     /// 목표 섹션 row — type별 row component 분기.
-    /// - 절제(.notTodo): NTDRow (카운트다운·progress capsule·(x) 포기)
-    /// - 습관(.habit)·활동(.activity)·집중(.focus): ItemRow (goalLeadingIcon + 각자 trailing UI)
+    /// 4-type 목표 통합 — MissionRow가 kind별 분기 내부 처리.
+    /// occurrenceDate: 1회성=item.startDate / 반복=occurrence start day.
+    /// displayedDate=date: multi-day NTD에서 어느 일자의 row인지 (액션 위치 판정).
     @ViewBuilder
     private func goalRow(item: Item, occurrenceDate: Date, isLast: Bool) -> some View {
-        switch item.itemKind {
-        case .notTodo:
-            NTDRow(item: item, occurrenceDate: occurrenceDate, displayedDate: date, compactMode: !isLast)
-        case .habit, .activity, .focus:
-            // routine은 occurrenceDate 기준 RC. 1회성은 startDate 기준 (canonical).
-            // trailing UI는 ItemRow 안에서 type별 분기 (habit=체크, activity=progress+N, focus=progress+▶).
-            ItemRow(
-                item: item,
-                referenceDate: date,
-                occurrenceStartOverride: item.recurrenceRule != nil ? occurrenceDate : nil,
-                compactMode: !isLast
-            )
-        default:
-            // 집중(.focus) Phase D — 현재 fetch에서 제외돼 도달 X.
-            EmptyView()
-        }
+        MissionRow(
+            item: item,
+            occurrenceDate: occurrenceDate,
+            displayedDate: date,
+            compactMode: !isLast
+        )
     }
 }
 

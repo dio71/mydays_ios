@@ -1310,6 +1310,31 @@ extension Item {
         item.updatedAt = now
     }
 
+    // MARK: - Row 공용 view 헬퍼
+    //
+    // ItemRow / MissionRow 양쪽에서 동일하게 쓰던 작은 view-state 헬퍼 — 중복 제거 차원에서 Item 확장으로 이전.
+    // 순수 model 헬퍼지만 view layer가 즉시 보고 부르는 의미라 별도 file로 분리하진 않음.
+
+    /// 반복 패턴 요약 — `repeat` 아이콘과 함께 statusIcons에 표시. recurrenceRule 없으면 nil.
+    var recurrenceTextSummary: String? {
+        guard let rule = recurrenceRule else { return nil }
+        return rule.summaryText()
+    }
+
+    /// 예약된 알림 1개 이상 보유 여부 — `bell` 아이콘 노출 판정.
+    var hasReminders: Bool {
+        guard let set = reminders as? Set<Reminder> else { return false }
+        return !set.isEmpty
+    }
+
+    /// 반복 항목의 현재 streak 일수. 반복 아니거나 streak 0이면 nil.
+    /// `referenceDate` 기본값: `.todayCalendarAnchor`. row의 `referenceDate` 그대로 전달 가능.
+    func streakValueIfRoutine(referenceDate: Date = .todayCalendarAnchor) -> Int? {
+        guard recurrenceRule != nil else { return nil }
+        let s = currentStreak(referenceDate: referenceDate)
+        return s > 0 ? s : nil
+    }
+
     // MARK: - Migration (출시 후 제거 예정)
     //
     // 기존 RC들에 targetSnapshot이 nil인 경우 item의 현재 target 값으로 채움.

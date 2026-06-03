@@ -24,8 +24,8 @@ struct MonthGridView: View {
     /// 일자 cell 탭 callback — 부모에서 displayedDate 변경.
     let onSelectDate: (Date) -> Void
 
-    /// 가로 swipe로 ±1개월 shift callback.
-    let onShiftMonth: (Int) -> Void
+    /// 가로 swipe로 ±1 unit shift callback. month 모드면 ±1개월, week 모드면 ±1주(7일).
+    let onShift: (Int) -> Void
 
     /// 카테고리 필터 — nil이면 무관. TodayView 상단 필터 메뉴와 sync.
     var categoryFilter: UUID? = nil
@@ -34,6 +34,15 @@ struct MonthGridView: View {
     /// 단일 항목 필터 — 항목 선택 모드에서 사용자가 picked한 item.id.
     /// nil이면 무관 (전체 종합). non-nil이면 그 item만 캘린더 표시 (Todo면 dot/bar / 목표면 achievement fill).
     var pickedItemID: UUID? = nil
+    /// 항목 선택 모드 활성 여부 — true + pickedItemID=nil 조합이면 모든 dot 숨기고 빈 cell만 표시.
+    /// "선택 안 함" 상태와 "일반 모드(전체 표시)"를 구분하기 위함.
+    var pickerModeActive: Bool = false
+
+    /// 표시 모드 — month(7×N grid) / week(7×1 grid). week 모드는 selectedDate 포함 1주만 노출.
+    /// 기존 WeekStripView를 흡수해 dot 인디케이터·picked mode·tint 처리를 공유.
+    var displayMode: DisplayMode = .month
+
+    enum DisplayMode { case month, week }
 
     /// week row 수를 6으로 고정 (4~5주짜리 월도 빈 row로 패딩) — true면 grid 높이 일정.
     /// ActivityHistoryView처럼 monthview가 상단 고정 영역인 경우 사용 — 월 전환 시 높이 점프 회피.
@@ -99,10 +108,12 @@ struct MonthGridView: View {
         // RC가 mutate될 때 body 재실행 보장. 값 자체는 안 쓰고 count만 참조.
         let _ = allCompletions.count
         // **퍼포먼스 critical**: 모든 caches는 body 진입 1회만 계산해 cell에 inject.
+        // - picker 모드 활성 + 미선택: 모든 dot 숨김 (빈 cell). 공간은 유지.
         // - picked goal 모드: ring 표시 + dots 숨김.
         // - picked Todo 모드 또는 일반 모드: dots 표시 (ring 없음). Todo는 partial progress 의미 없음.
         let isPickedGoal = pickedGoalItem != nil
-        let dotsCache: [Date: [DotIndicator]] = isPickedGoal
+        let isPickerEmpty = pickerModeActive && pickedItemID == nil
+        let dotsCache: [Date: [DotIndicator]] = (isPickedGoal || isPickerEmpty)
             ? [:]
             : days.reduce(into: [:]) { dict, day in dict[day] = dotIndicators(day: day) }
         let ringStates: [Date: RingState?] = isPickedGoal
@@ -164,7 +175,8 @@ struct MonthGridView: View {
             .animation(.easeInOut(duration: 0.22), value: monthAnchor)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        // 상단 spacer만 — 마지막 row Divider 다음에 빈 공간 없도록 bottom padding 제거.
+        .padding(.top, 6)
         // highPriorityGesture — 시스템 back-swipe(NavigationStack pop)와 sheet pan-to-dismiss 가로채는 케이스 방어.
         // ActivityHistoryView 같은 push된 화면에서 monthview swipe가 부모 navigation/sheet으로 전달되는 회귀 차단.
         .highPriorityGesture(
@@ -173,46 +185,60 @@ struct MonthGridView: View {
                     let h = value.translation.width
                     let v = value.translation.height
                     guard abs(h) > 60, abs(h) > abs(v) * 2 else { return }
-                    // 오른쪽 swipe → 이전 월, 왼쪽 swipe → 다음 월 (week strip / 본문 swipe와 방향 일치).
-                    onShiftMonth(h > 0 ? -1 : 1)
+                    // 오른쪽 swipe → 이전, 왼쪽 swipe → 다음 (month 모드=월, week 모드=주).
+                    onShift(h > 0 ? -1 : 1)
                 }
         )
     }
 
     // MARK: - 날짜 계산
 
-    /// 화면에 표시할 일자들 (weekCount × 7일). 월 첫주 시작 ~ 월 마지막주 끝 사이.
-    /// 대부분 5주, 31일 월이 금/토 시작이면 6주, 28일 2월이 first weekday 시작이면 4주.
-    /// fixedSixRows=true면 항상 42일(6주) 반환 — 월 전환 시 grid 높이 일정 유지.
+    /// 화면에 표시할 일자들. month 모드는 weekCount × 7일 (4~6주), week 모드는 7일 고정.
+    /// fixedSixRows=true (month 모드만)는 항상 42일(6주) 반환 — 월 전환 시 grid 높이 일정 유지.
     private var days: [Date] {
         guard let start = gridStart else { return [] }
         let total: Int
-        if fixedSixRows {
-            total = 42
-        } else {
-            guard let end = gridEnd else { return [] }
-            total = (Calendar.gmt.dateComponents([.day], from: start, to: end).day ?? 0) + 1
+        switch displayMode {
+        case .week:
+            total = 7
+        case .month:
+            if fixedSixRows {
+                total = 42
+            } else {
+                guard let end = gridEnd else { return [] }
+                total = (Calendar.gmt.dateComponents([.day], from: start, to: end).day ?? 0) + 1
+            }
         }
         return (0..<total).compactMap {
             Calendar.gmt.date(byAdding: .day, value: $0, to: start)
         }
     }
 
-    /// 표시할 week 수 — days.count / 7. 4~6 범위 (fixedSixRows면 항상 6).
-    private var weekCount: Int { max(1, days.count / 7) }
+    /// 표시할 week 수 — week 모드면 1, month 모드면 4~6 (fixedSixRows면 항상 6).
+    private var weekCount: Int {
+        displayMode == .week ? 1 : max(1, days.count / 7)
+    }
 
-    /// grid의 첫 칸(좌상단) — selectedDate가 속한 월의 1일이 포함된 주의 시작 (firstWeekday 기준).
+    /// grid의 첫 칸(좌상단).
+    /// month 모드: selectedDate가 속한 월의 1일이 포함된 주의 시작 (firstWeekday 기준).
+    /// week 모드: selectedDate가 포함된 주의 시작.
     private var gridStart: Date? {
         let cal = Calendar.current
         let local = selectedDate.localCalendarSameDay
-        let comps = cal.dateComponents([.year, .month], from: local)
-        guard let monthStart = cal.date(from: comps),
-              let weekInterval = cal.dateInterval(of: .weekOfYear, for: monthStart)
-        else { return nil }
-        return weekInterval.start.calendarDateAnchor
+        switch displayMode {
+        case .week:
+            guard let weekInterval = cal.dateInterval(of: .weekOfYear, for: local) else { return nil }
+            return weekInterval.start.calendarDateAnchor
+        case .month:
+            let comps = cal.dateComponents([.year, .month], from: local)
+            guard let monthStart = cal.date(from: comps),
+                  let weekInterval = cal.dateInterval(of: .weekOfYear, for: monthStart)
+            else { return nil }
+            return weekInterval.start.calendarDateAnchor
+        }
     }
 
-    /// grid의 마지막 칸(우하단) — selectedDate가 속한 월의 마지막 일이 포함된 주의 끝.
+    /// grid의 마지막 칸(우하단) — month 모드만 사용 (week 모드는 gridStart + 6일로 자명).
     private var gridEnd: Date? {
         let cal = Calendar.current
         let local = selectedDate.localCalendarSameDay
@@ -224,13 +250,19 @@ struct MonthGridView: View {
         return lastWeekDay.calendarDateAnchor
     }
 
-    /// 슬라이드 transition을 위한 월 식별자 (UTC anchor of 해당 월의 1일).
-    /// 같은 월 안에서 selectedDate가 바뀌어도 monthAnchor는 동일 → 슬라이드 발동 X.
+    /// 슬라이드 transition 식별자.
+    /// month 모드: 해당 월의 1일 (UTC anchor) — 같은 월 안에서 selectedDate 바뀌어도 그대로.
+    /// week 모드: 해당 주의 시작일 (gridStart) — 같은 주 안에서 selectedDate 바뀌어도 그대로.
     private var monthAnchor: Date? {
         let cal = Calendar.current
         let local = selectedDate.localCalendarSameDay
-        let comps = cal.dateComponents([.year, .month], from: local)
-        return cal.date(from: comps)?.calendarDateAnchor
+        switch displayMode {
+        case .week:
+            return gridStart
+        case .month:
+            let comps = cal.dateComponents([.year, .month], from: local)
+            return cal.date(from: comps)?.calendarDateAnchor
+        }
     }
 
     /// 두 일자가 같은 (year, month) 인지 (local 기준).
@@ -269,31 +301,26 @@ struct MonthGridView: View {
                         pickedRingView(ring: ring)
                     }
                     Text(verbatim: Self.dayNumber(date))
-                        .font(.callout)
-                        .foregroundStyle(numberColor(isSelected: isSelected, inMonth: inCurrentMonth))
+                        .font(.callout.weight(isToday ? .semibold : .regular))
+                        .foregroundStyle(numberColor(isToday: isToday, inMonth: inCurrentMonth))
                 }
                 .frame(width: 28, height: 28)
-
-                if isToday {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 4, height: 4)
-                        .offset(x: 1, y: -1)
-                }
             }
             .frame(width: 28, height: 28)
 
-            // Dot zone — picked 모드(goal/Todo 둘 다)는 8pt 고정 영역 확보해 cell 높이 일정 유지.
+            // Dot zone — picker 모드(미선택/선택 모두) 또는 picked 모드는 8pt 고정 영역 확보해 cell 높이 일정 유지.
+            //   · picker 모드 + 미선택: 모든 dot 숨김 (빈 공간만).
             //   · picked goal: ring이 메인 시각 → 빈 공간만.
             //   · picked Todo: 그 Todo dot이 있는 날만 표시 (없는 날은 빈 공간).
             //   · 일반 모드: dynamic 높이 (dotsZone이 indicator 수에 맞춰 자체 row 구성).
             // 구현: Color.clear가 항상 8pt 차지 → dotsZone이 EmptyView 반환해도 frame 보존.
             // (`Group { ... }.frame()`은 내부 EmptyView면 layout 안 잡혀 height 0이 되는 회귀 회피.)
-            if pickedItemID != nil {
+            let isPickerEmptyCell = pickerModeActive && pickedItemID == nil
+            if pickedItemID != nil || isPickerEmptyCell {
                 Color.clear
                     .frame(height: 8)
                     .overlay(alignment: .top) {
-                        if !isPickedGoal {
+                        if !isPickedGoal && !isPickerEmptyCell {
                             dotsZone(indicators: dots)
                         }
                     }
@@ -305,9 +332,13 @@ struct MonthGridView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// 일자 숫자 색 — 선택일 fill 옅어서 primary 글자도 가독성 OK. inMonth 여부만 반영.
-    private func numberColor(isSelected: Bool, inMonth: Bool) -> Color {
-        inMonth ? Color.primary : Color.secondary
+    /// 일자 숫자 색.
+    /// - today: tintColor + semibold (별도 red dot 없이 today 표시)
+    /// - 그 외: inMonth면 primary, 아니면 secondary
+    /// (선택일 fill은 0.22 옅어서 primary 글자도 가독성 OK)
+    private func numberColor(isToday: Bool, inMonth: Bool) -> Color {
+        if isToday { return tintColor }
+        return inMonth ? Color.primary : Color.secondary
     }
 
     /// picked 모드 ring rendering — Apple Watch 패턴.
@@ -816,7 +847,7 @@ struct RingState {
             forward = date > selected
             selected = date
         },
-        onShiftMonth: { delta in
+        onShift: { delta in
             let cal = Calendar.current
             let local = selected.localCalendarSameDay
             if let next = cal.date(byAdding: .month, value: delta, to: local) {

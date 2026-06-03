@@ -586,118 +586,6 @@ struct AddItemView: View {
         appendChecklistDraftAndFocus()
     }
 
-    /// 활동 기록 section — RoutineCompletion 레코드 표시 (최신순 최대 10건).
-    /// 통합 모델: 모든 체크는 RC 생성 → 1회성/반복 구분 없이 동일 소스.
-    @ViewBuilder
-    private var activityHistorySection: some View {
-        if let item = editingItem {
-            let records = item.routineHistoryRecords
-            if !records.isEmpty {
-                Section("activity.history.title") {
-                    ForEach(records.prefix(10), id: \.objectID) { record in
-                        activityRow(record)
-                    }
-                    // 기록 있으면 전체 보기 — sheet 진입 (NavigationLink push 대신).
-                    // NavigationStack push 시 monthview 가로 swipe와 시스템 back-swipe 충돌 → sheet으로 우회.
-                    Button {
-                        showFullHistory = true
-                    } label: {
-                        Text("activity_history.show_all")
-                            .foregroundStyle(Color.accentColor)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    /// 활동 기록 row — 날짜 + (시간) + 상태 라벨 + 코멘트(있을 때, 포기엔 "사유: " prefix).
-    /// effective target — RC.targetSnapshot 우선 (그 시점의 target 보존), fallback item.target.
-    private func activityRowTarget(_ record: RoutineCompletion) -> Int {
-        if let snap = record.targetSnapshot?.doubleValue, snap > 0 { return Int(snap) }
-        return record.item?.activityTargetValueInt ?? 0
-    }
-
-    /// 날짜·시간은 모두 RoutineCompletion.completedAt 기준 (= 사용자가 체크/포기한 실제 시점).
-    /// 활동 type이면 상태 자리에 누적값/목표 ("75/100") 표시.
-    @ViewBuilder
-    private func activityRow(_ record: RoutineCompletion) -> some View {
-        let isDone = record.done
-        let isFailed = record.failed
-        let kind = record.item?.itemKind
-        let showProgress = (kind == .activity || kind == .focus)
-        let valueRecorded = Int(record.valueRecorded?.doubleValue ?? 0)
-        let target = activityRowTarget(record)
-        // 표시 날짜는 completedAt 기준. 누락된 legacy record는 record.date로 fallback.
-        let displayDay: Date? = record.completedAt?.calendarDateAnchor ?? record.date
-        HStack(spacing: 8) {
-            Text(verbatim: shortDate(displayDay))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            if let timeText = timeText(record.completedAt) {
-                Text(verbatim: timeText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            // 모든 type 공통 라벨 — done=달성, failed=포기. pending(활동·집중 진행 중)은 라벨 없음.
-            if isDone {
-                Text("activity.status.done")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.accentColor)
-            } else if isFailed {
-                Text("activity.status.failed")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            // 오른쪽 끝: 활동·집중은 진행도(누적/목표), 그 외는 comment(있으면).
-            // 활동·집중 + comment 동시 있는 케이스는 드물지만 발생하면 진행도 우선.
-            if showProgress, target > 0 {
-                Text(verbatim: "\(valueRecorded)/\(target)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(isDone ? Color.accentColor : .secondary)
-            } else if let comment = record.comment, !comment.isEmpty {
-                Text(verbatim: commentText(comment: comment, isDone: isDone))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-            }
-        }
-    }
-
-    /// RoutineCompletion.completedAt(instant)를 시스템 시간 표시 설정에 맞춰 포맷.
-    /// 24h 모드: "14:30", 12h 모드: "오후 2:30" / "2:30 PM". UTC 변환 X (실제 시각).
-    private func timeText(_ instant: Date?) -> String? {
-        guard let instant else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.setLocalizedDateFormatFromTemplate("jm")
-        return formatter.string(from: instant)
-    }
-
-    /// 활동 기록 코멘트 표시 텍스트.
-    /// 포기 기록은 "사유: ..." prefix, 성공 기록은 코멘트 그대로 (현재 done 코멘트는 거의 비어있음).
-    private func commentText(comment: String, isDone: Bool) -> String {
-        if isDone { return comment }
-        return String.localizedStringWithFormat(
-            NSLocalizedString("activity.reason_format", comment: ""),
-            comment
-        )
-    }
-
-    /// 포기 기록 row의 날짜 표시. UTC anchor 기준 "M.d (E)" 형식.
-    private func shortDate(_ date: Date?) -> String {
-        guard let date else { return "" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.timeZone = TimeZone(identifier: "UTC") ?? .gmt
-        formatter.setLocalizedDateFormatFromTemplate("MdE")
-        return formatter.string(from: date)
-    }
-
-
     /// 입력 폼에 미저장 변경사항이 있는지.
     /// - 새 항목: 제목 또는 메모에 텍스트 입력 시 true.
     /// - 편집 항목: 현재 state가 editingItem 저장값과 다를 때 true.
@@ -792,11 +680,11 @@ struct AddItemView: View {
             // 일정 idle 후 환경에서 사라지는 케이스 방어 (사용자 보고: ~1분 후 form 전체 tint 풀림).
             // 외부에도 .appTint()가 한 번 더 있음 (belt-and-suspenders).
             Form {
-                // 편집 모드 — 목표 유형 식별 배지 (kind picker 숨김 보완).
-                // 신규에서는 goalTypeRow chip + 설명으로 type 표시, 편집에서는 type 변경 불가니까
-                // 어떤 유형의 목표인지 시각적으로 확인할 수 있도록 chip과 동일 크기·스타일의 filled circle을 가운데 표시.
+                // 편집 모드 — 항목 유형 식별 배지 (kind picker 숨김 보완).
+                // 신규에서는 picker/chip으로 type 선택, 편집에선 type 변경 불가니까
+                // 어떤 유형(할일/목표 4종)인지 시각적으로 확인할 수 있도록 filled circle 가운데 표시.
                 // 섹션 카드 배경은 숨김 — Form 위에 떠 있는 듯한 시각. 제목 섹션 위(form 최상단)에 배치.
-                if isGoal, isEditing {
+                if isEditing {
                     Section {
                         HStack {
                             Spacer()
@@ -804,7 +692,7 @@ struct AddItemView: View {
                                 Circle()
                                     .fill(Color.accentColor)
                                     .frame(width: 64, height: 64)
-                                Image(systemName: kind.goalTypeSymbolName)
+                                Image(systemName: isGoal ? kind.goalTypeSymbolName : "checkmark")
                                     .font(.title.weight(.semibold))
                                     .foregroundStyle(.white)
                             }
@@ -1125,8 +1013,8 @@ struct AddItemView: View {
                 }
 
                 if isEditing {
-                    // 활동 기록 — 성공·포기 occurrence 일자별 표시 (Todo/NTD 공통).
-                    activityHistorySection
+                    // 활동 기록 미리보기 section은 제거 — 화면 상단 chart 아이콘 버튼이 이미 entry point.
+                    // 단일 entry로 통합해 중복 회피 + 편집 폼 단순화.
 
                     Section {
                         Button(role: .destructive) {

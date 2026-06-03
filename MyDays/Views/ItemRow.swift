@@ -32,7 +32,6 @@ struct ItemRow: View {
     /// 체크리스트 inline expand 토글. row마다 독립 — 한 row 펼친다고 다른 row 자동 닫지 않음.
     /// 일자/탭 navigation 시 ItemRow 재생성으로 자동 reset.
     @State private var checklistExpanded: Bool = false
-    @State private var presentFocusSession: Bool = false
 
     /// 루틴 체크박스 동작 여부. 목록탭은 referenceDate 컨텍스트가 명확하지 않아 비활성.
     private var routineCheckable: Bool { mode != .list }
@@ -65,9 +64,6 @@ struct ItemRow: View {
             CancelTodoSheet { comment in
                 performCancel(comment: comment)
             }
-        }
-        .fullScreenCover(isPresented: $presentFocusSession) {
-            FocusSessionView(item: item, occurrenceDate: focusOccurrenceDate)
         }
     }
 
@@ -145,39 +141,9 @@ struct ItemRow: View {
                 // 여기에 두면 row 내부 VStack이 expansion 높이를 흡수해 title이 중앙으로 떠 보임.
             }
 
-            // 습관 trailing 체크 버튼 — leading icon은 display only이라 사용자에게 명시적 체크 액션 제공.
-            // 정책 (습관은 "오늘/이전에 했나/안 했나" 관점):
-            //   - **오늘 + 과거 일자만 노출** — 미래 일자는 미리 완료 의미 없음 → hide
-            //   - 완료/미완료 무관하게 노출 — 미스 클릭 해제용 (checked square 보이면 체크 해제 가능)
-            //   - 과거 일자도 노출 — 까먹고 안 한 거 나중에 기록 가능
-            //   - 취소 모드일 땐 (x) 버튼 우선
-            // 습관 trailing 체크 — 오늘/보관함 모드만. 목록 탭에선 숨김 (NTD progress·활동 progress와 동일 정책 — D-day 중심 조망).
-            // picker 모드에선 액션만 있는 trailing은 전체 hide (display 가치 없음).
-            if isHabit && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode && !itemPickerMode {
-                habitTrailingCheck
-            }
-
-            // 활동 trailing — progress text + quick [+N] 버튼.
-            // 정책: 오늘/보관함 모드만 노출. 목록 탭(.list)에선 숨김 — NTD가 목록 탭에서 progress 안 보이는 것과 동일.
-            //       (목록 탭은 D-day 중심 조망용 — progress 인터랙션은 오늘 탭에서만 수행)
-            // 미래 일자 / 시작 전 / 취소 모드 제외.
-            // picker 모드: progress capsule은 유지, trailing 액션 아이콘(+)은 내부에서 숨김.
-            if isActivity && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
-                activityTrailingProgress
-            }
-
-            // 집중 trailing — progress capsule + ▶ 시작 버튼.
-            // 정책: 오늘 모드 + 오늘 일자만 (다른 일자 시작은 의미 없음 — 사용자가 원하는 시점에 시작).
-            // 진행 중인 active session이 있으면 ▶ disabled (전역 single-active).
-            // picker 모드: progress capsule은 유지, ▶은 내부에서 숨김.
-            if isFocus && mode != .list && !isFutureDate && !isItemNotYetStarted && !cancelMode {
-                focusTrailingProgress
-            }
-
             // 취소 모드 + 미완료/미취소 row에만 (x) 노출.
-            // NTD는 NTDRow가 자체 처리. 습관은 cancel 의미 없음 (단순 미체크가 곧 미수행) → 제외.
-            // 여기 (x)는 Todo(1회성/루틴) 한정 — 미래 일자도 허용 (미리 취소 가능).
-            if cancelMode && !isGoal && !isCompletedForDate && !isCancelled {
+            // ItemRow는 Todo 전용 — 모든 row가 cancel 대상.
+            if cancelMode && !isCompletedForDate && !isCancelled {
                 Button {
                     showCancelSheet = true
                 } label: {
@@ -197,271 +163,12 @@ struct ItemRow: View {
 
     @ViewBuilder
     private var leadingControl: some View {
-        // 목표(절제/활동/집중/습관) — 사용자 지정 goalIcon + goalColor 사용. 4-state 시각 유지.
-        // 모든 목표 type은 leading icon은 display only. 습관은 trailing square check 버튼으로 toggleDone.
-        // iconName 없는 legacy NTD는 기존 clock fallback.
-        if isGoal, item.iconName != nil {
-            goalLeadingIcon
-        } else if isNTD {
-            ntdStatusIcon
-        } else if isRoutine && !routineCheckable {
+        // ItemRow는 Todo 전용. 반복 + 목록 탭 모드는 routineStatusIcon (체크 불가), 그 외 todoCheckbox.
+        if isRoutine && !routineCheckable {
             routineStatusIcon
         } else {
             todoCheckbox
         }
-    }
-
-    /// 습관 trailing 체크 버튼 — square / checkmark.square.fill 토글.
-    /// 4-state(scheduled/inProgress/done/failed)는 goalLeadingIcon이 표현하고,
-    /// 여기 trailing 버튼은 명시적 "체크" 액션만 담당.
-    @ViewBuilder
-    private var habitTrailingCheck: some View {
-        let checked = isCompletedForDate
-        Button(action: toggleDone) {
-            Image(systemName: checked ? "checkmark.square.fill" : "square")
-                .font(.title3)
-                .foregroundStyle(checked ? Color.accentColor : Color.secondary)
-        }
-        .buttonStyle(.plain)
-        // leadingControl과 동일 baseline 보정.
-        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
-    }
-
-    /// 습관 판정 — trailing 체크 버튼 노출 여부.
-    private var isHabit: Bool { item.itemKind == .habit }
-
-    /// 활동 판정 — trailing progress + [+N] 버튼 노출 여부.
-    private var isActivity: Bool { item.itemKind == .activity }
-    /// 집중 판정 — trailing progress + ▶ 버튼 노출 여부.
-    private var isFocus: Bool { item.itemKind == .focus }
-
-    /// activity occurrence date — 반복은 referenceDate, 1회성은 item.startDate 사용.
-    private var activityOccurrenceDate: Date {
-        if item.recurrenceRule != nil {
-            return occurrenceStartOverride ?? referenceDate
-        }
-        return item.startDate ?? referenceDate
-    }
-
-    /// 활동 progress capsule (NTDRow 패턴 재활용) + 우측 (+) 심볼 버튼 or HK auto badge.
-    /// progress fill 색·텍스트 색·(+) 색 모두 **goalColor 통일** (앱 tint 대신 항목 아이콘 색).
-    /// - manual: 탭 → valueRecorded += step (target 도달 시 자동 done).
-    /// - steps/distance (HK auto): (+) 버튼 대신 heart.fill badge (non-interactive).
-    ///   HK sync는 RootView .task + scenePhase.active 트리거.
-    @ViewBuilder
-    private var activityTrailingProgress: some View {
-        // effective target — RC.targetSnapshot 우선, fallback item.target.
-        // (사용자가 target 변경해도 과거 완료 RC는 그 시점 snapshot 기준으로 평가됨.)
-        let target = Int(item.effectiveTargetValue(on: activityOccurrenceDate) ?? 0)
-        let current = item.activityCurrentValue(on: activityOccurrenceDate)
-        let step = Item.activityQuickStep(target: max(target, 1))
-        let progress: Double = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
-        let goalColor = goalAccentColor
-        let isAutoSource = item.activitySource != .manual
-        // 과거 일자(occurrence가 어제 이전)는 입력 불가 — 당일에만 추가 가능.
-        // progress bar는 계속 노출(그날 결과 확인) + trailing icon은 outline/secondary로 inactive 표시.
-        let isPastDate = activityOccurrenceDate < .todayCalendarAnchor
-        // spacing 2 + (+)/heart 크기를 NTD (x) (title3, ~20pt)에 맞춰 — 전체 trailing 폭이 NTD와 일치하도록.
-        // 이전엔 (+) title2 + heart frame 28로 더 넓어서 progress capsule이 왼쪽으로 더 튀어나옴.
-        HStack(spacing: 2) {
-            // Progress capsule — goalColor 기반.
-            ZStack(alignment: .trailing) {
-                Capsule()
-                    .fill(Color(.systemGray5))
-                GeometryReader { geo in
-                    let fullWidth = geo.size.width
-                    let targetWidth = fullWidth * CGFloat(progress)
-                    let fillWidth: CGFloat = progress > 0 ? max(4, targetWidth) : 0
-                    Capsule()
-                        .fill(goalColor.opacity(0.22))
-                        .frame(width: fillWidth)
-                }
-                .clipShape(Capsule())
-                Text(verbatim: "\(current)/\(target)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : goalColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .padding(.trailing, 8)
-            }
-            .frame(width: 130, height: 22)
-
-            // 과거 일자는 trailing 아이콘 완전 숨김 — progress bar만으로 그날 결과 표시.
-            // 입력 정책: 활동은 당일에만 가능. 과거는 결과 확인만.
-            // 진행 중은 line, 완료(target 도달)는 filled — 목표 trailing 시각 정책.
-            // picker 모드: 액션 아이콘 숨김 (progress capsule만 유지).
-            let isDone = current >= target && target > 0
-            if !isPastDate && !itemPickerMode {
-                if isAutoSource {
-                    // HK auto source — heart badge (non-interactive). 진행 중=line, 완료=fill.
-                    Image(systemName: isDone ? "heart.fill" : "heart")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(goalColor.opacity(0.85))
-                        .frame(width: 22, alignment: .center)
-                        .accessibilityLabel(Text("activity.source.auto.accessibility"))
-                } else {
-                    // Manual — (+) 심볼 버튼. 진행 중=line, 완료=fill.
-                    // .title3 — NTD (x) 버튼과 같은 visual size로 alignment 일관성.
-                    Button {
-                        Item.incrementActivityValue(
-                            for: item,
-                            by: step,
-                            occurrenceDate: activityOccurrenceDate,
-                            in: context
-                        )
-                        saveContext()
-                    } label: {
-                        Image(systemName: isDone ? "plus.circle.fill" : "plus.circle")
-                            .font(.title3)
-                            .foregroundStyle(goalColor)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .layoutPriority(1)
-        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
-    }
-
-    // MARK: - 집중 trailing
-
-    /// 집중 occurrence date — 반복은 referenceDate, 1회성은 item.startDate. (활동과 동일 패턴)
-    private var focusOccurrenceDate: Date {
-        if item.recurrenceRule != nil {
-            return occurrenceStartOverride ?? referenceDate
-        }
-        return item.startDate ?? referenceDate
-    }
-
-    /// 집중 trailing — progress capsule (활동과 동일 시각) + ▶ 시작 버튼.
-    /// 진행 중 글로벌 active session이 이 item이면 ▶ 대신 stopwatch.fill 표시 (이미 modal에 있을 거지만).
-    /// past 일자는 progress만 (▶ 숨김).
-    @ViewBuilder
-    private var focusTrailingProgress: some View {
-        // effective target — RC.targetSnapshot 우선, fallback item.target.
-        let target = Int(item.effectiveTargetValue(on: focusOccurrenceDate) ?? 0)
-        let current = Int(item.focusCurrentMinutes(on: focusOccurrenceDate))
-        let progress: Double = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
-        let goalColor = goalAccentColor
-        let isPastDate = focusOccurrenceDate < .todayCalendarAnchor
-        HStack(spacing: 2) {
-            // Progress capsule — activity와 동일 시각. 분 단위로 표시 ("45/60").
-            ZStack(alignment: .trailing) {
-                Capsule()
-                    .fill(Color(.systemGray5))
-                GeometryReader { geo in
-                    let fullWidth = geo.size.width
-                    let targetWidth = fullWidth * CGFloat(progress)
-                    let fillWidth: CGFloat = progress > 0 ? max(4, targetWidth) : 0
-                    Capsule()
-                        .fill(goalColor.opacity(0.22))
-                        .frame(width: fillWidth)
-                }
-                .clipShape(Capsule())
-                Text(verbatim: "\(current)/\(target)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : goalColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .padding(.trailing, 8)
-            }
-            .frame(width: 130, height: 22)
-
-            // ▶ 시작 버튼 — 오늘 일자에만. focusSessionPresentation 트리거.
-            // 진행 중(target 미달)=line, 완료(target 도달)=filled — 목표 trailing 시각 정책.
-            // picker 모드: 액션 아이콘 숨김 (progress capsule만 유지).
-            if !isPastDate && !itemPickerMode {
-                let isDone = target > 0 && current >= target
-                Button {
-                    presentFocusSession = true
-                } label: {
-                    Image(systemName: isDone ? "play.circle.fill" : "play.circle")
-                        .font(.title3)
-                        .foregroundStyle(goalColor)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .layoutPriority(1)
-        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] - 2 }
-    }
-
-    /// 목표 아이콘 색 (iconColorHex → Color). 미설정 시 accent fallback.
-    /// 활동 progress · NTD progress 통일에 사용.
-    private var goalAccentColor: Color {
-        guard let raw = item.iconColorHex,
-              let cc = CategoryColor(rawValue: raw) else {
-            return Color.accentColor
-        }
-        return cc.color
-    }
-
-    /// 현재 view가 오늘 일자인지 — 미사용이지만 다른 케이스용 reserved.
-    private var isViewingToday: Bool { referenceDate == .todayCalendarAnchor }
-
-    /// 미래 일자 판정 — 습관 체크 버튼 노출 막기용 (미리 완료 의미 없음).
-    private var isFutureDate: Bool { referenceDate > .todayCalendarAnchor }
-
-    /// Item이 아직 시작 전인지 — startDate가 오늘보다 미래.
-    /// 목록 탭에서 referenceDate는 오늘이지만 항목 startDate가 미래인 케이스 처리:
-    /// 시작 안 한 습관/활동에 대한 trailing 체크/(+) 버튼을 막아 미리 완료 입력 방지.
-    private var isItemNotYetStarted: Bool {
-        guard let start = item.startDate else { return false }
-        return start > .todayCalendarAnchor
-    }
-
-    private var isGoal: Bool { item.itemKind.isGoal }
-
-    /// 목표 leading 아이콘 — Item.iconName + iconColorHex 기반. 4-state 색 패턴:
-    ///   - scheduled (pending + 시작 전): 회색 outline circle + 회색 icon
-    ///   - inProgress (pending + 진행 중): 투명 + goalColor icon
-    ///   - done: goalColor full 배경 + 흰색 icon
-    ///   - failed: 회색 full 배경 + 흰색 icon
-    /// 크기: 20×20 (Todo 체크박스 title3 circle과 시각 균형). icon 11pt.
-    @ViewBuilder
-    private var goalLeadingIcon: some View {
-        let icon = item.iconName.flatMap(GoalIcon.init(rawValue:))
-        let color = item.iconColorHex.flatMap { CategoryColor(rawValue: $0) }?.color ?? .secondary
-        let style = goalIconRenderStyle(color: color)
-        ZStack {
-            Circle()
-                .fill(style.background)
-                .overlay(Circle().strokeBorder(style.border, lineWidth: style.borderWidth))
-                .frame(width: 20, height: 20)
-            if let icon {
-                Image(systemName: icon.symbolName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(style.iconColor)
-            }
-        }
-        // SF Symbol Image와 시각 baseline 매칭 — ZStack은 default firstTextBaseline이 frame 하단(20pt)이라
-        // text baseline 정렬 시 시각적으로 아래로 떠 보임. @ViewBuilder + 외곽 alignmentGuide 체인 때문에
-        // 내부 alignmentGuide 효과가 약함 → offset으로 visual 보정 (layout box는 유지).
-        .offset(y: -3)
-    }
-
-    private struct GoalIconRenderStyle {
-        let background: Color
-        let iconColor: Color
-        let border: Color
-        let borderWidth: CGFloat
-    }
-
-    /// 목표 아이콘의 4-state 시각 스타일.
-    /// isCompletedForDate / isCancelled / isInProgress 기존 abstraction 재활용 — 1회성·반복 양쪽 호환.
-    private func goalIconRenderStyle(color: Color) -> GoalIconRenderStyle {
-        if isCompletedForDate {
-            return GoalIconRenderStyle(background: color, iconColor: .white, border: .clear, borderWidth: 0)
-        }
-        if isCancelled {
-            return GoalIconRenderStyle(background: Color(.systemGray3), iconColor: .white, border: .clear, borderWidth: 0)
-        }
-        if isInProgress {
-            // 진행 중 — goalColor outline circle + goalColor icon. scheduled와 같은 outline 패턴, 색만 다름.
-            return GoalIconRenderStyle(background: .clear, iconColor: color, border: color, borderWidth: 1)
-        }
-        // scheduled — 회색 outline circle + 회색 icon.
-        return GoalIconRenderStyle(background: .clear, iconColor: .secondary, border: .secondary, borderWidth: 1)
     }
 
     /// Todo/routine 일반 체크박스 아이콘:
@@ -517,40 +224,8 @@ struct ItemRow: View {
                 isInProgress ? Color.accentColor : Color.secondary)
     }
 
-    /// NTD 항목의 상태 표시 아이콘 (ListView 등에서 사용).
-    /// 4-state 색·fill 조합:
-    /// - pending + 시작 전 (scheduled): clock outline + secondary (회색) → 진행 전
-    /// - pending + 진행 중 (inProgress): clock outline + accent (파랑) → 활성
-    /// - done (자동/명시 완료):           clock.fill + accent (파랑) → 완료
-    /// - failed (사용자 포기):            clock.fill + secondary (회색 filled) → 종료/중단
-    @ViewBuilder
-    private var ntdStatusIcon: some View {
-        let (name, color) = Self.ntdIconStyle(for: item, now: Date())
-        Image(systemName: name)
-            .font(.title3)
-            .foregroundStyle(color)
-    }
-
-    /// NTD 아이콘 스타일 계산 — NTDRow와 동일 규칙 공유 위해 static helper.
-    /// pending 상태에서는 ntdRelevantOccurrenceDate + ntdState로 시간 진행 판정.
-    static func ntdIconStyle(for item: Item, now: Date, occurrenceDate: Date? = nil) -> (String, Color) {
-        if item.itemStatus == .done   { return ("clock.fill", Color.accentColor) }
-        if item.itemStatus == .failed { return ("clock.fill", Color.secondary) }
-        // pending — occurrence별 state. occurrenceDate가 명시되면 그것 사용, 아니면 relevant 자동.
-        let occDate = occurrenceDate ?? item.ntdRelevantOccurrenceDate(at: now)
-        guard let occDate, let state = item.ntdState(on: occDate, now: now) else {
-            return ("clock", Color.secondary)
-        }
-        switch state {
-        case .scheduled:  return ("clock", Color.secondary)
-        case .inProgress: return ("clock", Color.accentColor)
-        case .ended:      return ("clock.fill", Color.accentColor)
-        }
-    }
-
     // MARK: - completion
 
-    private var isNTD: Bool { item.itemKind == .notTodo }
     private var isRoutine: Bool { item.recurrenceRule != nil }
 
     private var isCompletedForDate: Bool {
@@ -612,8 +287,8 @@ struct ItemRow: View {
             return
         }
 
-        // 신규 체크. Todo + 미래 일정이면 사유 시트로 분기.
-        if !isNTD && isFutureSchedule(now: now) {
+        // 신규 체크. 미래 일정이면 사유 시트로 분기 (ItemRow는 Todo 전용).
+        if isFutureSchedule(now: now) {
             showCompleteSheet = true
             return
         }
@@ -717,16 +392,8 @@ struct ItemRow: View {
     }
 
     /// 제목 앞 세로 bar 색상.
-    /// - Todo: 카테고리 color
-    /// - 목표(절제/활동): Item.iconColorHex (사용자 지정 color)
-    /// 매칭 안 되면 nil (bar 안 보임).
+    /// Todo 카테고리 color bar — 매칭 안 되면 nil (bar 안 보임).
     private var categoryBarColor: Color? {
-        if item.itemKind.isGoal {
-            guard let raw = item.iconColorHex,
-                  let cc = CategoryColor(rawValue: raw)
-            else { return nil }
-            return cc.color
-        }
         guard let cat = item.category,
               let raw = cat.colorHex,
               let cc = CategoryColor(rawValue: raw)
@@ -736,10 +403,7 @@ struct ItemRow: View {
 
     // MARK: - status icons
 
-    private var hasReminders: Bool {
-        guard let set = item.reminders as? Set<Reminder> else { return false }
-        return !set.isEmpty
-    }
+    private var hasReminders: Bool { item.hasReminders }
 
     private var hasAnyStatusIconOrMeta: Bool {
         if hasChecklistDisplay { return true }
@@ -747,13 +411,11 @@ struct ItemRow: View {
         if streakValue != nil { return true }
         if hasReminders { return true }
         if recurrenceText != nil { return true }
-        if ntdDurationText != nil { return true }
         return false
     }
 
-    /// 순서: 깃발 / 체크리스트 칩 / streak / 알림 / 반복 / NTD 목표 시간.
-    /// today·list 모드 공통 — 항목의 메타 정보를 일관되게 노출.
-    /// 깃발이 제일 앞 — 우선순위가 가장 중요한 식별 정보.
+    /// 순서: 깃발 / 체크리스트 칩 / streak / 알림 / 반복.
+    /// today·list 모드 공통 — Todo 메타 정보 일관 노출 (NTD duration은 MissionRow가 처리).
     @ViewBuilder
     private var statusIcons: some View {
         HStack(spacing: 8) {
@@ -789,25 +451,10 @@ struct ItemRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            // NTD 목표 시간 — clock 아이콘 + duration 텍스트 (반복과 별도).
-            if let d = ntdDurationText {
-                HStack(spacing: 2) {
-                    Image(systemName: "clock")
-                    Text(verbatim: d)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
         }
     }
 
-    private var streakValue: Int? {
-        guard isRoutine else { return nil }
-        let s = item.currentStreak(referenceDate: referenceDate)
-        return s > 0 ? s : nil
-    }
+    private var streakValue: Int? { item.streakValueIfRoutine(referenceDate: referenceDate) }
 
     // MARK: - 체크리스트 (chip + inline expand)
 
@@ -940,101 +587,10 @@ struct ItemRow: View {
     /// 시간 포맷: 8h+ "%시간", 1~7h "%시간 %분", <1h "%분", <1m "%초" (Item.formatNTDDuration)
     private var dueDayLabel: String? {
         let now = Date()
-        // NTD는 별도 라벨 — 통일 원칙 적용 안 함. 카운트다운 라벨은 mode 무관 동일.
-        if isNTD {
-            return ntdListLabel(now: now)
-        }
-        // Todo (1회성/기간/반복) — 통일 원칙 적용.
         return todoUnifiedLabel(now: now)
     }
 
-    /// 반복 패턴 요약 — repeat 아이콘과 함께 statusIcons에 표시. 없으면 nil.
-    private var recurrenceText: String? {
-        guard let rule = item.recurrenceRule else { return nil }
-        return rule.summaryText()
-    }
-
-    /// NTD 목표 시간 텍스트 — duration 설정 시에만 노출. 미설정은 메타 라인에서 생략.
-    private var ntdDurationText: String? {
-        guard isNTD, let h = item.ntdDurationHourInt else { return nil }
-        return formatDuration(hours: h)
-    }
-
-    /// "16h", "1d 8h", "2d" 같은 짧은 duration 표기 — NTD 메타 라인용.
-    private func formatDuration(hours total: Int) -> String {
-        let days = total / 24
-        let rem = total % 24
-        if days > 0 && rem > 0 {
-            return String.localizedStringWithFormat(
-                NSLocalizedString("ntd.duration.day_format", comment: ""), days
-            ) + " " + String.localizedStringWithFormat(
-                NSLocalizedString("ntd.duration_format", comment: ""), rem
-            )
-        }
-        if days > 0 {
-            return String.localizedStringWithFormat(
-                NSLocalizedString("ntd.duration.day_format", comment: ""), days
-            )
-        }
-        return String.localizedStringWithFormat(
-            NSLocalizedString("ntd.duration_format", comment: ""), rem
-        )
-    }
-
-    // MARK: NTD label
-    private func ntdListLabel(now: Date) -> String? {
-        // 완료/포기(1회성): 실제 완료/포기 일시(시:분) 표시. occurrence = item.startDate.
-        if item.recurrenceRule == nil,
-           (item.itemStatus == .done || item.itemStatus == .failed) {
-            let occDate = item.startDate ?? Date().calendarDateAnchor
-            guard let inst = item.ntdLastCompletionInstant(on: occDate) ?? item.completedAt else {
-                return nil
-            }
-            let key = (item.itemStatus == .failed) ? "ntd.label.failed_at_format" : "ntd.label.done_at_format"
-            return String.localizedStringWithFormat(
-                NSLocalizedString(key, comment: ""),
-                NTDRow.completionTimeText(instant: inst, occurrenceDate: occDate)
-            )
-        }
-        // pending: 다음 occurrence 상태
-        guard let occurrenceDate = item.ntdRelevantOccurrenceDate(at: now),
-              let state = item.ntdState(on: occurrenceDate, now: now) else {
-            return nil
-        }
-        // 목록 탭 + 미래 일자 occurrence → Todo와 동일하게 D-N 형식.
-        // ("1일 21시간 후 시작" 같은 실시간 카운트다운은 목록 탭에선 부적합 — D-day 중심 조망용)
-        // 오늘 occurrence는 그대로 countdown(시작/종료 시간) 유지 — 활성 정보가 가치 있음.
-        if mode == .list, occurrenceDate > .todayCalendarAnchor {
-            let days = Calendar.gmt.dateComponents([.day], from: .todayCalendarAnchor, to: occurrenceDate).day ?? 0
-            return formatDDay(days)
-        }
-        switch state {
-        case .scheduled:
-            guard let start = item.ntdStartInstant(on: occurrenceDate) else { return nil }
-            let remaining = Int(start.timeIntervalSince(now))
-            return String.localizedStringWithFormat(
-                NSLocalizedString("ntd.list.starts_in_format", comment: ""),
-                Item.formatNTDDuration(seconds: max(0, remaining))
-            )
-        case .inProgress:
-            if let end = item.ntdEndInstant(on: occurrenceDate) {
-                let remaining = Int(end.timeIntervalSince(now))
-                return String.localizedStringWithFormat(
-                    NSLocalizedString("ntd.list.remaining_format", comment: ""),
-                    Item.formatNTDDuration(seconds: max(0, remaining))
-                )
-            }
-            // 목표 미설정 → 경과
-            guard let start = item.ntdStartInstant(on: occurrenceDate) else { return nil }
-            let elapsed = Int(now.timeIntervalSince(start))
-            return String.localizedStringWithFormat(
-                NSLocalizedString("ntd.list.in_progress_format", comment: ""),
-                Item.formatNTDDuration(seconds: max(0, elapsed))
-            )
-        case .ended:
-            return nil
-        }
-    }
+    private var recurrenceText: String? { item.recurrenceTextSummary }
 
     // MARK: Todo label (통일 원칙 적용)
     //
@@ -1055,11 +611,10 @@ struct ItemRow: View {
         if mode == .list, !isRoutine,
            (item.itemStatus == .done || item.itemStatus == .failed),
            let inst = item.completedAt {
-            let occDate = item.startDate ?? inst.calendarDateAnchor
             let key = (item.itemStatus == .failed) ? "todo.label.cancelled_at_format" : "todo.label.done_at_format"
             return String.localizedStringWithFormat(
                 NSLocalizedString(key, comment: ""),
-                NTDRow.completionTimeText(instant: inst, occurrenceDate: occDate)
+                MissionRow.completionTimeText(instant: inst)
             )
         }
         guard let occStart = occurrenceStartOverride ?? item.referenceOccurrenceStartDate(viewDate: referenceDate) else {
@@ -1219,12 +774,7 @@ struct ItemRow: View {
     }
 
     // MARK: format helpers
-
-    private func formatDDay(_ days: Int) -> String {
-        if days == 0 { return "D-day" }
-        if days > 0  { return "D-\(days)" }
-        return "D+\(-days)"
-    }
+    // formatDDay는 `Views/RowHelpers.swift`의 free 함수로 이전 (ItemRow/MissionRow 공유).
 
     /// "오후 5시" / "5:00 PM" — 시스템 12h/24h, hour-level만.
     private func hourLabel(forHour h: Int) -> String {

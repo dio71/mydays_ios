@@ -38,6 +38,15 @@ struct ActivityHistoryView: View {
     /// 월 swipe 방향 — slide transition edge 계산용.
     @State private var monthForward: Bool = true
 
+    /// per-item 상단 헤더 mode — month grid vs year grid 토글. default month.
+    @State private var headerMode: HistoryHeaderMode = .month
+    /// year mode anchor (표시 연도).
+    @State private var yearAnchor: Int = Calendar.gmt.component(.year, from: .todayCalendarAnchor)
+    /// year swipe 방향 — slide transition edge 계산용.
+    @State private var yearForward: Bool = true
+
+    enum HistoryHeaderMode: String { case month, year }
+
     // FetchRequest로 RC 직접 fetch. predicate는 item != nil이면 item만, nil이면 전체.
     @FetchRequest private var records: FetchedResults<RoutineCompletion>
 
@@ -187,6 +196,12 @@ struct ActivityHistoryView: View {
                 listContent
             }
         }
+        // 진입 시 NTD 자동 완성 처리 — sheet 안의 ActivityHistoryView는 RootView.task가 닿지 않아
+        // 시간 지난 NTD occurrence가 RC 없이 머무는 케이스 방어. 진입 시점에 한 번 정리.
+        .task {
+            Item.completeFinishedNTDs(in: context)
+            Item.completeExpiredRoutines(in: context)
+        }
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         // per-item 모드 상단에 monthview 고정 — "yyyy년 M월" 타이틀 + grid. picked goal/Todo ring/dot 시각.
@@ -216,8 +231,17 @@ struct ActivityHistoryView: View {
                         .font(.headline)
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                filterMenu
+            // per-item — 상단 헤더 M/Y 토글. 현재 상태 아이콘 노출 (calendar=month, square.grid=year).
+            // 순서: M/Y → 카테고리/유형 → 상태(check) 순으로 trailing 정렬.
+            if item != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        headerMode = (headerMode == .month) ? .year : .month
+                    } label: {
+                        Image(systemName: headerMode == .month ? "calendar" : "square.grid.3x3")
+                    }
+                    .accessibilityLabel(headerMode == .month ? "Year view" : "Month view")
+                }
             }
             if item == nil {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -228,6 +252,9 @@ struct ActivityHistoryView: View {
                     }
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                filterMenu
+            }
         }
         // all-item 모드에서만 검색 바.
         .modifier(SearchableIfAllItem(item: item, searchText: $searchText))
@@ -235,29 +262,41 @@ struct ActivityHistoryView: View {
         .appTint()
     }
 
-    /// Per-item 모드 상단 monthview — "yyyy년 M월" 타이틀 + MonthGridView 재사용.
-    /// 일자 선택은 no-op (월 단위 조망만), 월 단위 swipe로만 navigate.
+    /// Per-item 모드 상단 헤더 — month/year 토글에 따라 grid 분기.
+    /// 일자 선택은 no-op (단순 조망), 가로 swipe로만 navigate.
     @ViewBuilder
     private var monthHeader: some View {
         if let item {
             VStack(spacing: 4) {
-                Text(verbatim: monthAnchorLabel)
+                Text(verbatim: headerLabel)
                     .font(.headline)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 8)
-                    // 제목 transition을 grid slide와 분리 — ambient animation이 텍스트에 묻어 시각 충돌하는 케이스 방어.
+                    // 제목 즉시 변경 (TodayView 패턴과 통일). ambient animation 차단.
                     .transaction { $0.animation = nil }
-                MonthGridView(
-                    selectedDate: monthAnchor,
-                    forward: monthForward,
-                    onSelectDate: { _ in },
-                    onShiftMonth: { delta in
-                        shiftMonth(by: delta)
-                    },
-                    pickedItemID: item.id,
-                    fixedSixRows: true,
-                    showsSelection: false
-                )
+                switch headerMode {
+                case .month:
+                    MonthGridView(
+                        selectedDate: monthAnchor,
+                        forward: monthForward,
+                        onSelectDate: { _ in },
+                        onShift: { delta in
+                            shiftMonth(by: delta)
+                        },
+                        pickedItemID: item.id,
+                        fixedSixRows: true,
+                        showsSelection: false
+                    )
+                case .year:
+                    YearGridView(
+                        item: item,
+                        year: yearAnchor,
+                        forward: yearForward,
+                        onShiftYear: { delta in
+                            shiftYear(by: delta)
+                        }
+                    )
+                }
             }
             .background(Color(.systemBackground))
             .overlay(alignment: .bottom) {
@@ -266,13 +305,33 @@ struct ActivityHistoryView: View {
         }
     }
 
-    /// monthAnchor 일자의 "yyyy년 M월" 형식 라벨. 로케일 자동 (영문: "May 2026").
-    private var monthAnchorLabel: String {
-        let f = DateFormatter()
-        f.locale = Locale.current
-        f.timeZone = TimeZone(identifier: "UTC") ?? .gmt
-        f.setLocalizedDateFormatFromTemplate("yMMMM")
-        return f.string(from: monthAnchor)
+    /// headerMode에 따른 타이틀 — month는 "yyyy년 M월", year는 "yyyy년".
+    private var headerLabel: String {
+        switch headerMode {
+        case .month:
+            let f = DateFormatter()
+            f.locale = Locale.current
+            f.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+            f.setLocalizedDateFormatFromTemplate("yMMMM")
+            return f.string(from: monthAnchor)
+        case .year:
+            let isKorean = Locale.preferredLanguages.first?.hasPrefix("ko") ?? false
+            return isKorean ? "\(yearAnchor)년" : "\(yearAnchor)"
+        }
+    }
+
+    /// 연 navigation — shiftMonth와 동일 패턴 (방향 전환 시 forward flag 먼저 갱신).
+    private func shiftYear(by delta: Int) {
+        let next = yearAnchor + delta
+        let forward = delta > 0
+        if forward != yearForward {
+            yearForward = forward
+            DispatchQueue.main.async {
+                yearAnchor = next
+            }
+        } else {
+            yearAnchor = next
+        }
     }
 
     /// 월 navigation — 방향 전환 시 forward flag를 한 박자 먼저 갱신해
@@ -412,25 +471,19 @@ struct ActivityHistoryView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                // 활동: 누적값/목표 표시. 그 외: 상태 라벨.
+                // 우측: 활동/집중은 누적값/목표 / 그 외는 comment(있을 때) — 별도 라인 제거 정책 (사용자 결정).
+                // 상태 라벨(Done/Gave up)은 leading icon이 이미 표현해 중복이라 제거.
                 if isActivity, target > 0 {
                     Text(verbatim: "\(valueRecorded)/\(target)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(rc.done ? Color.accentColor : .secondary)
-                } else {
-                    Text(recordStatusKey(rc: rc, isActivityProgress: isActivityProgress))
+                } else if let comment = rc.comment, !comment.isEmpty {
+                    Text(verbatim: commentText(comment: comment, isDone: rc.done))
                         .font(.caption)
-                        .foregroundStyle(rc.done ? Color.accentColor : .secondary)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                 }
-            }
-            // 포기 사유 — 있을 때만 별도 라인.
-            if let comment = rc.comment, !comment.isEmpty {
-                Text(commentText(comment: comment, isDone: rc.done))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .padding(.leading, 24)
             }
         }
         .padding(.vertical, 2)
