@@ -1,3 +1,5 @@
+import Combine
+import CoreData
 import SwiftUI
 import WidgetKit
 
@@ -23,6 +25,8 @@ struct RootView: View {
     @State private var sidebarSelection: SidebarItem? = .today
     // iPhone 탭 선택 — 시스템 알림 탭 시 .today로 전환.
     @State private var selectedTab: SidebarItem = .today
+    // CloudKit 원격 변경(import) 후 알림 재조정 debounce용 — burst로 들어오는 remote change를 합침.
+    @State private var remoteChangeReconcileTask: Task<Void, Never>?
 
     /// 현재 활성 탭/사이드바 — 키보드 ⌘N 시 어느 view에 새 항목 broadcast할지 결정.
     private var currentTab: SidebarItem {
@@ -54,6 +58,24 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openTodayTabFromNotification)) { _ in
             selectedTab = .today
             sidebarSelection = .today
+        }
+        // CloudKit import(원격 변경) 후 알림 재조정 — 재설치/기기변경/다른 기기에서 완료한 경우
+        // 늦게 도착한 완료 RC가 반영되도록 refreshAllRoutineNotifications 재실행.
+        // 안 그러면 import 전에 등록된 알림(이미 완료된 occurrence)이 그대로 fire됨.
+        // remote change는 import 중 burst로 들어오므로 1.5s debounce.
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .NSPersistentStoreRemoteChange)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            remoteChangeReconcileTask?.cancel()
+            remoteChangeReconcileTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard !Task.isCancelled else { return }
+                Item.completeFinishedNTDs(in: context)
+                Item.refreshAllRoutineNotifications(in: context)
+                WidgetCenter.shared.reloadAllTimelines()
+            }
         }
         .task {
             // Migration: RC.targetSnapshot 1회 backfill (출시 후 제거 예정).
@@ -159,6 +181,9 @@ struct RootView: View {
                 .tabItem { Label("tab.settings", systemImage: "gearshape") }
                 .tag(SidebarItem.settings)
         }
+        // TabView 자체에 .appTint() — iOS 26 floating tab bar의 SF Symbol 아이콘이 SwiftUI 환경의 tint 직접
+        // 참조하는 경로가 있어, WindowGroup의 .tint()만으론 변경 즉시 반영 안 되는 케이스 방어.
+        .appTint()
     }
 
     // MARK: - iPad / Mac Catalyst (regular)

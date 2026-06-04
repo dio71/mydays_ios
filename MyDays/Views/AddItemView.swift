@@ -107,6 +107,14 @@ struct AddItemView: View {
     @State private var showOneOffGoalAlert: Bool = false
     /// 편집 모드 활동/집중에서 target 값이 바뀐 경우 안내 alert — 변경값이 신규 occurrence부터 적용된다는 안내.
     @State private var showTargetChangedAlert: Bool = false
+    /// 무료 cap 초과 시 안내 alert (목표/반복/체크리스트 신규 추가 차단). Pro 결제 연결 전 테스트용.
+    @State private var showCapAlert: Bool = false
+    /// 위 alert에서 어느 한도에 걸렸는지 — 종류별 안내 문구 분기용.
+    @State private var capAlertKind: CapKind = .goal
+    /// 활동 보고서(프로 플랜 전용) 진입 시도 시 잠금 안내 alert.
+    @State private var showReportProAlert: Bool = false
+    /// 프로 플랜 안내(Paywall) sheet 표시 여부 — cap/보고서 alert의 업그레이드 버튼이 트리거.
+    @State private var showPaywall: Bool = false
     /// 편집 시작 시점의 activityTarget. 저장 시 변경 감지에 사용 (활동·집중 공통, focus는 분 단위).
     @State private var originalActivityTarget: Int = 0
     @Environment(\.scenePhase) private var addItemScenePhase
@@ -273,6 +281,12 @@ struct AddItemView: View {
         guard let item = editingItem else { return false }
         return !item.routineHistoryRecords.isEmpty
     }
+
+    /// 보고서 진입점 노출 조건 — 반복 항목만 (1회성은 streak·달성률 의미 X).
+    /// 4-type 목표든 Todo든 무관, recurrenceRule이 있어야 함.
+    private var hasRecurringSchedule: Bool {
+        editingItem?.recurrenceRule != nil
+    }
     private var isNTD: Bool { kind == .notTodo }
     /// 목표(절제/활동/집중/습관) 그룹 판정 — 같은 섹션·같은 입력 UI 사용.
     private var isGoal: Bool { kind.isGoal }
@@ -333,6 +347,22 @@ struct AddItemView: View {
     private func attemptSave() {
         if !canSave {
             showMissingFieldsAlert = true
+            return
+        }
+        // Freemium 가드 — 무료 한도 초과면 cap alert 후 중단.
+        // 목표: kind는 편집에서 변경 불가(신규만 picker) → 신규 목표만 검사.
+        if !isEditing, isGoal, !Premium.canAddGoal(in: context) {
+            capAlertKind = .goal
+            showCapAlert = true
+            return
+        }
+        // 반복 할일: 편집으로 "비반복 → 반복" 전환도 새 반복으로 카운트해야 함 (편집 우회 방지).
+        // → "저장 결과가 반복 할일이고, 이전엔 반복 할일이 아니었던" 경우만 검사.
+        let willBeRecurringTodo = (kind == .todo) && (recurrenceConfig != nil)
+        let wasRecurringTodo = (editingItem?.itemKind == .todo) && (editingItem?.recurrenceRule != nil)
+        if willBeRecurringTodo, !wasRecurringTodo, !Premium.canAddRecurrence(in: context) {
+            capAlertKind = .recurrence
+            showCapAlert = true
             return
         }
         // HK auto source → 권한 요청 후 저장 흐름 이어감. 이미 결정된 경우 prompt 없이 즉시 반환.
@@ -566,6 +596,15 @@ struct AddItemView: View {
 
     /// 새 빈 draft를 끝에 추가하고 자동 포커스.
     private func appendChecklistDraftAndFocus() {
+        // Freemium 가드 — 채워진 draft가 무료 한도 도달이면 추가 차단 (빈 진행 중 draft는 미카운트).
+        let filledCount = checklistDrafts.filter {
+            !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+        guard Premium.canAddChecklistItem(currentCount: filledCount) else {
+            capAlertKind = .checklist
+            showCapAlert = true
+            return
+        }
         let newDraft = ChecklistDraft(id: UUID(), title: "")
         checklistDrafts.append(newDraft)
         focusedChecklistDraft = newDraft.id
@@ -711,24 +750,42 @@ struct AddItemView: View {
                     TextField("add.field.notes", text: $notes, axis: .vertical)
                         .lineLimit(2...5)
                 } header: {
-                    // 빈 header 영역을 활용해 우측 정렬 활동 기록 아이콘 버튼 노출.
-                    // 편집 모드 + 기록 1+ 일 때만. 평소엔 빈 header → 시각 영향 없음.
+                    // 빈 header 영역을 활용해 우측 정렬 보고서 아이콘 버튼 노출.
+                    // 편집 모드 + **반복 항목** (1회성은 streak·달성률 의미 X — 진입점 hide).
+                    // 기존 hasHistoryRecords 조건 제거 — RC 없어도 미래 occurrence 있는 반복은 보고서 의미 있음.
                     // capsule + tint 배경으로 "버튼" 느낌 강조 (header text plain 텍스트와 시각 구분).
-                    if isEditing, hasHistoryRecords {
+                    if isEditing, hasRecurringSchedule {
                         HStack {
                             Spacer()
                             Button {
-                                showFullHistory = true
+                                // 보고서는 Pro 전용 — 미언락 시 안내 alert, 언락 시 sheet.
+                                if Premium.isUnlocked {
+                                    showFullHistory = true
+                                } else {
+                                    showReportProAlert = true
+                                }
                             } label: {
-                                Image(systemName: "calendar.badge.clock")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(Color.accentColor)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                                HStack(spacing: 4) {
+                                    Image(systemName: Premium.isUnlocked ? "calendar.badge.clock" : "lock.fill")
+                                    Text("report.title")
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("activity_history.show_all")
+                            .accessibilityLabel("report.show")
+                            .alert(
+                                Text(verbatim: ProFeature.report.alertTitle),
+                                isPresented: $showReportProAlert
+                            ) {
+                                Button("pro.upgrade.cta") { showPaywall = true }
+                                Button("common.close", role: .cancel) {}
+                            } message: {
+                                Text(verbatim: ProFeature.report.alertMessage)
+                            }
                         }
                     }
                 }
@@ -1143,6 +1200,15 @@ struct AddItemView: View {
                     } message: {
                         Text(isFocus ? "alert.target_changed.body.focus" : "alert.target_changed.body.activity")
                     }
+                    .alert(
+                        "cap.reached.title",
+                        isPresented: $showCapAlert
+                    ) {
+                        Button("pro.upgrade.cta") { showPaywall = true }
+                        Button("common.close", role: .cancel) {}
+                    } message: {
+                        Text(verbatim: capAlertKind.alertMessage)
+                    }
                 }
             }
             .task {
@@ -1196,13 +1262,17 @@ struct AddItemView: View {
                 )
             }
             .sheet(isPresented: $showFullHistory) {
-                // 활동 기록 전체 보기 — NavigationStack 안에 ActivityHistoryView. 자체 toolbar(닫기 버튼) 표시.
+                // 반복 항목 보고서 — NavigationStack 안에 MissionReportView. 자체 toolbar(닫기 버튼) 표시.
                 if let item = editingItem {
                     NavigationStack {
-                        ActivityHistoryView(item: item, showsCloseButton: true)
+                        MissionReportView(item: item, showsCloseButton: true)
                     }
                     .appTint()
                 }
+            }
+            // 프로 플랜 안내(Paywall) — cap/보고서 alert의 업그레이드 버튼이 트리거.
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
             }
             // NavigationStack root에 직접 .appTint() — iOS 26 idle-tint-loss 방어.
             // 외곽 .appTint()와 함께 belt-and-suspenders로 propagation 보장.

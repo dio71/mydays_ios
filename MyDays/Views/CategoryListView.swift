@@ -22,6 +22,10 @@ struct CategoryListView: View {
     private var categories: FetchedResults<Category>
 
     @State private var sheet: SheetMode?
+    /// 무료 cap 초과 시 안내 alert (카테고리 신규 추가 차단).
+    @State private var showCapAlert = false
+    /// 프로 플랜 안내(Paywall) sheet 표시 여부.
+    @State private var showPaywall = false
 
     private enum SheetMode: Identifiable {
         case new
@@ -60,7 +64,12 @@ struct CategoryListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    sheet = .new
+                    // Freemium 가드 — 무료 한도 초과면 cap alert, 아니면 신규 생성 sheet.
+                    if Premium.canAddCategory(in: context) {
+                        sheet = .new
+                    } else {
+                        showCapAlert = true
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -76,6 +85,15 @@ struct CategoryListView: View {
             case .edit(let cat):
                 CategoryEditSheet(category: cat)
             }
+        }
+        .alert("cap.reached.title", isPresented: $showCapAlert) {
+            Button("pro.upgrade.cta") { showPaywall = true }
+            Button("common.close", role: .cancel) {}
+        } message: {
+            Text(verbatim: CapKind.category.alertMessage)
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
         }
     }
 

@@ -10,6 +10,10 @@ final class PersistenceController {
     /// 두 target의 Signing & Capabilities → App Groups에 동일 ID가 등록돼 있어야 함.
     static let appGroupID = "group.io.snapplay.MyDays"
 
+    /// 마지막 CloudKit 동기화(import/export) 성공 시각 — Settings 표시용.
+    /// timeIntervalSinceReferenceDate(Double)로 UserDefaults.standard에 저장. SettingsView가 @AppStorage로 관찰.
+    static let lastSyncDateKey = "sync.lastSyncDate"
+
     /// NSPersistentCloudKitContainer는 NSPersistentContainer의 subclass.
     /// Main app은 CloudKit 동기화 필요해 CloudKit container, Widget process는 메모리 부담 줄이기 위해 일반 container.
     /// Widget은 sqlite를 read-only로만 접근 — sync는 main app이 처리.
@@ -68,6 +72,28 @@ final class PersistenceController {
             // 모델에 id 추가되기 전 빌드의 잔존 row가 있을 수 있어 부팅 시 한 번 검사 → 로그만.
             // 백필 없이 로그만 — 테스트 중 노출되는지 사용자가 직접 모니터링.
             logEntitiesWithMissingID()
+
+            // CloudKit 동기화 이벤트 관찰 → 마지막 import/export 성공 시각 기록 (Settings 표시용).
+            observeCloudKitSyncEvents()
+        }
+    }
+
+    /// NSPersistentCloudKitContainer의 import/export 이벤트가 성공 완료되면 그 시각을 UserDefaults에 기록.
+    /// Settings "마지막 동기화" row가 @AppStorage로 읽어 표시.
+    private func observeCloudKitSyncEvents() {
+        guard let ckContainer = container as? NSPersistentCloudKitContainer else { return }
+        NotificationCenter.default.addObserver(
+            forName: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: ckContainer,
+            queue: .main
+        ) { note in
+            guard let event = note.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
+                    as? NSPersistentCloudKitContainer.Event else { return }
+            // 완료된(endDate != nil) import/export + 성공만 기록. setup/진행중/실패는 무시.
+            guard event.endDate != nil, event.succeeded,
+                  event.type == .import || event.type == .export else { return }
+            let stamp = (event.endDate ?? Date()).timeIntervalSinceReferenceDate
+            UserDefaults.standard.set(stamp, forKey: Self.lastSyncDateKey)
         }
     }
 

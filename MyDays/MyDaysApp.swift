@@ -36,17 +36,75 @@ struct MyDaysApp: App {
     }
 
     /// 사용자 tint preset을 UIKit appearance에 반영. init + tint 변경 시 호출.
-    /// 한 번 적용 후 새로 생성되는 UIView/UIKit-bridge component (DatePicker, NavigationStack toolbar 등)에 모두 propagate.
+    /// iOS 26 floating tab bar는 `tintColor`만으로 selected item 색이 갱신 안 되는 경우가 있어
+    /// `selectedItemTintColor` + `UITabBarAppearance` (item appearance) 모두 갱신.
+    /// 신규 생성 default + 기존 인스턴스 즉시 갱신 둘 다 처리.
     private func applyTintAppearance() {
         let color = UIColor((TintPreset(rawValue: tintPresetRaw) ?? .blue).color)
         UIView.appearance().tintColor = color
         UIWindow.appearance().tintColor = color
-        // 이미 생성된 window들도 즉시 갱신 (런타임 preset 변경 케이스 대응).
+        UINavigationBar.appearance().tintColor = color
+
+        // 신규 생성 UITabBar에 standard + scrollEdge appearance 설정 — selected icon/text tint 명시.
+        let tabAppearance = Self.makeTabBarAppearance(tintColor: color)
+        UITabBar.appearance().tintColor = color
+        UITabBar.appearance().standardAppearance = tabAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+
+        // 이미 생성된 window + 그 안 모든 tab bar / nav bar 인스턴스 즉시 갱신.
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
             for window in windowScene.windows {
                 window.tintColor = color
+                Self.refreshTintInSubviews(window, color: color, tabAppearance: tabAppearance)
             }
+        }
+    }
+
+    /// UITabBarAppearance — selected/normal item 색상 명시 설정.
+    /// iOS 26 tab bar는 단순 tintColor 대신 이 appearance를 통해 selected 상태 색을 결정하는 경우가 있어
+    /// 두 경로 모두 갱신해야 즉시 반영 보장.
+    private static func makeTabBarAppearance(tintColor: UIColor) -> UITabBarAppearance {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        let item = UITabBarItemAppearance()
+        item.selected.iconColor = tintColor
+        item.selected.titleTextAttributes = [.foregroundColor: tintColor]
+        appearance.stackedLayoutAppearance = item
+        appearance.inlineLayoutAppearance = item
+        appearance.compactInlineLayoutAppearance = item
+        return appearance
+    }
+
+    /// view tree 재귀 walk — UITabBar / UINavigationBar 인스턴스에 명시적으로 tintColor + appearance 갱신.
+    /// 추가로 UITabBar 내부 모든 UIImageView 의 tintColor도 직접 갱신 — iOS 26 floating tab bar의 SF Symbol
+    /// 아이콘이 UITabBarItemAppearance.iconColor를 무시하고 본인 UIImageView의 tintColor를 캐시하는 케이스 대응.
+    private static func refreshTintInSubviews(_ view: UIView, color: UIColor, tabAppearance: UITabBarAppearance) {
+        if let tabBar = view as? UITabBar {
+            tabBar.tintColor = color
+            tabBar.standardAppearance = tabAppearance
+            tabBar.scrollEdgeAppearance = tabAppearance
+            // 내부 모든 UIImageView 아이콘에도 tint 직접 적용.
+            forceIconTint(in: tabBar, color: color)
+            tabBar.setNeedsLayout()
+            tabBar.setNeedsDisplay()
+        } else if let navBar = view as? UINavigationBar {
+            navBar.tintColor = color
+            navBar.setNeedsLayout()
+        }
+        for subview in view.subviews {
+            refreshTintInSubviews(subview, color: color, tabAppearance: tabAppearance)
+        }
+    }
+
+    /// UITabBar 내부 모든 UIImageView 의 tintColor를 직접 갱신.
+    /// 일부 iOS 버전에서 selected item 아이콘은 자체 캐시된 tintColor를 갖고 있어 명시 갱신해야 즉시 반영.
+    private static func forceIconTint(in view: UIView, color: UIColor) {
+        if let imageView = view as? UIImageView {
+            imageView.tintColor = color
+        }
+        for subview in view.subviews {
+            forceIconTint(in: subview, color: color)
         }
     }
 

@@ -35,6 +35,14 @@ struct YearGridView: View {
     /// 가로 swipe로 ±1년 shift callback.
     let onShiftYear: (Int) -> Void
 
+    /// 가로 swipe로 navigate 가능 여부. false면 정적 grid (보고서 "올해" 등).
+    /// 기본 true.
+    var swipeEnabled: Bool = true
+
+    /// 좁은 영역(보고서 section)에서 사용 시 gridHeight 축소 — 기본 70(iPad 안전 마진) 대신 44(좁은 cell 콘텐츠 기준).
+    /// false (기본): 70. true: 44.
+    var compactHeight: Bool = false
+
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\RoutineCompletion.completedAt, order: .reverse)],
         animation: .default
@@ -79,21 +87,35 @@ struct YearGridView: View {
         .animation(.easeInOut(duration: 0.22), value: year)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 30)
-                .onEnded { value in
-                    let h = value.translation.width
-                    let v = value.translation.height
-                    guard abs(h) > 60, abs(h) > abs(v) * 2 else { return }
-                    onShiftYear(h > 0 ? -1 : 1)
-                }
-        )
+        .modifier(SwipeModifier(enabled: swipeEnabled, onShift: onShiftYear))
+    }
+
+    /// swipeEnabled 토글용 modifier — 조건부로 highPriorityGesture 부착.
+    private struct SwipeModifier: ViewModifier {
+        let enabled: Bool
+        let onShift: (Int) -> Void
+        func body(content: Content) -> some View {
+            if enabled {
+                content.highPriorityGesture(
+                    DragGesture(minimumDistance: 30)
+                        .onEnded { value in
+                            let h = value.translation.width
+                            let v = value.translation.height
+                            guard abs(h) > 60, abs(h) > abs(v) * 2 else { return }
+                            onShift(h > 0 ? -1 : 1)
+                        }
+                )
+            } else {
+                content
+            }
+        }
     }
 
     /// 7 row × cellSize + 6 × gap(1.5pt). cellSize는 width / 53 로 동적이라
     /// 화면 폭이 클수록 grid도 커짐. 폰 360pt → ~44pt, sheet 400pt → ~50pt, iPad → ~70pt+.
     /// `.clipped()`로 outer ZStack을 자르니 부족하면 마지막 row가 잘림. 안전 마진 두고 70pt.
-    private var gridHeight: CGFloat { 70 }
+    /// compactHeight=true 면 좁은 cell 콘텐츠에 맞춰 44pt — 보고서 section처럼 빈 공간이 시각 균형 깨는 경우.
+    private var gridHeight: CGFloat { compactHeight ? 44 : 70 }
 
     // MARK: - 주(컬럼) 계산
 
@@ -145,37 +167,19 @@ struct YearGridView: View {
     private func cell(day: Date, size: CGFloat) -> some View {
         let state = cellState(day: day)
         let color = itemColor
-        let isTodo = item.itemKind == .todo
-        // Todo는 살짝 round된 사각, 목표는 원.
-        // strokeBorder는 InsettableShape 한정 (Circle/RoundedRectangle은 conform) — fill과 동일 outer size 보장.
-        // AnyShape로 erase하면 InsettableShape 제약이 풀려 strokeBorder 사용 불가 → 각 case에 inline 분기.
+        // Todo·목표 통일 — 살짝 round된 사각. strokeBorder + fill 모두 RoundedRectangle 사용.
+        let shape = RoundedRectangle(cornerRadius: 1.5, style: .continuous)
         Group {
             switch state {
             case .none:
                 // 빈 날짜는 항목 색상 무관 회색 — 활성 일자(pending/completed/cancelled)와 시각 구분.
-                if isTodo {
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(Color.secondary.opacity(0.05))
-                } else {
-                    Circle().fill(Color.secondary.opacity(0.05))
-                }
+                shape.fill(Color.secondary.opacity(0.05))
             case .pending:
-                if isTodo {
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous).strokeBorder(color, lineWidth: 1)
-                } else {
-                    Circle().strokeBorder(color, lineWidth: 1)
-                }
+                shape.strokeBorder(color, lineWidth: 1)
             case .completed:
-                if isTodo {
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(color)
-                } else {
-                    Circle().fill(color)
-                }
+                shape.fill(color)
             case .cancelled:
-                if isTodo {
-                    RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(color).opacity(0.2)
-                } else {
-                    Circle().fill(color).opacity(0.2)
-                }
+                shape.fill(color).opacity(0.2)
             }
         }
         .frame(width: size, height: size)

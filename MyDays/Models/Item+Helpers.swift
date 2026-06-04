@@ -1335,6 +1335,93 @@ extension Item {
         return s > 0 ? s : nil
     }
 
+    // MARK: - Report stats (MissionReportView)
+
+    /// MissionReportView 상단 6 카드 통계 묶음.
+    /// 단일 forward iteration (시작일 ~ 오늘)으로 totalOccurrences/maxStreak/monthly/yearly 일괄 계산 — RC 수천건도 ms 수준.
+    /// currentStreak은 기존 backward 함수 재사용 (today 예외 로직 동일 정책).
+    struct ReportStats {
+        let currentStreak: Int
+        let maxStreak: Int
+        let totalCompletions: Int
+        let monthCompletions: Int    // 이번달 done — rc.date(occurrence 시작일) 기준
+        let yearCompletions: Int     // 올해 done — 동일 기준
+        let totalOccurrences: Int    // 시작일~오늘(양끝 포함) 사이 rule.occurs(...)=true 일수
+        let daysSinceStart: Int      // 시작일~오늘 일수 차이 (start==today면 0)
+
+        /// 달성률 0.0~1.0. occurrence 0이면 0.
+        var completionRate: Double {
+            guard totalOccurrences > 0 else { return 0 }
+            return Double(totalCompletions) / Double(totalOccurrences)
+        }
+    }
+
+    /// 반복 항목 전용 통계 계산. 비-반복이면 모든 값 0인 stats 반환 (호출 측에서 가드 권장).
+    func reportStats(referenceDate: Date = .todayCalendarAnchor) -> ReportStats {
+        let utc = Calendar.gmt
+        let today = utc.startOfDay(for: referenceDate)
+        let start = utc.startOfDay(for: startDate ?? referenceDate)
+        let daysSince = utc.dateComponents([.day], from: start, to: today).day ?? 0
+
+        guard let rule = recurrenceRule else {
+            return ReportStats(currentStreak: 0, maxStreak: 0, totalCompletions: 0,
+                               monthCompletions: 0, yearCompletions: 0,
+                               totalOccurrences: 0, daysSinceStart: max(daysSince, 0))
+        }
+
+        // done occurrence date set — O(1) lookup.
+        let completions = (self.completions as? Set<RoutineCompletion>) ?? []
+        let doneDates = Set(completions.compactMap { rc -> Date? in
+            guard rc.done, let d = rc.date else { return nil }
+            return utc.startOfDay(for: d)
+        })
+
+        let currentMonth = utc.component(.month, from: today)
+        let currentYear = utc.component(.year, from: today)
+
+        var totalOccurrences = 0
+        var totalDone = 0
+        var monthDone = 0
+        var yearDone = 0
+        var maxStreak = 0
+        var runStreak = 0
+
+        var day = start
+        var safety = 365 * 10  // 10년 cap — 현실 사용에 충분.
+        while day <= today, safety > 0 {
+            if rule.occurs(on: day, startDate: startDate, endDate: recurrenceEndDate) {
+                totalOccurrences += 1
+                if doneDates.contains(day) {
+                    totalDone += 1
+                    runStreak += 1
+                    if runStreak > maxStreak { maxStreak = runStreak }
+                    let y = utc.component(.year, from: day)
+                    if y == currentYear {
+                        yearDone += 1
+                        let m = utc.component(.month, from: day)
+                        if m == currentMonth { monthDone += 1 }
+                    }
+                } else if !utc.isDate(day, inSameDayAs: today) {
+                    // 오늘 미완료는 streak 종료 X (사용자가 아직 할 수 있음).
+                    runStreak = 0
+                }
+            }
+            guard let next = utc.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+            safety -= 1
+        }
+
+        return ReportStats(
+            currentStreak: currentStreak(referenceDate: referenceDate),
+            maxStreak: maxStreak,
+            totalCompletions: totalDone,
+            monthCompletions: monthDone,
+            yearCompletions: yearDone,
+            totalOccurrences: totalOccurrences,
+            daysSinceStart: max(daysSince, 0)
+        )
+    }
+
     // MARK: - Migration (출시 후 제거 예정)
     //
     // 기존 RC들에 targetSnapshot이 nil인 경우 item의 현재 target 값으로 채움.

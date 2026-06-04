@@ -26,8 +26,9 @@ enum TintPreset: String, CaseIterable, Identifiable {
         case .mustard: return Color(red: 0xDA/255, green: 0xA5/255, blue: 0x22/255)
         case .sage:    return Color(red: 0x8A/255, green: 0xAA/255, blue: 0x56/255)
         case .slate:   return Color(red: 0x5C/255, green: 0x7C/255, blue: 0x95/255)
-        case .forest:  return Color(red: 0x2A/255, green: 0x60/255, blue: 0x48/255)
-        case .wine:    return Color(red: 0x82/255, green: 0x38/255, blue: 0x53/255)
+        // forest/wine은 dark mode에서 text 대비 부족 보고됨 — 채도·명도 모두 상향.
+        case .forest:  return Color(red: 0x36/255, green: 0x80/255, blue: 0x5E/255)
+        case .wine:    return Color(red: 0xA8/255, green: 0x48/255, blue: 0x6C/255)
         }
     }
 

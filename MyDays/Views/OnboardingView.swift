@@ -41,9 +41,9 @@ struct OnboardingView: View {
 
             TabView(selection: $page) {
                 OnboardingTodoPage().tag(0)
-                OnboardingGoalPage().tag(1)
-                OnboardingTodayWidgetPage().tag(2)
-                OnboardingInboxPage().tag(3)
+                OnboardingInboxPage().tag(1)
+                OnboardingGoalPage().tag(2)
+                OnboardingTodayWidgetPage().tag(3)
                 OnboardingPermissionsPage().tag(lastPage)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -598,7 +598,7 @@ private struct OnboardingInboxPage: View {
                         }
                     Image(systemName: "mic.fill")
                         .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.red)
                         .frame(width: 36, height: 36)
                     ZStack {
                         Circle().fill(Color.accentColor)

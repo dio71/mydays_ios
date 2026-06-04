@@ -54,6 +54,20 @@ struct MonthGridView: View {
     /// 기본 true (TodayView 기존 동작 유지).
     var showsSelection: Bool = true
 
+    /// 요일 헤더/주(row) 분리선 노출 여부. false면 minimalist 시각 — 보고서 등 컴팩트 영역용.
+    /// 기본 true.
+    var showsDividers: Bool = true
+
+    /// 가로 swipe로 navigate 가능 여부. false면 highPriorityGesture 미부착 → 정적 grid.
+    /// 보고서 "이번주" 같은 고정 영역에서 사용.
+    /// 기본 true.
+    var swipeEnabled: Bool = true
+
+    /// 페이지 전환 transition — fade(.opacity) vs slide(.move). default slide.
+    /// List row 안에 있을 때 slide insertion이 SwiftUI 버그로 즉시 등장 → 보고서는 fade 권장.
+    /// TodayView처럼 safeAreaInset에 있는 경우 slide 정상 동작 → 기본값 false 유지.
+    var useFadeTransition: Bool = false
+
     // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
     private var tintPresetRaw: String = TintPreset.blue.rawValue
@@ -101,7 +115,7 @@ struct MonthGridView: View {
     }
 
     var body: some View {
-        // TodayView/WeekStripView와 동일한 transition 패턴.
+        // 슬라이드 방향 — useFadeTransition=false일 때만 사용.
         let insertionEdge: Edge = forward ? .trailing : .leading
         let removalEdge: Edge = forward ? .leading : .trailing
         // RC FetchRequest 의존성 강제 — (+N) 활동 누적, 집중 세션 종료, 포기 등으로
@@ -131,8 +145,10 @@ struct MonthGridView: View {
                 }
             }
             .padding(.vertical, 4)
-            // 요일 아래 분리선.
-            Divider()
+            // 요일 아래 분리선. showsDividers=false면 숨김 (보고서 컴팩트 시각).
+            if showsDividers {
+                Divider()
+            }
 
             // 일자 grid — 월 단위 transition.
             // LazyVGrid 대신 VStack of HStacks(spacing: 0)로 직접 배치 — cell 사이 간격을 정확히 0으로
@@ -161,15 +177,23 @@ struct MonthGridView: View {
                             }
                         }
                         .padding(.vertical, 4)
-                        // 각 주(row) 아래 분리선.
-                        Divider()
+                        // 각 주(row) 아래 분리선. showsDividers=false면 숨김.
+                        if showsDividers {
+                            Divider()
+                        }
                     }
                 }
                 .id(monthAnchor)
-                .transition(.asymmetric(
-                    insertion: .move(edge: insertionEdge),
-                    removal: .move(edge: removalEdge)
-                ))
+                // useFadeTransition=true: List row 안 SwiftUI insertion 버그 회피용 fade.
+                // false (기본): TodayView처럼 safeAreaInset / 풀스크린 컨테이너에서 자연스러운 slide.
+                .transition(
+                    useFadeTransition
+                        ? AnyTransition.opacity
+                        : AnyTransition.asymmetric(
+                            insertion: .move(edge: insertionEdge),
+                            removal: .move(edge: removalEdge)
+                        )
+                )
             }
             .clipped()
             .animation(.easeInOut(duration: 0.22), value: monthAnchor)
@@ -177,18 +201,31 @@ struct MonthGridView: View {
         .padding(.horizontal, 8)
         // 상단 spacer만 — 마지막 row Divider 다음에 빈 공간 없도록 bottom padding 제거.
         .padding(.top, 6)
+        // swipeEnabled=true 일 때만 gesture 부착.
         // highPriorityGesture — 시스템 back-swipe(NavigationStack pop)와 sheet pan-to-dismiss 가로채는 케이스 방어.
         // ActivityHistoryView 같은 push된 화면에서 monthview swipe가 부모 navigation/sheet으로 전달되는 회귀 차단.
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 30)
-                .onEnded { value in
-                    let h = value.translation.width
-                    let v = value.translation.height
-                    guard abs(h) > 60, abs(h) > abs(v) * 2 else { return }
-                    // 오른쪽 swipe → 이전, 왼쪽 swipe → 다음 (month 모드=월, week 모드=주).
-                    onShift(h > 0 ? -1 : 1)
-                }
-        )
+        .modifier(SwipeModifier(enabled: swipeEnabled, onShift: onShift))
+    }
+
+    /// swipeEnabled 토글용 modifier — 조건부로 highPriorityGesture 부착/미부착.
+    private struct SwipeModifier: ViewModifier {
+        let enabled: Bool
+        let onShift: (Int) -> Void
+        func body(content: Content) -> some View {
+            if enabled {
+                content.highPriorityGesture(
+                    DragGesture(minimumDistance: 30)
+                        .onEnded { value in
+                            let h = value.translation.width
+                            let v = value.translation.height
+                            guard abs(h) > 60, abs(h) > abs(v) * 2 else { return }
+                            onShift(h > 0 ? -1 : 1)
+                        }
+                )
+            } else {
+                content
+            }
+        }
     }
 
     // MARK: - 날짜 계산

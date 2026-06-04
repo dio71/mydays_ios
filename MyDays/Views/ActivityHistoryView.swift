@@ -444,8 +444,11 @@ struct ActivityHistoryView: View {
         }()
         // 활동 진행 케이스: done/failed 아니면서 valueRecorded > 0.
         let isActivityProgress = isActivity && !rc.done && !rc.failed && valueRecorded > 0
+        // 반복 항목만 occurrence chip 노출 — 1회성은 occurrence가 항상 startDate라 중복.
+        let isRecurring = rc.item?.recurrenceRule != nil
         VStack(alignment: .leading, spacing: 4) {
             // all-item 모드: 항목 제목 강조. 카테고리 바: Todo는 카테고리 색, 목표는 iconColorHex.
+            // 반복 항목이면 제목 뒤에 occurrence chip — 어느 회차인지 식별.
             if item == nil, let title = rc.item?.title, !title.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if let barColor = recordBarColor(for: rc) {
@@ -459,6 +462,17 @@ struct ActivityHistoryView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if isRecurring, let occDate = rc.date {
+                        occurrenceChip(occDate)
+                    }
+                }
+            }
+            // per-item 모드 + 반복: 별도 title 라인 추가해 occurrence chip 표시.
+            // 1회성 항목은 chip 없음 — 추가 라인도 없음 (행 컴팩트 유지).
+            if item != nil, isRecurring, let occDate = rc.date {
+                HStack {
+                    occurrenceChip(occDate)
+                    Spacer(minLength: 0)
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -487,6 +501,39 @@ struct ActivityHistoryView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// 반복 항목의 occurrence 식별 chip — 작은 calendar 아이콘 + 짧은 일자.
+    /// occDate는 UTC anchor (반복 occurrence start date) — 같은 timezone에서 라벨링.
+    @ViewBuilder
+    private func occurrenceChip(_ occDate: Date) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "calendar")
+                .font(.system(size: 9))
+            Text(verbatim: occurrenceChipLabel(occDate))
+                .font(.system(size: 11).monospacedDigit())
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            Capsule().fill(Color(.tertiarySystemFill))
+        )
+    }
+
+    /// occurrence chip 일자 라벨 — UTC anchor 강제 (캘린더 날짜 의미).
+    /// "5/28 (수)" / "5/28 (Wed)" 포맷 — 요일 분리 포맷팅으로 로케일 무관 컴팩트 표시.
+    private func occurrenceChipLabel(_ date: Date) -> String {
+        let utc = TimeZone(identifier: "UTC") ?? .gmt
+        let dateF = DateFormatter()
+        dateF.locale = Locale.current
+        dateF.timeZone = utc
+        dateF.setLocalizedDateFormatFromTemplate("Md")
+        let weekdayF = DateFormatter()
+        weekdayF.locale = Locale.current
+        weekdayF.timeZone = utc
+        weekdayF.setLocalizedDateFormatFromTemplate("EEE")
+        return "\(dateF.string(from: date)) (\(weekdayF.string(from: date)))"
     }
 
     /// 항목 제목 앞 세로 바 색 — Todo는 카테고리, 목표는 iconColorHex.
