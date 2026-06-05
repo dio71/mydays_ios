@@ -13,25 +13,38 @@ import WidgetKit
 
 struct GoalLockRectEntry: TimelineEntry {
     let date: Date
-    /// 좌·우 슬롯에 표시할 snapshot. 활성 목표 < 2개면 second는 nil.
-    let first: ItemSnapshot?
-    let second: ItemSnapshot?
+    /// 좌·우 슬롯에 표시할 목표 (각 최대 4 분할). 균형 분배 — 총 최대 8.
+    let left: [ItemSnapshot]
+    let right: [ItemSnapshot]
 }
 
 struct GoalLockRectProvider: TimelineProvider {
 
+    /// rectangular 2 slot에 표시할 최대 목표 수 (4분할 × 2).
+    static let capacity = 8
+
     func placeholder(in context: Context) -> GoalLockRectEntry {
         let now = Date()
         let snaps = GoalLockCircleProvider.fetchActiveGoalSnapshots(now: now)
-        return GoalLockRectEntry(date: now, first: snaps.first, second: snaps.count > 1 ? snaps[1] : nil)
+        let (l, r) = Self.split(Array(snaps.prefix(Self.capacity)))
+        return GoalLockRectEntry(date: now, left: l, right: r)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (GoalLockRectEntry) -> Void) {
         let now = Date()
         let snaps = GoalLockCircleProvider.fetchActiveGoalSnapshots(now: now)
-        completion(GoalLockRectEntry(date: now,
-                                     first: snaps.first,
-                                     second: snaps.count > 1 ? snaps[1] : nil))
+        let (l, r) = Self.split(Array(snaps.prefix(Self.capacity)))
+        completion(GoalLockRectEntry(date: now, left: l, right: r))
+    }
+
+    /// 목표를 좌/우 slot에 균형 분배 — 좌 = ceil(n/2)(최대 4), 우 = 나머지(최대 4).
+    /// 2개=각1개(풀 원), 4개=2+2, 8개=4+4. 분할 수를 최소화해 가독성 ↑.
+    static func split(_ snaps: [ItemSnapshot]) -> (left: [ItemSnapshot], right: [ItemSnapshot]) {
+        let n = min(snaps.count, 8)
+        let leftCount = min(4, Int((Double(n) / 2.0).rounded(.up)))
+        let left = Array(snaps.prefix(leftCount))
+        let right = Array(snaps.dropFirst(leftCount).prefix(4))
+        return (left, right)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<GoalLockRectEntry>) -> Void) {
@@ -62,13 +75,15 @@ struct GoalLockRectProvider: TimelineProvider {
             dates.insert(t)
         }
         let sortedDates = dates.sorted()
-        // LockRect: top 2 고정 (회전 없음). LockCircle은 index 2부터 회전하므로 중복 회피.
-        // 활성 목표 < 2개면 두 번째 slot은 빈 상태.
-        let entries: [GoalLockRectEntry] = sortedDates.map { entryDate in
-            let snaps = GoalLockCircleProvider.fetchActiveGoalSnapshots(now: entryDate)
-            let first: ItemSnapshot? = snaps.indices.contains(0) ? snaps[0] : nil
-            let second: ItemSnapshot? = snaps.indices.contains(1) ? snaps[1] : nil
-            return GoalLockRectEntry(date: entryDate, first: first, second: second)
+        // 상위 목표부터 최대 8개를 2 slot에 균형 분배. 8개 초과면 8개씩 window 회전.
+        let cap = Self.capacity
+        let entries: [GoalLockRectEntry] = sortedDates.enumerated().map { i, entryDate in
+            let all = GoalLockCircleProvider.fetchActiveGoalSnapshots(now: entryDate)
+            let windows = max(1, Int((Double(all.count) / Double(cap)).rounded(.up)))
+            let w = i % windows
+            let slice = Array(all.dropFirst(w * cap).prefix(cap))
+            let (l, r) = Self.split(slice)
+            return GoalLockRectEntry(date: entryDate, left: l, right: r)
         }
         let reloadAt = (entries.last?.date ?? now).addingTimeInterval(60)
         completion(Timeline(entries: entries, policy: .after(reloadAt)))
@@ -97,12 +112,12 @@ struct MyDaysNTDLockWidgetEntryView: View {
 
     var body: some View {
         Group {
-            if entry.first == nil && entry.second == nil {
+            if entry.left.isEmpty && entry.right.isEmpty {
                 emptyContent
             } else {
                 HStack(spacing: 8) {
-                    slot(entry.first)
-                    slot(entry.second)
+                    slot(entry.left)
+                    slot(entry.right)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -110,25 +125,16 @@ struct MyDaysNTDLockWidgetEntryView: View {
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
-    /// 1칸 형태 — circular widget과 동일 시각 (원형 배경 + 큰 아이콘 + 두꺼운 원형 arc).
+    /// 1칸 형태 — 원형 배경 + SegmentedGoalCircle(1~4 분할). 빈 slot은 배경 원만 (시각화 X).
     /// AccessoryWidgetBackground는 부모 family(rectangular)에 맞춰 사각형으로 그려져 원형 시각 깨짐 →
-    /// 명시 Circle로 배경 구성. clipShape(Circle)도 가능하지만 시스템 tint를 잃어 의도된 시각 손실.
-    /// snap nil이면 빈 자리(자리 유지, 시각화 X).
+    /// 명시 Circle로 배경 구성.
     @ViewBuilder
-    private func slot(_ snap: ItemSnapshot?) -> some View {
+    private func slot(_ snaps: [ItemSnapshot]) -> some View {
         ZStack {
             Circle()
                 .fill(.fill.tertiary)
-            if let snap {
-                Image(systemName: snap.iconName)
-                    .font(.system(size: 18, weight: .medium))
-                    .widgetAccentable()
-                Circle()
-                    .trim(from: 0, to: max(0, min(snap.progress, 1)))
-                    .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .padding(2)
-                    .widgetAccentable()
+            if !snaps.isEmpty {
+                SegmentedGoalCircle(snapshots: snaps)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -164,30 +170,35 @@ struct MyDaysNTDLockWidget: Widget {
 #Preview(as: .accessoryRectangular) {
     MyDaysNTDLockWidget()
 } timeline: {
+    // 8개 → 좌 4분할 + 우 4분할
     GoalLockRectEntry(
         date: .now,
-        first: ItemSnapshot(
-            id: "p1", kind: .notTodo, title: "16시간 단식",
-            bucket: .ongoing, progress: 0.55,
-            sortAnchor: .now.addingTimeInterval(7 * 3600),
-            iconName: "fork.knife", iconColorHex: "blue"
-        ),
-        second: ItemSnapshot(
-            id: "p2", kind: .activity, title: "걷기",
-            bucket: .ongoing, progress: 0.3,
-            sortAnchor: .now.addingTimeInterval(8 * 3600),
-            iconName: "figure.walk", iconColorHex: "green"
-        )
+        left: [
+            ItemSnapshot(id: "1", kind: .notTodo, title: "단식", bucket: .ongoing, progress: 0.55,
+                         sortAnchor: .now, iconName: "fork.knife", iconColorHex: "blue"),
+            ItemSnapshot(id: "2", kind: .activity, title: "걷기", bucket: .ongoing, progress: 0.7,
+                         sortAnchor: .now, iconName: "figure.walk", iconColorHex: "green"),
+            ItemSnapshot(id: "3", kind: .focus, title: "집중", bucket: .ongoing, progress: 0.3,
+                         sortAnchor: .now, iconName: "hourglass.bottomhalf.filled", iconColorHex: "purple"),
+            ItemSnapshot(id: "4", kind: .habit, title: "독서", bucket: .scheduled, progress: 0.0,
+                         sortAnchor: .now, iconName: "book", iconColorHex: "orange"),
+        ],
+        right: [
+            ItemSnapshot(id: "5", kind: .notTodo, title: "금주", bucket: .ongoing, progress: 0.8,
+                         sortAnchor: .now, iconName: "wineglass", iconColorHex: "red"),
+            ItemSnapshot(id: "6", kind: .activity, title: "물", bucket: .ongoing, progress: 0.5,
+                         sortAnchor: .now, iconName: "drop", iconColorHex: "teal"),
+            ItemSnapshot(id: "7", kind: .habit, title: "운동", bucket: .ongoing, progress: 0.25,
+                         sortAnchor: .now, iconName: "dumbbell", iconColorHex: "blue"),
+        ]
     )
+    // 2개 → 각 1개 (풀 원 2개)
     GoalLockRectEntry(
         date: .now,
-        first: ItemSnapshot(
-            id: "p3", kind: .focus, title: "집중",
-            bucket: .ongoing, progress: 0.7,
-            sortAnchor: .now,
-            iconName: "hourglass.bottomhalf.filled", iconColorHex: "purple"
-        ),
-        second: nil
+        left: [ItemSnapshot(id: "a", kind: .notTodo, title: "단식", bucket: .ongoing, progress: 0.55,
+                            sortAnchor: .now, iconName: "fork.knife", iconColorHex: "blue")],
+        right: [ItemSnapshot(id: "b", kind: .activity, title: "걷기", bucket: .ongoing, progress: 0.3,
+                             sortAnchor: .now, iconName: "figure.walk", iconColorHex: "green")]
     )
-    GoalLockRectEntry(date: .now, first: nil, second: nil)
+    GoalLockRectEntry(date: .now, left: [], right: [])
 }

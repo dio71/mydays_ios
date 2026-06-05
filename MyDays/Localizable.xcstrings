@@ -7819,6 +7819,38 @@
         }
       }
     },
+    "widget.combo.description" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tasks on the left, goals on the right."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "왼쪽은 할일, 오른쪽은 목표를 함께 표시합니다."
+          }
+        }
+      }
+    },
+    "widget.combo.display_name" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tasks & Goals"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할일 + 목표"
+          }
+        }
+      }
+    },
     "widget.countdown.h_m_format" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7865,6 +7897,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "오늘 일정 없음"
+          }
+        }
+      }
+    },
+    "widget.goal_grid.description" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show goal progress as colored rings."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "목표 진행도를 원형 진행바로 표시합니다."
+          }
+        }
+      }
+    },
+    "widget.goal_grid.display_name" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goals"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "목표"
+          }
+        }
+      }
+    },
+    "widget.goal_grid.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No active goals"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "진행 중인 목표 없음"
           }
         }
       }
@@ -7994,13 +8074,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Show the most relevant Fast occurrence and its countdown."
+            "value" : "Show today's tasks."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "가장 가까운 절제 목표의 카운트다운을 표시합니다."
+            "value" : "오늘의 할일을 표시합니다."
           }
         }
       }
@@ -8011,13 +8091,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fast"
+            "value" : "Tasks"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "절제 목표"
+            "value" : "할일"
           }
         }
       }
@@ -8222,6 +8302,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "절제 %d · 할일 %d · 루틴 %d"
+          }
+        }
+      }
+    },
+    "widget.todo.count_format" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tasks : %lld/%lld"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할일 : %lld/%lld"
+          }
+        }
+      }
+    },
+    "widget.todo.end_at" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ends %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 종료"
+          }
+        }
+      }
+    },
+    "widget.todo.start_at" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starts %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 시작"
           }
         }
       }

@@ -1,5 +1,6 @@
 import CoreData
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // MARK: - Home Widget (Small / Medium)
@@ -47,6 +48,9 @@ struct ItemSnapshot: Equatable, Identifiable {
     let iconName: String
     /// 색상 rawValue (CategoryColor: "red", "blue" 등). nil이면 위젯이 앱 tint로 fallback.
     let iconColorHex: String?
+    /// 할일 2번째 라인 시간 라벨 (예: "12:00 - 13:00" / "9:00 시작"). 없으면 제목만. 목표는 nil.
+    /// var + 기본값 — 기존 ItemSnapshot 생성부(프리뷰 등) 호환.
+    var timeLabel: String? = nil
 
     var isGoal: Bool { kind != .todo }
 
@@ -160,6 +164,8 @@ struct MyDaysHomeProvider: TimelineProvider {
         let today: Date = .todayCalendarAnchor
         var snaps: [ItemSnapshot] = []
         for item in items {
+            // 할일 전용 위젯 — 목표(4-type)는 별도 GoalGridWidget에서 표시하므로 제외.
+            guard item.itemKind == .todo else { continue }
             // past(완료/취소/만료) 항목은 row 표시에서 제외. 카운트(computeCounts)는 별도라 영향 X.
             if let s = snapshot(for: item, now: now, today: today), s.bucket != .past {
                 snaps.append(s)
@@ -185,8 +191,46 @@ struct MyDaysHomeProvider: TimelineProvider {
             progress: progress,
             sortAnchor: cls.anchor,
             iconName: resolveIcon(for: item),
-            iconColorHex: resolveColorHex(for: item)
+            iconColorHex: resolveColorHex(for: item),
+            timeLabel: todoTimeLabel(for: item, today: today)
         )
+    }
+
+    /// 할일 2번째 라인 시간 라벨. 목표/시간미지정/기간 중간일은 nil(제목만).
+    /// - 단일일(시작==종료일) + 시간지정: "시작 - 종료" (시각 같으면 단일 시각).
+    /// - 기간(시작≠종료일): 오늘이 시작일이면 "시작시각 시작", 종료일이면 "종료시각 종료", 그 외 nil.
+    private static func todoTimeLabel(for item: Item, today: Date) -> String? {
+        guard item.itemKind == .todo, item.hasExplicitTime else { return nil }
+        guard let startDay = item.startDate else { return nil }
+        let dueDay = item.dueDate ?? startDay
+        let cal = Calendar.gmt
+        if cal.isDate(startDay, inSameDayAs: dueDay) {
+            // 단일일 + 시간 지정.
+            if item.startHourInt == item.dueHourInt || item.dueHourInt >= 24 {
+                return hourLabel(item.startHourInt)
+            }
+            return "\(hourLabel(item.startHourInt)) - \(hourLabel(item.dueHourInt))"
+        }
+        // 기간 — 오늘이 시작/종료일일 때만.
+        if cal.isDate(today, inSameDayAs: startDay) {
+            return String(format: NSLocalizedString("widget.todo.start_at", comment: ""), hourLabel(item.startHourInt))
+        }
+        if cal.isDate(today, inSameDayAs: dueDay) {
+            return String(format: NSLocalizedString("widget.todo.end_at", comment: ""), hourLabel(item.dueHourInt))
+        }
+        return nil
+    }
+
+    /// 정수 hour(0~24) → 로케일 시각 문자열 ("14:00" / "오후 2:00"). 24+는 0시로 wrap.
+    private static func hourLabel(_ hour: Int) -> String {
+        let h = ((hour % 24) + 24) % 24
+        var comps = DateComponents()
+        comps.hour = h
+        let date = Calendar.current.date(from: comps) ?? Date()
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.setLocalizedDateFormatFromTemplate("jm")
+        return f.string(from: date)
     }
 
     private static func snapshotID(for item: Item, occurrenceKey: Date) -> String {
@@ -465,12 +509,184 @@ extension ItemSnapshot {
     }
 }
 
+extension Color {
+    /// HSB brightness 조정 (음수=어둡게, 양수=밝게). 라이트모드 텍스트 진하게용.
+    func adjustBrightness(_ delta: CGFloat) -> Color {
+        let ui = UIColor(self)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
+        return Color(hue: Double(h),
+                     saturation: Double(s),
+                     brightness: Double(max(0, min(1, b + delta))),
+                     opacity: Double(a))
+    }
+
+    /// 다크모드 텍스트용 — 채도를 낮춰 파스텔화 + 명도 확보. 어두운 바탕에서 밝게 보임.
+    /// (단순 brightness +는 이미 밝은 색에서 clamp돼 효과 없음 → 채도 down이 핵심.)
+    func pastelBright(saturationScale: CGFloat, minBrightness: CGFloat) -> Color {
+        let ui = UIColor(self)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
+        return Color(hue: Double(h),
+                     saturation: Double(s * saturationScale),
+                     brightness: Double(max(b, minBrightness)),
+                     opacity: Double(a))
+    }
+}
+
+// MARK: - 재사용 컴포넌트 (할일 컬럼) — 단독 위젯 + 조합 위젯 공용
+
+/// 할일 행 레이아웃 상수/계산.
+enum TodoLayout {
+    static let widgetContentHeight: CGFloat = 142   // small/medium content 높이
+    static let largeContentHeight: CGFloat = 320    // large content 높이(근사)
+    static let headerHeight: CGFloat = 44
+    static let rowHeightDouble: CGFloat = 36        // 시간 라벨 있는 2줄
+    static let rowHeightSingle: CGFloat = 24        // 제목만 1줄
+    static let rowSpacing: CGFloat = 4
+
+    static func rowHeight(for snap: ItemSnapshot) -> CGFloat {
+        snap.timeLabel == nil ? rowHeightSingle : rowHeightDouble
+    }
+
+    /// 높이 budget에 들어가는 만큼만 순서대로 (가변 높이 greedy).
+    static func fitted(_ snaps: [ItemSnapshot], budget: CGFloat) -> [ItemSnapshot] {
+        guard budget > 0 else { return [] }
+        var result: [ItemSnapshot] = []
+        var used: CGFloat = 0
+        for snap in snaps {
+            let h = rowHeight(for: snap)
+            let add = result.isEmpty ? h : (rowSpacing + h)
+            guard used + add <= budget else { break }
+            used += add
+            result.append(snap)
+        }
+        return result
+    }
+}
+
+/// 할일 헤더 — 큰 일자 + 요일 + "할일 : n/m".
+struct TodoHeader: View {
+    let date: Date
+    let counts: ItemCounts
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text(verbatim: Self.formatDay(date))
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: Self.formatWeekday(date))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(verbatim: String(format: NSLocalizedString("widget.todo.count_format", comment: ""),
+                                      counts.todoActive, counts.todoTotal))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func formatDay(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = .current; f.dateFormat = "d"; return f.string(from: d)
+    }
+    private static func formatWeekday(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = .current; f.setLocalizedDateFormatFromTemplate("EEEE"); return f.string(from: d)
+    }
+}
+
+/// 할일 행 — round box + 세로 색상바 + 제목 + 시간 라벨 (아이콘 없음).
+struct TodoRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let snap: ItemSnapshot
+
+    var body: some View {
+        let color = snap.resolvedColor()
+        let isDark = colorScheme == .dark
+        let titleColor: Color = isDark ? Color(white: 0.82) : color.adjustBrightness(-0.34)
+        let timeColor = isDark ? color.pastelBright(saturationScale: 0.65, minBrightness: 0.88) : color
+        let bgOpacity: Double = isDark ? 0.24 : 0.11
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(color)
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(verbatim: snap.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(titleColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let t = snap.timeLabel {
+                    Text(verbatim: t)
+                        .font(.caption2)
+                        .foregroundStyle(timeColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .padding(.vertical, 2)
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: TodoLayout.rowHeight(for: snap))
+        .background(color.opacity(bgOpacity))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// 할일 빈 상태.
+struct TodoEmptyView: View {
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "tray")
+                .font(.system(size: 26))
+                .foregroundStyle(.secondary)
+            Text("widget.empty.today")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.bottom, 8)
+    }
+}
+
+/// 할일 컬럼 — (옵션 헤더) + 행들 위부터. rows는 호출 측에서 미리 fit.
+/// showEmptyState=true면 rows 비었을 때 빈 안내, false면 빈 자리(오버플로우 컬럼용).
+struct TodoColumn: View {
+    let rows: [ItemSnapshot]
+    var date: Date = Date()
+    var counts: ItemCounts = .empty
+    var showHeader: Bool = true
+    var showEmptyState: Bool = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TodoLayout.rowSpacing) {
+            if showHeader {
+                TodoHeader(date: date, counts: counts)
+            }
+            if rows.isEmpty {
+                if showEmptyState { TodoEmptyView() }
+            } else {
+                ForEach(rows) { TodoRowView(snap: $0) }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
 // MARK: - Views
 
 struct MyDaysWidgetEntryView: View {
 
     @Environment(\.widgetFamily) private var family
-    @Environment(\.colorScheme) private var colorScheme
     let entry: MyDaysHomeEntry
 
     var body: some View {
@@ -485,289 +701,28 @@ struct MyDaysWidgetEntryView: View {
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
-    // MARK: - 공간 추정 / fit
-    //
-    // ViewThatFits는 widget process 메모리 부담 + variant pass 비용 — deterministic 추정으로 처리.
-    // - 위젯 content 영역 ~142pt (small/medium 동일 높이).
-    // - 헤더 영역(date + counts) ~50pt.
-    // - row 1줄(progress capsule or text + icon) ~22pt, row 간 spacing 4pt.
-    //   item 1개당 effective ~26pt. budget 92pt면 약 3~4개.
-
-    private static let widgetContentHeight: CGFloat = 142
-    private static let headerHeight: CGFloat = 44  // 일자 큰 글자 + 우측 2줄(요일/카운트) 기준.
-    private static let rowHeight: CGFloat = 28
-    private static let rowSpacing: CGFloat = 5
-
-    private static func fitCount(in budget: CGFloat) -> Int {
-        guard budget > 0 else { return 0 }
-        // 첫 row는 spacing 없음 → effective = rowHeight, 그 다음부터 spacing 포함.
-        let extra = max(0, budget - rowHeight)
-        return 1 + Int(extra / (rowHeight + rowSpacing))
-    }
-
-    private static func smallFitCount() -> Int {
-        fitCount(in: widgetContentHeight - headerHeight)
-    }
-
-    private static func mediumLeftFitCount() -> Int {
-        fitCount(in: widgetContentHeight - headerHeight)
-    }
-
-    private static func mediumRightFitCount() -> Int {
-        fitCount(in: widgetContentHeight)
-    }
-
-    // MARK: - Header (날짜 + 카운트 박스)
-
-    /// 좌측: 큰 일자 / 우측 stack: 요일(상, 좌측 정렬) + 카운트(하, 우측 정렬).
-    /// small widget에서 한 줄에 모두 넣으면 카운트 숫자 잘림 → 우측 영역을 2줄로 분리해 공간 확보.
-    private var headerRow: some View {
-        HStack(alignment: .center, spacing: 6) {
-            Text(verbatim: Self.formatDay(entry.date))
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            VStack(spacing: 3) {
-                Text(verbatim: Self.formatWeekday(entry.date))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                countsBox
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 우상단 1줄 카운트 박스. (scope) n/m  (checkmark.circle) n/m.
-    private var countsBox: some View {
-        HStack(spacing: 6) {
-            countItem(symbol: "scope",
-                      active: entry.counts.goalActive,
-                      total: entry.counts.goalTotal)
-            countItem(symbol: "checkmark.circle",
-                      active: entry.counts.todoActive,
-                      total: entry.counts.todoTotal)
-        }
-        .lineLimit(1)
-    }
-
-    private func countItem(symbol: String, active: Int, total: Int) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(verbatim: "\(active)/\(total)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-    }
-
-    // MARK: - Date formatters
-
-    private static func formatDay(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale.current
-        f.dateFormat = "d"
-        return f.string(from: date)
-    }
-
-    private static func formatWeekday(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale.current
-        f.setLocalizedDateFormatFromTemplate("EEEE")
-        return f.string(from: date)
-    }
-
-    // MARK: - Row (목표 = progress capsule + 타이틀, 할일 = 아이콘 + 타이틀)
-
-    @ViewBuilder
-    private func itemRow(_ snap: ItemSnapshot) -> some View {
-        HStack(spacing: 7) {
-            // leading icon — MissionRow goalLeadingIcon 4-state 시각 규칙 적용:
-            //   - scheduled (예정): 회색 outline circle + 회색 icon
-            //   - ongoing (진행 중): goalColor outline circle + goalColor icon
-            //   - past (완료/포기): goalColor filled + 흰 icon
-            widgetLeadingIcon(snap)
-                .frame(width: 22, height: 22)
-            if snap.isGoal {
-                progressCapsule(snap)
-            } else {
-                Text(verbatim: snap.title)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        // row는 고정 크기. 항목 갯수가 fit max보다 적으면 아래는 자연 빈 공간으로 둠.
-        .frame(height: Self.rowHeight)
-        // past bucket은 dim — 완료/포기/만료 시각화.
-        .opacity(snap.bucket == .past ? 0.55 : 1.0)
-    }
-
-    /// leading icon — MissionRow.goalLeadingIcon 4-state 시각 규칙.
-    /// 모든 항목(목표/할일)에 동일 규칙 적용 — bucket 기반.
-    @ViewBuilder
-    private func widgetLeadingIcon(_ snap: ItemSnapshot) -> some View {
-        let color = snap.resolvedColor()
-        let iconPointSize: CGFloat = 12
-        switch snap.bucket {
-        case .past:
-            // 완료/포기 — color filled + 흰 icon (MissionRow done state).
-            ZStack {
-                Circle().fill(color)
-                Image(systemName: snap.iconName)
-                    .font(.system(size: iconPointSize, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-        case .ongoing:
-            // 진행 중 — color outline + color icon (MissionRow inProgress state).
-            ZStack {
-                Circle().strokeBorder(color, lineWidth: 1)
-                Image(systemName: snap.iconName)
-                    .font(.system(size: iconPointSize, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-        case .scheduled:
-            // 예정 — secondary outline + secondary icon (MissionRow scheduled state).
-            ZStack {
-                Circle().strokeBorder(Color.secondary, lineWidth: 1)
-                Image(systemName: snap.iconName)
-                    .font(.system(size: iconPointSize, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// 목표 row의 progress capsule + 타이틀 overlay.
-    /// MissionRow.progressCapsule과 동일 패턴 — 안쪽 fill은 Capsule (양끝 round) + outer `.clipShape(Capsule())`로
-    /// 진행률 작을 때 round가 바 영역 바깥으로 나가지 않도록 clip.
-    @ViewBuilder
-    private func progressCapsule(_ snap: ItemSnapshot) -> some View {
-        let progress = max(0, min(snap.progress, 1))
-        let fill = snap.resolvedColor()
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.secondary.opacity(0.22))
-                Capsule()
-                    .fill(fill.opacity(0.35))
-                    .frame(width: max(0, proxy.size.width * progress))
-                Text(verbatim: snap.title)
-                    .font(.caption.weight(.semibold))
-                    // NTDRow와 동일 패턴 — 라이트: goalColor(fill 위 또렷), 다크: .primary(white).
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : fill)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .clipShape(Capsule())
-        }
-        .frame(height: 24)
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Layout 전략
-    //
-    // - row 박스 높이를 fit count × rowHeight + (fitCount-1) × rowSpacing 로 미리 계산.
-    // - 이 박스를 widget 바닥에 정렬 → device별 widget 높이 차이는 박스 위쪽 여백이 흡수.
-    // - 박스 안 row는 위부터 채움 (top 정렬). 항목 < fitCount면 박스 아래는 빈 공간이지만
-    //   박스 자체가 바닥에 붙어 있어 widget 아래 여백 0.
-
-    private static func boxHeight(for count: Int) -> CGFloat {
-        guard count > 0 else { return 0 }
-        return CGFloat(count) * rowHeight + CGFloat(max(0, count - 1)) * rowSpacing
-    }
-
-    /// 박스 안 row 위 정렬 layout. 항목이 박스 fit보다 적으면 박스 아래는 빈 공간.
-    @ViewBuilder
-    private func rowBox(snaps: [ItemSnapshot], height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: Self.rowSpacing) {
-            ForEach(snaps) { snap in
-                itemRow(snap)
-            }
-            Spacer(minLength: 0)  // 박스 안 빈 자리를 아래로 밀어 row를 위 정렬.
-        }
-        .frame(height: height, alignment: .topLeading)
-    }
-
-    // MARK: - Small
+    // 헤더 아래로 항목을 위부터 자연 스택. fitted로 widget 높이에 맞춰 개수 제한.
 
     private var smallLayout: some View {
-        let count = Self.smallFitCount()
-        let snaps = Array(entry.snapshots.prefix(count))
-        let box = Self.boxHeight(for: count)
-        return VStack(spacing: 0) {
-            headerRow
-            Spacer(minLength: 0)  // 헤더와 박스 사이 flex — device별 widget 높이 차이 흡수.
-            if snaps.isEmpty {
-                emptyContent
-            } else {
-                rowBox(snaps: snaps, height: box)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        let rows = TodoLayout.fitted(entry.snapshots,
+                                     budget: TodoLayout.widgetContentHeight - TodoLayout.headerHeight)
+        return TodoColumn(rows: rows, date: entry.date, counts: entry.counts)
     }
-
-    // MARK: - Medium
 
     private var mediumLayout: some View {
-        let leftMax = Self.mediumLeftFitCount()
-        let rightMax = Self.mediumRightFitCount()
-        let snaps = entry.snapshots
-        let leftCount = min(snaps.count, leftMax)
-        let leftSlice = Array(snaps.prefix(leftCount))
-        let rest = Array(snaps.dropFirst(leftCount))
-        let rightSlice = Array(rest.prefix(rightMax))
-        let leftBox = Self.boxHeight(for: leftMax)
-        let rightBox = Self.boxHeight(for: rightMax)
-        // 빈 상태 — 양쪽 모두 비어있으면 headerRow만 두고 본문 가운데에 emptyContent.
-        if snaps.isEmpty {
-            return AnyView(
-                VStack(spacing: 0) {
-                    headerRow
-                    Spacer(minLength: 0)
-                    emptyContent
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            )
+        let all = entry.snapshots
+        if all.isEmpty {
+            return AnyView(TodoColumn(rows: [], date: entry.date, counts: entry.counts))
         }
+        let left = TodoLayout.fitted(all, budget: TodoLayout.widgetContentHeight - TodoLayout.headerHeight)
+        let rest = Array(all.dropFirst(left.count))
+        let right = TodoLayout.fitted(rest, budget: TodoLayout.widgetContentHeight)
         return AnyView(HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 0) {
-                headerRow
-                Spacer(minLength: 0)
-                rowBox(snaps: leftSlice, height: leftBox)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                rowBox(snaps: rightSlice, height: rightBox)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            TodoColumn(rows: left, date: entry.date, counts: entry.counts, showHeader: true)
+            // 오른쪽은 오버플로우 — 비면 빈 자리.
+            TodoColumn(rows: right, showHeader: false, showEmptyState: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
-    }
-
-    /// 빈 상태 — 작은 아이콘 + "Nothing Today" / "오늘 일정 없음". 본문 영역 가운데 정렬.
-    /// headerRow는 호출 측에서 함께 노출 (헤더 자체는 빈 상태에서도 보임).
-    @ViewBuilder
-    private var emptyContent: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "tray")
-                .font(.system(size: 26))
-                .foregroundStyle(.secondary)
-            Text("widget.empty.today")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, 8)
     }
 }
 
