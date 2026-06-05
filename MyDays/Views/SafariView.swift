@@ -26,4 +26,14 @@ enum AppLinks {
         return URL(string: urlString)
             ?? URL(string: "https://app.snapplay.io/docs/mydays_privacy_policy.en.html")!
     }
+
+    /// 도움말(FAQ). 사용자 언어에 따라 ko/en 페이지 분기.
+    static var help: URL {
+        let isKorean = Locale.preferredLanguages.first?.hasPrefix("ko") ?? false
+        let urlString = isKorean
+            ? "https://app.snapplay.io/docs/mydays_help.ko.html"
+            : "https://app.snapplay.io/docs/mydays_help.en.html"
+        return URL(string: urlString)
+            ?? URL(string: "https://app.snapplay.io/docs/mydays_help.en.html")!
+    }
 }

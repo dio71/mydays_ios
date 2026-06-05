@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>MyDays Help</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1c1c1e; --muted: #6e6e73;
+    --border: #e0e0e5; --accent: #0a84ff; --card: #f5f5f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000; --fg: #f2f2f7; --muted: #98989d;
+      --border: #38383a; --accent: #0a84ff; --card: #1c1c1e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.65; -webkit-text-size-adjust: 100%;
+  }
+  .container { max-width: 720px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin: 0 0 28px; }
+  h2 { font-size: 1.05rem; margin: 0; }
+  .faq {
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; margin: 12px 0; background: var(--card);
+  }
+  .faq p { margin: 8px 0 0; }
+  .faq ul { margin: 8px 0 0; padding-left: 1.2em; }
+  .faq li { margin: 4px 0; }
+  .q { color: var(--accent); font-weight: 600; }
+  a { color: var(--accent); }
+  .shot {
+    margin: 12px 0 0; padding: 24px; text-align: center;
+    border: 1px dashed var(--border); border-radius: 10px;
+    color: var(--muted); font-size: 0.85rem;
+  }
+  .section-title { margin: 28px 0 4px; font-size: 0.85rem; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>MyDays Help</h1>
+<p class="meta">Frequently asked questions · Last updated [YYYY-MM-DD]</p>
+
+<div class="section-title">GETTING STARTED</div>
+
+<div class="faq">
+  <h2 class="q">What's the difference between tasks and goals?</h2>
+  <p>A <strong>task</strong> is something you do once or within a period (e.g., a meeting, a deadline). A <strong>goal</strong> is an ongoing habit or abstention. Goals are tracked with progress and streaks.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">What are the 4 goal types (Abstain · Activity · Focus · Habit)?</h2>
+  <ul>
+    <li><strong>Abstain</strong> — Refrain from something for a set time (e.g., fasting). Tracked with a countdown.</li>
+    <li><strong>Activity</strong> — A numeric target (e.g., 10,000 steps, 2L water). Steps/distance can sync from the Health app.</li>
+    <li><strong>Focus</strong> — Stay focused for a set duration (e.g., study 2h), via the focus screen.</li>
+    <li><strong>Habit</strong> — A recurring habit you check off (e.g., reading, vitamins).</li>
+  </ul>
+  <div class="shot">[Screenshot: goal type picker]</div>
+</div>
+
+<div class="faq">
+  <h2 class="q">How do I set up a recurring item?</h2>
+  <p>In the item editor, turn on <strong>Repeat</strong> and choose daily / weekly (weekdays) / monthly (dates or rules) / yearly. To stop a recurrence, set a <strong>repeat end date</strong>.</p>
+</div>
+
+<div class="section-title">WIDGETS &amp; AUTO-TRACKING</div>
+
+<div class="faq">
+  <h2 class="q">How do I add a widget?</h2>
+  <ul>
+    <li><strong>Home Screen</strong>: long-press empty space → <strong>+</strong> (top-left) → search "MyDays" → choose Tasks / Goals / Tasks &amp; Goals.</li>
+    <li><strong>Lock Screen</strong>: long-press the lock screen → "Customize" → tap a widget area → add MyDays.</li>
+  </ul>
+  <div class="shot">[Screenshot: adding a widget / widget types]</div>
+</div>
+
+<div class="faq">
+  <h2 class="q">My activity (e.g., steps) isn't updating automatically.</h2>
+  <p>Activity goals (steps, distance, calories, stairs) need <strong>Health app permission</strong>. Allow it in Settings &gt; Info &amp; Permissions &gt; Health permissions, or in Health &gt; Sharing &gt; Apps &gt; MyDays. Open the app once after granting to refresh.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">I'm not getting notifications.</h2>
+  <p>Check that <strong>Notifications</strong> are enabled in Settings &gt; Info &amp; Permissions &gt; App permissions. Per-item reminders can be turned on in the item editor.</p>
+</div>
+
+<div class="section-title">SYNC · DATA</div>
+
+<div class="faq">
+  <h2 class="q">How do I use it across multiple devices?</h2>
+  <p>Sign in with the same <strong>iCloud account</strong> and your data syncs automatically (see the last sync time in Settings &gt; Sync). No separate account or sign-up.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">What does the Pro Plan add?</h2>
+  <p>All core features are free. The Pro Plan adds <strong>unlimited usage</strong> (goals, recurrences, categories, checklists), <strong>theme colors</strong>, and <strong>activity reports</strong>. One-time purchase, yours forever.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">How do I back up or delete my data?</h2>
+  <p>In Settings &gt; Info &amp; Permissions &gt; Data, you can <strong>Export Data</strong> (JSON backup) and <strong>Delete All Data</strong>.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">I have another question.</h2>
+  <p>Send it via Settings &gt; Help &amp; Feedback &gt; <strong>Report a Bug or Suggestion</strong>. We'll take a look.</p>
+</div>
+
+</div>
+</body>
+</html>

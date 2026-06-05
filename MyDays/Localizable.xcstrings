@@ -2766,6 +2766,71 @@
         }
       }
     },
+    "feedback.body_prefix" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please describe your feedback:"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내용을 적어주세요:"
+          }
+        }
+      }
+    },
+    "feedback.diagnostics" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics (please keep)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "진단 정보 (지우지 말아주세요)"
+          }
+        }
+      }
+    },
+    "feedback.subject" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[MyDays] User Feedback"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[MyDays] 사용자 피드백"
+          }
+        }
+      }
+    },
+    "feedback.suggestion.subject" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[MyDays] Suggestion"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[MyDays] 건의사항"
+          }
+        }
+      }
+    },
     "filter.clear" : {
       "localizations" : {
         "en" : {
@@ -6359,6 +6424,104 @@
         }
       }
     },
+    "settings.coming_soon" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Coming soon"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "준비 중"
+          }
+        }
+      }
+    },
+    "settings.data.delete_all" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete All Data"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체 데이터 삭제"
+          }
+        }
+      }
+    },
+    "settings.data.export" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Data"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터 내보내기"
+          }
+        }
+      }
+    },
+    "settings.feedback" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a Bug or Suggestion"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "버그 신고 및 건의하기"
+          }
+        }
+      }
+    },
+    "settings.feedback.suggestion" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send a Suggestion"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "건의하기"
+          }
+        }
+      }
+    },
+    "settings.help" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Help"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도움말"
+          }
+        }
+      }
+    },
     "settings.history.goal" : {
       "localizations" : {
         "en" : {
@@ -6391,6 +6554,22 @@
         }
       }
     },
+    "settings.info_permission" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Info & Permissions"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "정보 및 권한"
+          }
+        }
+      }
+    },
     "settings.label.version" : {
       "localizations" : {
         "en" : {
@@ -6403,6 +6582,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "버전"
+          }
+        }
+      }
+    },
+    "settings.onboarding_replay" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replay Onboarding"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "온보딩 다시 보기"
           }
         }
       }
@@ -6455,6 +6650,57 @@
         }
       }
     },
+    "settings.privacy.no_ads" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We don't show ads."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저희는 광고를 띄우지 않습니다."
+          }
+        }
+      }
+    },
+    "settings.privacy.no_collect" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We don't collect your personal data."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저희는 사용자 정보를 수집하지 않습니다."
+          }
+        }
+      }
+    },
+    "settings.privacy.no_track" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We don't track you."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저희는 사용자를 추적하지 않습니다."
+          }
+        }
+      }
+    },
     "settings.section.activity" : {
       "localizations" : {
         "en" : {
@@ -6484,6 +6730,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "앱 색상"
+          }
+        }
+      }
+    },
+    "settings.section.data" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Data"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터"
+          }
+        }
+      }
+    },
+    "settings.section.help_feedback" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Help & Feedback"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도움말 및 피드백"
           }
         }
       }

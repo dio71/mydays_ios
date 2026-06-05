@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>MyDays 도움말</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1c1c1e; --muted: #6e6e73;
+    --border: #e0e0e5; --accent: #0a84ff; --card: #f5f5f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000; --fg: #f2f2f7; --muted: #98989d;
+      --border: #38383a; --accent: #0a84ff; --card: #1c1c1e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
+    line-height: 1.65; -webkit-text-size-adjust: 100%;
+  }
+  .container { max-width: 720px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin: 0 0 28px; }
+  h2 { font-size: 1.05rem; margin: 0; }
+  .faq {
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; margin: 12px 0; background: var(--card);
+  }
+  .faq p { margin: 8px 0 0; }
+  .faq ul { margin: 8px 0 0; padding-left: 1.2em; }
+  .faq li { margin: 4px 0; }
+  .q { color: var(--accent); font-weight: 600; }
+  a { color: var(--accent); }
+  .shot {
+    margin: 12px 0 0; padding: 24px; text-align: center;
+    border: 1px dashed var(--border); border-radius: 10px;
+    color: var(--muted); font-size: 0.85rem;
+  }
+  .section-title { margin: 28px 0 4px; font-size: 0.85rem; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>MyDays 도움말</h1>
+<p class="meta">자주 묻는 질문 · 최종 업데이트 [YYYY-MM-DD]</p>
+
+<div class="section-title">시작하기</div>
+
+<div class="faq">
+  <h2 class="q">할일과 목표는 어떻게 다른가요?</h2>
+  <p><strong>할일</strong>은 한 번 또는 특정 기간에 하는 일정이에요(예: 회의, 마감). <strong>목표</strong>는 꾸준히 이어가는 습관·절제 같은 거예요. 목표는 진행률·연속 달성(streak)으로 추적됩니다.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">목표 4종(절제 · 활동 · 집중 · 습관)이 뭔가요?</h2>
+  <ul>
+    <li><strong>절제</strong> — 일정 시간 동안 무언가를 참기 (예: 단식, 금주). 카운트다운으로 진행.</li>
+    <li><strong>활동</strong> — 수치 목표 (예: 1만 보, 물 2L). 걸음·거리 등은 건강 앱에서 자동 측정 가능.</li>
+    <li><strong>집중</strong> — 정해진 시간만큼 집중 (예: 공부 2시간). 집중 화면에서 진행.</li>
+    <li><strong>습관</strong> — 매일/주기적으로 체크하는 습관 (예: 독서, 영양제).</li>
+  </ul>
+  <div class="shot">[스크린샷: 목표 유형 선택 화면]</div>
+</div>
+
+<div class="faq">
+  <h2 class="q">반복 일정은 어떻게 설정하나요?</h2>
+  <p>항목 편집 화면에서 <strong>반복</strong>을 켜고 매일 / 매주(요일) / 매월(일자·조건) / 매년을 선택하세요. 반복을 끝내려면 <strong>반복 종료일</strong>을 지정하면 됩니다.</p>
+</div>
+
+<div class="section-title">위젯 &amp; 자동 측정</div>
+
+<div class="faq">
+  <h2 class="q">위젯은 어떻게 추가하나요?</h2>
+  <ul>
+    <li><strong>홈 화면</strong>: 빈 곳을 길게 눌러 좌상단 <strong>+</strong> → "MyDays" 검색 → 할일 / 목표 / 할일+목표 위젯 선택.</li>
+    <li><strong>잠금 화면</strong>: 잠금 화면 길게 누름 → "사용자화" → 위젯 영역 탭 → MyDays 추가.</li>
+  </ul>
+  <div class="shot">[스크린샷: 위젯 추가 / 위젯 종류]</div>
+</div>
+
+<div class="faq">
+  <h2 class="q">걸음 수 같은 활동이 자동으로 안 들어와요.</h2>
+  <p>활동 목표(걸음·거리·칼로리·계단)는 <strong>건강 앱 권한</strong>이 필요해요. 설정 &gt; 정보 및 권한 &gt; 건강 앱 권한에서 허용하거나, 건강 앱 &gt; 공유 &gt; 앱 &gt; MyDays에서 읽기를 켜주세요. 권한 허용 후 앱을 한 번 열면 갱신됩니다.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">알림이 오지 않아요.</h2>
+  <p>설정 &gt; 정보 및 권한 &gt; 앱 권한에서 <strong>알림</strong>이 켜져 있는지 확인하세요. 항목별 알림은 항목 편집 화면에서 켤 수 있습니다.</p>
+</div>
+
+<div class="section-title">동기화 · 데이터</div>
+
+<div class="faq">
+  <h2 class="q">여러 기기에서 같이 쓰려면?</h2>
+  <p>같은 <strong>iCloud 계정</strong>으로 로그인하면 자동으로 동기화됩니다(설정 &gt; 동기화에서 마지막 동기화 시각 확인). 별도 계정/가입은 없습니다.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">프로 플랜은 뭐가 다른가요?</h2>
+  <p>무료로도 핵심 기능을 모두 쓸 수 있어요. 프로 플랜은 <strong>사용량 무제한</strong>(목표·반복·카테고리·체크리스트), <strong>테마 색상</strong>, <strong>활동 보고서</strong>를 제공합니다. 한 번 결제로 평생 사용.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">데이터를 백업하거나 삭제하려면?</h2>
+  <p>설정 &gt; 정보 및 권한 &gt; 데이터에서 <strong>데이터 내보내기</strong>(JSON 백업)와 <strong>전체 데이터 삭제</strong>를 할 수 있습니다.</p>
+</div>
+
+<div class="faq">
+  <h2 class="q">더 궁금한 점이 있어요.</h2>
+  <p>설정 &gt; 도움말 및 피드백 &gt; <strong>버그 신고 및 건의하기</strong>로 보내주세요. 빠르게 확인하겠습니다.</p>
+</div>
+
+</div>
+</body>
+</html>
