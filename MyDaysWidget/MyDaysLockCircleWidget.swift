@@ -132,7 +132,7 @@ struct GoalLockCircleProvider: TimelineProvider {
 
 // MARK: - View
 
-struct MyDaysNTDLockCircleWidgetEntryView: View {
+struct MyDaysLockCircleWidgetEntryView: View {
     let entry: GoalLockCircleEntry
 
     var body: some View {
@@ -149,12 +149,12 @@ struct MyDaysNTDLockCircleWidgetEntryView: View {
 
 // MARK: - Widget Configuration
 
-struct MyDaysNTDLockCircleWidget: Widget {
-    let kind: String = "MyDaysNTDLockCircleWidget"
+struct MyDaysLockCircleWidget: Widget {
+    let kind: String = "MyDaysLockCircleWidget"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: GoalLockCircleProvider()) { entry in
-            MyDaysNTDLockCircleWidgetEntryView(entry: entry)
+            MyDaysLockCircleWidgetEntryView(entry: entry)
         }
         .configurationDisplayName(Text("widget.ntd_lock_circle.display_name"))
         .description(Text("widget.ntd_lock_circle.description"))
@@ -165,7 +165,7 @@ struct MyDaysNTDLockCircleWidget: Widget {
 // MARK: - Preview
 
 #Preview(as: .accessoryCircular) {
-    MyDaysNTDLockCircleWidget()
+    MyDaysLockCircleWidget()
 } timeline: {
     // 4분할
     GoalLockCircleEntry(date: .now, snapshots: [

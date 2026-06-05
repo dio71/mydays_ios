@@ -35,7 +35,7 @@ struct SettingsView: View {
     // 사용자 테마 설정 — MyDaysApp의 @AppStorage와 같은 키 → 즉시 sync.
     // store: .appShared — App Group 공유. 위젯에서도 같은 값 읽음.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
-    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintPresetRaw: String = TintPreset.coral.rawValue
     @AppStorage(AppThemeKey.appearanceMode, store: .appShared)
     private var appearanceModeRaw: String = AppearanceMode.system.rawValue
 

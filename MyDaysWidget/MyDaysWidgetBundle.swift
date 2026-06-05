@@ -14,7 +14,7 @@ struct MyDaysWidgetBundle: WidgetBundle {
         MyDaysWidget()
         GoalGridWidget()
         ComboWidget()
-        MyDaysNTDLockWidget()
-        MyDaysNTDLockCircleWidget()
+        MyDaysLockWidget()
+        MyDaysLockCircleWidget()
     }
 }

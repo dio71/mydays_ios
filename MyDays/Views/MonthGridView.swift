@@ -70,9 +70,9 @@ struct MonthGridView: View {
 
     // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
-    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintPresetRaw: String = TintPreset.coral.rawValue
     private var tintColor: Color {
-        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+        (TintPreset(rawValue: tintPresetRaw) ?? .coral).color
     }
 
     /// 모든 active 항목 — Someday 제외, 삭제(status=2) 제외. cell 인디케이터(dot) 계산용.

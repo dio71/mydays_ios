@@ -521,6 +521,17 @@ extension Color {
                      opacity: Double(a))
     }
 
+    /// 채도만 scale (명도 유지). 홈 위젯 목표 원 아이콘/진행바 톤 다운용.
+    func desaturated(_ scale: CGFloat) -> Color {
+        let ui = UIColor(self)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
+        return Color(hue: Double(h),
+                     saturation: Double(max(0, min(1, s * scale))),
+                     brightness: Double(b),
+                     opacity: Double(a))
+    }
+
     /// 다크모드 텍스트용 — 채도를 낮춰 파스텔화 + 명도 확보. 어두운 바탕에서 밝게 보임.
     /// (단순 brightness +는 이미 밝은 색에서 clamp돼 효과 없음 → 채도 down이 핵심.)
     func pastelBright(saturationScale: CGFloat, minBrightness: CGFloat) -> Color {

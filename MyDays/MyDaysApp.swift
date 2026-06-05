@@ -8,7 +8,7 @@ struct MyDaysApp: App {
     // 사용자 테마 설정 — Settings에서 변경, 앱 전체 propagate.
     // store: .appShared — App Group 공유 suite. 위젯 process도 같은 값을 읽어 일관 tint 적용.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
-    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintPresetRaw: String = TintPreset.coral.rawValue
     @AppStorage(AppThemeKey.appearanceMode, store: .appShared)
     private var appearanceModeRaw: String = AppearanceMode.system.rawValue
     /// 첫 진입 onboarding 완료 여부. false면 권한 안내 페이지 노출.
@@ -16,7 +16,7 @@ struct MyDaysApp: App {
     private var onboardingShown: Bool = false
 
     private var tintColor: Color {
-        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+        (TintPreset(rawValue: tintPresetRaw) ?? .coral).color
     }
     private var colorScheme: ColorScheme? {
         (AppearanceMode(rawValue: appearanceModeRaw) ?? .system).colorScheme
@@ -40,7 +40,7 @@ struct MyDaysApp: App {
     /// `selectedItemTintColor` + `UITabBarAppearance` (item appearance) 모두 갱신.
     /// 신규 생성 default + 기존 인스턴스 즉시 갱신 둘 다 처리.
     private func applyTintAppearance() {
-        let color = UIColor((TintPreset(rawValue: tintPresetRaw) ?? .blue).color)
+        let color = UIColor((TintPreset(rawValue: tintPresetRaw) ?? .coral).color)
         UIView.appearance().tintColor = color
         UIWindow.appearance().tintColor = color
         UINavigationBar.appearance().tintColor = color

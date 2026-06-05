@@ -106,7 +106,7 @@ struct GoalLockRectProvider: TimelineProvider {
 
 // MARK: - View
 
-struct MyDaysNTDLockWidgetEntryView: View {
+struct MyDaysLockWidgetEntryView: View {
 
     let entry: GoalLockRectEntry
 
@@ -152,12 +152,12 @@ struct MyDaysNTDLockWidgetEntryView: View {
 
 // MARK: - Widget Configuration
 
-struct MyDaysNTDLockWidget: Widget {
-    let kind: String = "MyDaysNTDLockWidget"
+struct MyDaysLockWidget: Widget {
+    let kind: String = "MyDaysLockWidget"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: GoalLockRectProvider()) { entry in
-            MyDaysNTDLockWidgetEntryView(entry: entry)
+            MyDaysLockWidgetEntryView(entry: entry)
         }
         .configurationDisplayName(Text("widget.ntd_lock.display_name"))
         .description(Text("widget.ntd_lock.description"))
@@ -168,7 +168,7 @@ struct MyDaysNTDLockWidget: Widget {
 // MARK: - Preview
 
 #Preview(as: .accessoryRectangular) {
-    MyDaysNTDLockWidget()
+    MyDaysLockWidget()
 } timeline: {
     // 8개 → 좌 4분할 + 우 4분할
     GoalLockRectEntry(

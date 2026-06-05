@@ -51,6 +51,28 @@ struct FocusSessionView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 32) {
+                // 상단 현재 시간 — 락스크린 느낌 (날짜 + 큰 시각). 타이머 아님(분 단위 갱신).
+                // 오전/오후는 작게, 시각은 크게 분리. 톤은 회색.
+                TimelineView(.everyMinute) { context in
+                    let parts = clockParts(context.date)
+                    VStack(spacing: 2) {
+                        Text(context.date, format: .dateTime.weekday(.wide).month().day())
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.4))
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if !parts.period.isEmpty {
+                                Text(parts.period)
+                                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            }
+                            Text(parts.time)
+                                .font(.system(size: 64, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
+                .padding(.top, 60)
+
                 Spacer()
 
                 // 목표 아이콘 (작게, 회색 톤 — 산만 방지)
@@ -168,6 +190,23 @@ struct FocusSessionView: View {
                 gen.notificationOccurred(.success)
             }
         }
+    }
+
+    // MARK: - 시계 포맷
+
+    /// 현재 시각을 (오전/오후, 시:분)로 분리 — 시스템 12/24h 설정 반영.
+    /// 24h면 period는 빈 문자열.
+    private func clockParts(_ date: Date) -> (period: String, time: String) {
+        let locale = Locale.current
+        let is24h = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: locale)?.contains("a") == false
+        let timeFmt = DateFormatter()
+        timeFmt.locale = locale
+        // 고정 포맷 — 템플릿("hmm")은 ko에서 오전/오후를 포함해 period 중복됨. 시각만.
+        timeFmt.dateFormat = is24h ? "H:mm" : "h:mm"
+        let periodFmt = DateFormatter()
+        periodFmt.locale = locale
+        periodFmt.setLocalizedDateFormatFromTemplate("a")
+        return (is24h ? "" : periodFmt.string(from: date), timeFmt.string(from: date))
     }
 
     // MARK: - 색상

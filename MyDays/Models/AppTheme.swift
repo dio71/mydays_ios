@@ -13,14 +13,15 @@ import SwiftUI
 /// `Color.accentColor`는 SwiftUI 환경값을 읽으므로 root `.tint()`에 전달하면 자동 propagate.
 /// 색상 후보는 디자이너 큐레이션 — 따뜻한 톤 위주.
 enum TintPreset: String, CaseIterable, Identifiable {
-    case blue, coral, peach, mustard, sage, slate, forest, wine
+    // 표시 순서 = 선언 순서. 기본값은 coral(첫번째). blue는 맨 뒤.
+    case coral, peach, mustard, sage, slate, forest, wine, blue
 
     var id: String { rawValue }
 
     /// SwiftUI Color — `.tint()`에 전달.
     var color: Color {
         switch self {
-        case .blue:    return .blue
+        case .blue:    return Color(red: 0x4A/255, green: 0x86/255, blue: 0xCF/255)
         case .coral:   return Color(red: 0xE4/255, green: 0x7A/255, blue: 0x66/255)
         case .peach:   return Color(red: 0xEF/255, green: 0x97/255, blue: 0x6B/255)
         case .mustard: return Color(red: 0xDA/255, green: 0xA5/255, blue: 0x22/255)
@@ -113,8 +114,8 @@ extension TintPreset {
     /// 값 없으면 default `.blue`.
     static var currentColor: Color {
         let raw = UserDefaults.appShared.string(forKey: AppThemeKey.tintPreset)
-                  ?? TintPreset.blue.rawValue
-        return (TintPreset(rawValue: raw) ?? .blue).color
+                  ?? TintPreset.coral.rawValue
+        return (TintPreset(rawValue: raw) ?? .coral).color
     }
 }
 
@@ -127,10 +128,10 @@ extension TintPreset {
 
 private struct AppTintModifier: ViewModifier {
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
-    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintPresetRaw: String = TintPreset.coral.rawValue
 
     private var tintColor: Color {
-        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+        (TintPreset(rawValue: tintPresetRaw) ?? .coral).color
     }
 
     func body(content: Content) -> some View {

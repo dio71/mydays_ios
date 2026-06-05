@@ -86,7 +86,8 @@ struct SegmentedGoalCircle: View {
         let rad = centroid * .pi / 180
         let iconR = side * iconRadiusFactor(n)
 
-        let color = snap.resolvedColor()
+        // colored(홈 위젯)는 채도 톤다운 — 카테고리 vivid 색이 위젯에서 너무 쨍해 보임. 락은 단색이라 무관.
+        let color = colored ? snap.resolvedColor().desaturated(0.7) : snap.resolvedColor()
         ZStack {
             // 트랙 — 전체 wedge, 흐리게 (분할 경계 인지용).
             WedgeArc(startDeg: start, sweepDeg: sweep, fraction: 1)
@@ -140,7 +141,7 @@ private struct WedgeArc: Shape {
 // MARK: - Preview
 
 #Preview("2분할", as: .accessoryCircular) {
-    MyDaysNTDLockCircleWidget()
+    MyDaysLockCircleWidget()
 } timeline: {
     GoalLockCircleEntry(date: .now, snapshots: [
         ItemSnapshot(id: "1", kind: .notTodo, title: "단식", bucket: .ongoing, progress: 0.6,

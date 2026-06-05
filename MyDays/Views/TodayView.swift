@@ -76,9 +76,9 @@ struct TodayView: View {
     // 사용자 tint preset — @AppStorage로 직접 읽어 toolbar 버튼 .tint()에 명시 적용.
     // SwiftUI environment의 accent color가 일부 케이스에서 풀려 시스템 blue로 fallback되는 회귀 방어.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
-    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintPresetRaw: String = TintPreset.coral.rawValue
     private var resolvedTintColor: Color {
-        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+        (TintPreset(rawValue: tintPresetRaw) ?? .coral).color
     }
     // 특정일 이동 시트.
     @State private var showDatePicker: Bool = false
@@ -621,9 +621,9 @@ struct TodayList: View {
 
     // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
-    private var tintPresetRaw: String = TintPreset.blue.rawValue
+    private var tintPresetRaw: String = TintPreset.coral.rawValue
     private var resolvedTintColor: Color {
-        (TintPreset(rawValue: tintPresetRaw) ?? .blue).color
+        (TintPreset(rawValue: tintPresetRaw) ?? .coral).color
     }
 
     /// 할일(1회성+루틴) 정렬 snapshot — date 변경 시(view 재생성) 한 번 계산.
