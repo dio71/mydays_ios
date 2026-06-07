@@ -111,9 +111,9 @@ struct MissionReportView: View {
                 year: currentYear,
                 forward: false,
                 onShiftYear: { _ in },
-                swipeEnabled: false,
-                compactHeight: true
+                swipeEnabled: false
             )
+            // YearGridView가 컨텐츠 크기로 자동 fit (aspectRatio per cell).
             // YearGridView 내부 padding(.vertical, 3)이 양쪽에 3pt씩 추가됨.
             // listRow 위/아래로 9pt씩 — 시각적으로 cell 위/아래 약 12pt씩 균등.
             .listRowInsets(EdgeInsets(top: 9, leading: 0, bottom: 9, trailing: 0))

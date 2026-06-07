@@ -39,10 +39,6 @@ struct YearGridView: View {
     /// 기본 true.
     var swipeEnabled: Bool = true
 
-    /// 좁은 영역(보고서 section)에서 사용 시 gridHeight 축소 — 기본 70(iPad 안전 마진) 대신 44(좁은 cell 콘텐츠 기준).
-    /// false (기본): 70. true: 44.
-    var compactHeight: Bool = false
-
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\RoutineCompletion.completedAt, order: .reverse)],
         animation: .default
@@ -58,25 +54,21 @@ struct YearGridView: View {
         let removalEdge: Edge = forward ? .leading : .trailing
         let weeks = weekColumns()
 
+        let gap: CGFloat = 1.5
         ZStack {
-            GeometryReader { proxy in
-                // available width - (column gaps). column gap 1pt × (count-1).
-                let gap: CGFloat = 1.5
-                let totalGap = gap * CGFloat(max(0, weeks.count - 1))
-                let cellSize = max(3, (proxy.size.width - totalGap) / CGFloat(weeks.count))
-
-                HStack(alignment: .top, spacing: gap) {
-                    ForEach(0..<weeks.count, id: \.self) { weekIdx in
-                        VStack(spacing: gap) {
-                            ForEach(0..<7, id: \.self) { rowIdx in
-                                cell(day: weeks[weekIdx][rowIdx], size: cellSize)
-                            }
+            // GeometryReader/fixed height 제거. 각 cell이 aspectRatio(1)로 column 너비에 맞춰 square 자체 fit.
+            // → 컨텐츠 높이 자동 = column_width × 7 + gap × 6. 폰 폭에 비례 → top/bottom padding 균등 시각.
+            HStack(alignment: .top, spacing: gap) {
+                ForEach(0..<weeks.count, id: \.self) { weekIdx in
+                    VStack(spacing: gap) {
+                        ForEach(0..<7, id: \.self) { rowIdx in
+                            cell(day: weeks[weekIdx][rowIdx])
+                                .aspectRatio(1, contentMode: .fit)
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: gridHeight)
             .id(year)
             .transition(.asymmetric(
                 insertion: .move(edge: insertionEdge),
@@ -110,12 +102,6 @@ struct YearGridView: View {
             }
         }
     }
-
-    /// 7 row × cellSize + 6 × gap(1.5pt). cellSize는 width / 53 로 동적이라
-    /// 화면 폭이 클수록 grid도 커짐. 폰 360pt → ~44pt, sheet 400pt → ~50pt, iPad → ~70pt+.
-    /// `.clipped()`로 outer ZStack을 자르니 부족하면 마지막 row가 잘림. 안전 마진 두고 70pt.
-    /// compactHeight=true 면 좁은 cell 콘텐츠에 맞춰 44pt — 보고서 section처럼 빈 공간이 시각 균형 깨는 경우.
-    private var gridHeight: CGFloat { compactHeight ? 44 : 70 }
 
     // MARK: - 주(컬럼) 계산
 
@@ -164,25 +150,23 @@ struct YearGridView: View {
     // MARK: - cell rendering
 
     @ViewBuilder
-    private func cell(day: Date, size: CGFloat) -> some View {
+    private func cell(day: Date) -> some View {
         let state = cellState(day: day)
         let color = itemColor
         // Todo·목표 통일 — 살짝 round된 사각. strokeBorder + fill 모두 RoundedRectangle 사용.
+        // size 파라미터 제거 — aspectRatio(1)이 column 너비에 맞춰 square 자동 fit (호출 측에서 적용).
         let shape = RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-        Group {
-            switch state {
-            case .none:
-                // 빈 날짜는 항목 색상 무관 회색 — 활성 일자(pending/completed/cancelled)와 시각 구분.
-                shape.fill(Color.secondary.opacity(0.05))
-            case .pending:
-                shape.strokeBorder(color, lineWidth: 1)
-            case .completed:
-                shape.fill(color)
-            case .cancelled:
-                shape.fill(color).opacity(0.2)
-            }
+        switch state {
+        case .none:
+            // 빈 날짜는 항목 색상 무관 회색 — 활성 일자(pending/completed/cancelled)와 시각 구분.
+            shape.fill(Color.secondary.opacity(0.05))
+        case .pending:
+            shape.strokeBorder(color, lineWidth: 1)
+        case .completed:
+            shape.fill(color)
+        case .cancelled:
+            shape.fill(color).opacity(0.2)
         }
-        .frame(width: size, height: size)
     }
 
     // MARK: - cell state
