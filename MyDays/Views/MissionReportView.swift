@@ -33,6 +33,12 @@ struct MissionReportView: View {
     @State private var logMonthDate: Date = .todayCalendarAnchor
     /// month grid 슬라이드 transition 방향.
     @State private var logMonthForward: Bool = false
+    /// 요약 탭 — 이번주 grid 표시 주 anchor (UTC) + 슬라이드 방향.
+    @State private var weekDate: Date = .todayCalendarAnchor
+    @State private var weekForward: Bool = false
+    /// 요약 탭 — 올해 grid 표시 연도 + 슬라이드 방향.
+    @State private var yearValue: Int = Calendar.gmt.component(.year, from: .todayCalendarAnchor)
+    @State private var yearForward: Bool = false
 
     enum ReportTab: String, CaseIterable, Identifiable {
         case summary, log
@@ -101,28 +107,46 @@ struct MissionReportView: View {
 
     // MARK: - 올해 (year grid — 정적)
 
-    /// 올해 grid — YearGridView 재활용. 정적 (swipe 없음, 올해 고정).
+    /// 올해 grid — YearGridView 재활용. (<)(>) 연도 이동, 미래 연도 disable.
     @ViewBuilder
     private var thisYearSection: some View {
-        let currentYear = Calendar.gmt.component(.year, from: .todayCalendarAnchor)
         Section {
             YearGridView(
                 item: item,
-                year: currentYear,
-                forward: false,
-                onShiftYear: { _ in },
-                swipeEnabled: false
+                year: yearValue,
+                forward: yearForward,
+                onShiftYear: { shiftYear($0) },
+                swipeEnabled: true,
+                animated: false
             )
-            // YearGridView가 컨텐츠 크기로 자동 fit (aspectRatio per cell).
-            // YearGridView 내부 padding(.vertical, 3)이 양쪽에 3pt씩 추가됨.
-            // listRow 위/아래로 9pt씩 — 시각적으로 cell 위/아래 약 12pt씩 균등.
             .listRowInsets(EdgeInsets(top: 9, leading: 0, bottom: 9, trailing: 0))
         } header: {
-            HStack {
-                Text("report.section.this_year")
-                Spacer()
-                Text(verbatim: yearLabel(currentYear))
-            }
+            navHeader(
+                yearTitle,
+                canNext: yearValue < currentYear,
+                prev: { shiftYear(-1) },
+                next: { shiftYear(1) }
+            )
+        }
+    }
+
+    private var currentYear: Int { Calendar.gmt.component(.year, from: .todayCalendarAnchor) }
+
+    /// 올해면 "올해", 아니면 "{year}년".
+    private var yearTitle: String {
+        yearValue == currentYear ? String(localized: "report.section.this_year") : yearLabel(yearValue)
+    }
+
+    /// 연도 이동 — 미래 연도로는 이동 안 함.
+    private func shiftYear(_ delta: Int) {
+        let newYear = yearValue + delta
+        guard newYear <= currentYear, newYear >= 1 else { return }
+        let fwd = delta > 0
+        if fwd != yearForward {
+            yearForward = fwd
+            DispatchQueue.main.async { yearValue = newYear }
+        } else {
+            yearValue = newYear
         }
     }
 
@@ -136,26 +160,113 @@ struct MissionReportView: View {
 
     // MARK: - 이번주 (week grid — 정적)
 
-    /// 이번주 grid — MonthGridView .week 모드 재활용. 정적 (swipe 없음, 이번주 고정).
+    /// 이번주 grid — MonthGridView .week 모드 재활용. (<)(>) 주 이동, 미래 주 disable.
     /// pickedItemID = item.id로 해당 항목만 dot/ring 노출. divider 숨김.
     @ViewBuilder
     private var thisWeekSection: some View {
         Section {
             MonthGridView(
-                selectedDate: .todayCalendarAnchor,
-                forward: false,
+                selectedDate: weekDate,
+                forward: weekForward,
                 onSelectDate: { _ in },
-                onShift: { _ in },
+                onShift: { shiftWeek($0) },
                 pickedItemID: item.id,
                 displayMode: .week,
                 showsSelection: false,
                 showsDividers: false,
-                swipeEnabled: false
+                swipeEnabled: true,
+                animated: false
             )
             // 좌우/상하 row 기본 inset 축소. bottom 0 — MonthGridView 내부 padding만 유지.
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 0, trailing: 0))
         } header: {
-            Text("report.section.this_week")
+            navHeader(
+                weekTitle,
+                canNext: canGoNextWeek,
+                prev: { shiftWeek(-1) },
+                next: { shiftWeek(1) }
+            )
+        }
+    }
+
+    /// 주 시작(firstWeekday 기준, UTC) 계산용 캘린더.
+    private func weekCalendar() -> Calendar {
+        var cal = Calendar.gmt
+        cal.firstWeekday = Calendar.current.firstWeekday
+        return cal
+    }
+
+    private func weekStart(_ date: Date) -> Date {
+        let cal = weekCalendar()
+        let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return cal.date(from: comps) ?? date
+    }
+
+    /// 표시 주가 이번 주보다 과거면 다음 주로 이동 가능.
+    private var canGoNextWeek: Bool {
+        weekStart(weekDate) < weekStart(.todayCalendarAnchor)
+    }
+
+    /// 이번 주면 "이번주", 아니면 주간 날짜 범위 "6.2 – 6.8".
+    private var weekTitle: String {
+        if weekStart(weekDate) == weekStart(.todayCalendarAnchor) {
+            return String(localized: "report.section.this_week")
+        }
+        let cal = weekCalendar()
+        let start = weekStart(weekDate)
+        let end = cal.date(byAdding: .day, value: 6, to: start) ?? start
+        let sM = cal.component(.month, from: start), sD = cal.component(.day, from: start)
+        let eM = cal.component(.month, from: end), eD = cal.component(.day, from: end)
+        return "\(sM).\(sD) – \(eM).\(eD)"
+    }
+
+    /// 주 이동 — 미래 주로는 이동 안 함.
+    private func shiftWeek(_ delta: Int) {
+        let cal = weekCalendar()
+        guard let next = cal.date(byAdding: .weekOfYear, value: delta, to: weekDate) else { return }
+        if delta > 0, weekStart(next) > weekStart(.todayCalendarAnchor) { return }
+        let fwd = delta > 0
+        if fwd != weekForward {
+            weekForward = fwd
+            DispatchQueue.main.async { weekDate = next }
+        } else {
+            weekDate = next
+        }
+    }
+
+    // MARK: - 네비게이션 헤더 (제목 + (<)(>) 이동 버튼)
+
+    @ViewBuilder
+    private func navHeader(_ title: String,
+                           canNext: Bool,
+                           prev: @escaping () -> Void,
+                           next: @escaping () -> Void) -> some View {
+        HStack(spacing: 0) {
+            Text(verbatim: title)
+            Spacer(minLength: 8)
+            // (<)(>) chip — 하나의 capsule 안에 좌우 버튼 (스테퍼 형태).
+            HStack(spacing: 0) {
+                Button(action: prev) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 38, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider().frame(height: 14)
+                Button(action: next) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(canNext ? Color.accentColor : Color.secondary.opacity(0.35))
+                        .frame(width: 38, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canNext)
+            }
+            .background(Capsule(style: .continuous).fill(Color(.tertiarySystemFill)))
+            .clipShape(Capsule(style: .continuous))
         }
     }
 
@@ -306,7 +417,13 @@ struct MissionReportView: View {
             )
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
         } header: {
-            Text(verbatim: monthYearLabel(logMonthDate))
+            // 월간은 미래 달도 허용 (스케줄된 미래 occurrence 조회 — swipe와 일관).
+            navHeader(
+                monthYearLabel(logMonthDate),
+                canNext: true,
+                prev: { handleLogMonthShift(-1) },
+                next: { handleLogMonthShift(1) }
+            )
         }
     }
 

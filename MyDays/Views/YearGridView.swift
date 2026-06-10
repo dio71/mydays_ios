@@ -39,6 +39,9 @@ struct YearGridView: View {
     /// 기본 true.
     var swipeEnabled: Bool = true
 
+    /// 연도 전환 애니메이션 사용 여부. false면 즉시 교체 (슬라이드 없음).
+    var animated: Bool = true
+
     @FetchRequest(
         sortDescriptors: [SortDescriptor(\RoutineCompletion.completedAt, order: .reverse)],
         animation: .default
@@ -70,13 +73,12 @@ struct YearGridView: View {
                 }
             }
             .id(year)
-            .transition(.asymmetric(
-                insertion: .move(edge: insertionEdge),
-                removal: .move(edge: removalEdge)
-            ))
+            .transition(animated
+                ? .asymmetric(insertion: .move(edge: insertionEdge), removal: .move(edge: removalEdge))
+                : .identity)
         }
         .clipped()
-        .animation(.easeInOut(duration: 0.22), value: year)
+        .animation(animated ? .easeInOut(duration: 0.22) : nil, value: year)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .modifier(SwipeModifier(enabled: swipeEnabled, onShift: onShiftYear))

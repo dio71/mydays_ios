@@ -1192,7 +1192,14 @@ extension Item {
                 return ""
             }
         }
-        // Todo
+        // Todo — 시간 미지정: offset이 "자정 기준 분"(절대 시각/사전일)이라 "X분 후/전" 표현 부적절.
+        // 시작일 당일 알림(offset>=0)이면 "오늘", 이전 일자 알림(offset<0)이면 "예정된" 으로 안내.
+        if !hasExplicitTime {
+            return offset >= 0
+                ? String(localized: "notif.body.todo.today")
+                : String(localized: "notif.body.todo.upcoming")
+        }
+        // Todo (시간 지정)
         if anchor == .due {
             return isExact
                 ? String(localized: "notif.body.todo.due")
@@ -1260,12 +1267,14 @@ extension Item {
     /// 활동 occurrence에 N만큼 증가. RC 없으면 생성. target 도달 시 done=true 자동 flip.
     /// 1회성 활동(recurrenceRule=nil)도 같은 RC 패턴 — 활동 기록·일관성 위해.
     /// 호출 측에서 context.save() 책임.
+    /// 반환값: 이번 증가로 **새로** target에 도달했으면 true (목표 달성 알림 트리거용).
+    @discardableResult
     static func incrementActivityValue(
         for item: Item,
         by amount: Int,
         occurrenceDate: Date,
         in context: NSManagedObjectContext
-    ) {
+    ) -> Bool {
         let now = Date()
         let day = Calendar.gmt.startOfDay(for: occurrenceDate)
         let completions = (item.completions as? Set<RoutineCompletion>) ?? []
@@ -1283,6 +1292,7 @@ extension Item {
             rc.item = item
             rc.failed = false
         }
+        let wasDone = rc.done
         let prev = Int(rc.valueRecorded?.doubleValue ?? 0)
         let next = max(prev + amount, 0)
         rc.valueRecorded = NSNumber(value: Double(next))
@@ -1308,6 +1318,7 @@ extension Item {
             }
         }
         item.updatedAt = now
+        return rc.done && !wasDone
     }
 
     // MARK: - Row 공용 view 헬퍼

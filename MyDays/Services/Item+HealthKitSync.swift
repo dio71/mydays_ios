@@ -207,7 +207,8 @@ extension Item {
     /// 활동 목표 달성 알림 — 즉시 fire (trigger nil).
     /// ID: `activity_goal_reached:{itemID}:{occurrenceDate-epoch}` — 같은 occurrence 중복 fire 회피.
     /// 권한 거부 시 silent fail (UNUserNotificationCenter 자체 처리).
-    private static func fireGoalReachedAlert(for item: Item, occurrenceDate: Date) {
+    /// internal — 직접입력(+N) 경로에서 뷰가 직접 호출 (manual은 HK observer를 안 타므로).
+    static func fireGoalReachedAlert(for item: Item, occurrenceDate: Date) {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "activity_alert.goal_reached.title")
         content.body = String.localizedStringWithFormat(

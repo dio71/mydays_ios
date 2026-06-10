@@ -68,6 +68,10 @@ struct MonthGridView: View {
     /// TodayView처럼 safeAreaInset에 있는 경우 slide 정상 동작 → 기본값 false 유지.
     var useFadeTransition: Bool = false
 
+    /// 페이지 전환 애니메이션 사용 여부. false면 즉시 교체(슬라이드/페이드 없음).
+    /// 보고서 주/연도 그리드처럼 애니메이션이 어색한 곳에서 false.
+    var animated: Bool = true
+
     // 사용자 tint preset — @AppStorage로 직접 읽어 SwiftUI environment 풀림 회귀 방어.
     @AppStorage(AppThemeKey.tintPreset, store: .appShared)
     private var tintPresetRaw: String = TintPreset.coral.rawValue
@@ -187,16 +191,18 @@ struct MonthGridView: View {
                 // useFadeTransition=true: List row 안 SwiftUI insertion 버그 회피용 fade.
                 // false (기본): TodayView처럼 safeAreaInset / 풀스크린 컨테이너에서 자연스러운 slide.
                 .transition(
-                    useFadeTransition
-                        ? AnyTransition.opacity
-                        : AnyTransition.asymmetric(
-                            insertion: .move(edge: insertionEdge),
-                            removal: .move(edge: removalEdge)
-                        )
+                    !animated
+                        ? AnyTransition.identity
+                        : (useFadeTransition
+                            ? AnyTransition.opacity
+                            : AnyTransition.asymmetric(
+                                insertion: .move(edge: insertionEdge),
+                                removal: .move(edge: removalEdge)
+                            ))
                 )
             }
             .clipped()
-            .animation(.easeInOut(duration: 0.22), value: monthAnchor)
+            .animation(animated ? .easeInOut(duration: 0.22) : nil, value: monthAnchor)
         }
         .padding(.horizontal, 8)
         // 상단 spacer만 — 마지막 row Divider 다음에 빈 공간 없도록 bottom padding 제거.

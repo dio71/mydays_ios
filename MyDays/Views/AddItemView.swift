@@ -491,8 +491,11 @@ struct AddItemView: View {
                     notificationPermissionWarning
                 }
                 alertOffsetPicker(label: "alert.label.start", selection: $todoStartAlertOffset)
-                Toggle(isOn: $notifyOnGoalReached) {
-                    Text("add.field.goal_alert")
+                // 목표 달성 알림 — 자동 수집(HK)에서만. 직접입력은 사용자가 직접 채우므로 푸시 의미 없어 숨김.
+                if activitySource != .manual {
+                    Toggle(isOn: $notifyOnGoalReached) {
+                        Text("add.field.goal_alert")
+                    }
                 }
             }
         } else if hasStart || hasDue {

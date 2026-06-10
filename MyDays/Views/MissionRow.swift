@@ -1,5 +1,6 @@
 import CoreData
 import SwiftUI
+import UIKit
 
 // MARK: - MissionRow (목표 4-type 통합 row)
 //
@@ -508,8 +509,12 @@ struct MissionRow: View {
                         .accessibilityLabel(Text("activity.source.auto.accessibility"))
                 } else {
                     Button {
-                        Item.incrementActivityValue(for: item, by: step, occurrenceDate: occurrenceDate, in: context)
+                        let reached = Item.incrementActivityValue(for: item, by: step, occurrenceDate: occurrenceDate, in: context)
                         saveContext()
+                        // 직접입력은 사용자가 직접 채우므로 푸시 알림 대신 달성 햅틱으로 피드백.
+                        if reached {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        }
                     } label: {
                         Image(systemName: isDone ? "plus.circle.fill" : "plus.circle")
                             .font(.title3)
