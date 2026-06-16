@@ -356,7 +356,11 @@ struct ItemRow: View {
     /// 1회성: startDate (canonical event date) — 다양한 day view에서 같은 RC 매칭.
     private var canonicalCompletionDay: Date {
         if isRoutine {
-            let day = occurrenceStartOverride ?? referenceDate
+            // isFutureSchedule과 동일한 occurrence 해석 사용 — 불일치 시 잘못된 날짜에 RC 기록 +
+            // 엉뚱한 날 알림 취소되는 버그(목록탭 미리 완료 등). override 없으면 적용 occurrence로.
+            let day = occurrenceStartOverride
+                ?? item.referenceOccurrenceStartDate(viewDate: referenceDate)
+                ?? referenceDate
             return Calendar.gmt.startOfDay(for: day)
         }
         return Calendar.gmt.startOfDay(for: item.startDate ?? referenceDate)
